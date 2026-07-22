@@ -330,6 +330,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .typebtn .tcount:empty { display: none; }
 .typebtn.pulse { animation: btnpulse .45s ease; }
 @keyframes btnpulse { 0% { background: var(--c); color: #fff; } 100% { background: #fff; color: var(--c); } }
+.typebtn.gear { border-color: var(--line); background: var(--surface-2); color: var(--text); }
+.typebtn.gear .tlabel { font-size: 18px; }
+.typebtn.gear .tcount { display: none; }
 
 /* ---------- Besprechungsmodus ---------- */
 .discussion { max-width: 680px; margin: 0 auto; }
