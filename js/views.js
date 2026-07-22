@@ -39,7 +39,8 @@
       default:             out = await ViewHome();
     }
     document.getElementById("topbar").innerHTML = out.topbar || "";
-    document.getElementById("view").innerHTML = '<div class="container">' + (out.body || "") + "</div>";
+    const containerClass = out.fullWidth ? "container container-wide" : "container";
+    document.getElementById("view").innerHTML = '<div class="' + containerClass + '">' + (out.body || "") + "</div>";
     if (out.mount) out.mount();
   }
 
@@ -370,7 +371,7 @@
       '<div class="tracker-scroll"><div class="seatgrid tracker-grid" id="tracker-grid" style="--cols:' + plan.cols + '">' + seats + "</div></div>" +
       (schueler.length ? "" : '<div class="empty">Kein Sitzplan belegt. Lege im Tab „Sitzplan“ Plätze an.</div>');
 
-    return { topbar, body, mount: startHeatTimer };
+    return { topbar, body, mount: startHeatTimer, fullWidth: true };
   }
 
   function seatTrackerHTML(seat, sMap) {

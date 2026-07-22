@@ -87,6 +87,7 @@ body {
   padding: var(--gap) calc(var(--gap) + var(--safe-right)) calc(var(--gap) + var(--safe-bottom)) calc(var(--gap) + var(--safe-left));
 }
 .container { max-width: 1180px; margin: 0 auto; }
+.container.container-wide { max-width: 1560px; }
 
 /* ---------- Buttons ---------- */
 .btn {
@@ -299,7 +300,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .tracker-legend .dot { width: 12px; height: 12px; border-radius: 50%; }
 
 .tracker-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
-.seatgrid.tracker-grid { grid-template-columns: repeat(var(--cols, 6), minmax(190px, 1fr)); }
+.seatgrid.tracker-grid {
+  width: 100%;
+  grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr));
+}
 
 .seat.tracker { min-height: 132px; justify-content: flex-start; align-items: stretch; gap: 8px; padding: 10px; cursor: default; }
 .seat.tracker.empty { justify-content: center; align-items: center; }
