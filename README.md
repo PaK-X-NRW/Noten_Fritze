@@ -6,6 +6,17 @@ Tablet-first, optimiert für das **iPad im Querformat**, offline nutzbar als PWA
 
 ---
 
+## Verfügbarkeit & Hosting
+
+**Die App ist online verfügbar unter:**
+- **http://noten-fritze.patrick-knapp.de** (Domain-Redirect)
+- Gehostet auf GitHub Pages: https://pak-x-nrw.github.io/Noten_Fritze/
+
+**Wichtig:** Alle Daten bleiben auf Ihrem Gerät! Die App speichert nichts in der Cloud. 
+Sie können die App als PWA installieren („Zum Home-Bildschirm hinzufügen") und nutzen sie offline.
+
+---
+
 ## 1. Architektur & Begründung
 
 **Vanilla JS + IndexedDB, ohne Build-Schritt, ohne Abhängigkeiten.**
@@ -190,3 +201,49 @@ App im Vollbild und offline. Alle Daten bleiben ausschließlich auf dem Gerät.
 
 **Datensicherung:** Einstellungen → „Backup exportieren (JSON)“. Da Daten im Browser
 liegen, gehen sie beim Löschen der Website-Daten verloren – regelmäßig sichern.
+## 11. Datenspeicherung & Backup
+
+### Wie funktioniert die Speicherung?
+
+- **Automatisch beim Eingeben:** Jede Änderung (neue Klasse, Schüler, Noten, Mitarbeitseintrag) 
+  wird sofort in IndexedDB geschrieben – **keine manuellen Speicherschritte nötig**.
+- **Auf dem Gerät selbst:** Die Daten werden lokal im iPad/Browser gespeichert, nicht in der Cloud, 
+  nicht auf Strato, nicht auf einem Server. Vollständige Datensouveränität.
+- **Dauerhaft:** Die Daten bleiben erhalten nach dem Schließen der App, nach dem Ausschalten 
+  des iPads und nach Browser-Neustarts.
+
+### Werden Daten beim Schließen gelöscht?
+
+**Nein!** Die Daten verschwinden **nicht**:
+- App schließen → Daten bleiben ✅
+- iPad ausschalten → Daten bleiben ✅
+- Browser-Tab schließen → Daten bleiben ✅
+- Browser deinstallieren → Daten gehen verloren ⚠️
+
+### Backup-Strategie
+
+**Wann sollten Sie exportieren?**
+
+| Situation | Häufigkeit | Methode |
+|-----------|-----------|---------|
+| Nach großen Änderungen (neue Klassen, viele Noten) | Monatlich | JSON-Export |
+| Schuljahrs-Ende / Archivierung | 1x pro Jahr | JSON-Export + sichern |
+| Tägliche Nutzung (normal) | Nicht nötig | App speichert automatisch |
+| Zusätzliche Sicherheit | Wöchentlich (optional) | JSON-Export |
+
+**Wie exportieren:**
+1. **In der App:** Einstellungen → **„Backup exportieren"** (oder CSV-Export)
+2. **Datei speichern:** z.B. `noten-fritze-backup-2026-07-22.json`
+3. **Sichern:** Auf Computer, OneDrive, Google Drive oder USB-Stick kopieren
+
+**Wie wiederherstellen:**
+1. **Einstellungen** → **„Backup importieren"**
+2. **JSON-Datei auswählen** → alle Daten werden wiederhergestellt
+3. Optional: „Vorher alles löschen" aktivieren (für Neustart)
+
+### Sicherheit
+
+✅ **Alle Daten bleiben lokal** – kein Cloud-Upload, keine Übertragung  
+✅ **Keine Abhängigkeit** – funktioniert offline, ohne Internetverbindung  
+✅ **Langlebigkeit** – auch in 10 Jahren noch lesbar (Standard-JSON-Format)  
+✅ **Kontrolle:** Sie entscheiden, wann/ob exportiert wird
