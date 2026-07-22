@@ -342,7 +342,7 @@
     });
     state.tracker = {
       openedAt: Store.now(),
-      counts, typeCounts, last, names, undoStack: [], heatTimer: null
+      counts, typeCounts, last, names, students: sMap, undoStack: [], heatTimer: null
     };
 
     // Legende erklärt Farbe + Kurzlabel der Buttons auf den Kacheln
@@ -377,7 +377,8 @@
     const s = seat.schuelerId ? sMap[seat.schuelerId] : null;
     if (!s) return '<div class="seat tracker empty">·</div>';
     const t = state.tracker;
-    const bg = Calc.heatFarbe(t.last[s.id], t.openedAt, state.settings.heatMinuten);
+    const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, state.settings.heatVerfallMinuten, state.settings.heatVerfallPunkte);
+    const bg = Calc.heatFarbeDurchPunkte(heat.heatPoints);
     const total = t.counts[s.id] || 0;
     const tc = t.typeCounts[s.id] || {};
 
@@ -390,12 +391,16 @@
       "</button>";
     }).join("");
 
+    const heatEdit = '<button class="typebtn gear" data-action="tracker-heat-edit" data-sid="' + s.id + '" title="Heatmap bearbeiten">' +
+      '<span class="tlabel">⚙️</span>' +
+      "</button>";
+
     return '<div class="seat tracker heat" style="background:' + bg + '" data-sid="' + s.id + '" data-seat="' + seat.id + '">' +
       '<div class="seat-head">' +
         '<span class="nm">' + UI.esc(UI.vollerName(s)) + "</span>" +
         '<span class="tcount-total"' + (total ? "" : ' style="visibility:hidden"') + ">Σ " + total + "</span>" +
       "</div>" +
-      '<div class="typebtns">' + buttons + "</div>" +
+      '<div class="typebtns">' + buttons + heatEdit + "</div>" +
     "</div>";
   }
 
@@ -410,7 +415,10 @@
     const t = state.tracker; if (!t) return;
     UI.$all("#tracker-grid .seat.heat").forEach((el) => {
       const sid = el.getAttribute("data-sid");
-      el.style.background = Calc.heatFarbe(t.last[sid], t.openedAt, state.settings.heatMinuten);
+      const s = t.students && t.students[sid];
+      if (!s) return;
+      const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, state.settings.heatVerfallMinuten, state.settings.heatVerfallPunkte);
+      el.style.background = Calc.heatFarbeDurchPunkte(heat.heatPoints);
     });
   }
 
@@ -428,7 +436,57 @@
       const cEl = seat.querySelector('.typebtn[data-type="' + et.id + '"] .tcount');
       if (cEl) cEl.textContent = tc[et.id] ? tc[et.id] : "";
     });
-    seat.style.background = Calc.heatFarbe(t.last[sid], t.openedAt, state.settings.heatMinuten);
+    const s = t.students && t.students[sid];
+    if (s) {
+      const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, state.settings.heatVerfallMinuten, state.settings.heatVerfallPunkte);
+      seat.style.background = Calc.heatFarbeDurchPunkte(heat.heatPoints);
+    }
+  }
+
+  function heatGainForType(typ) {
+    const s = state.settings || {};
+    if (typ === "einfach") return Math.max(0, parseInt(s.heatPunkteEinfach, 10) || 0);
+    if (typ === "gut") return Math.max(0, parseInt(s.heatPunkteGut, 10) || 0);
+    if (typ === "sehrgut") return Math.max(0, parseInt(s.heatPunkteSehrGut, 10) || 0);
+    return 0;
+  }
+
+  async function trackerHeatEditDialog(sid) {
+    const t = state.tracker;
+    const s = t && t.students ? t.students[sid] : await Store.Schueler.get(sid);
+    if (!s) return;
+    const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, state.settings.heatVerfallMinuten, state.settings.heatVerfallPunkte);
+    const body =
+      '<p class="muted">Heatmap direkt setzen. Der Wert wird sofort gespeichert.</p>' +
+      '<div class="field"><label for="heat-slider">Heatmap-Punkte</label>' +
+        '<input type="range" id="heat-slider" min="0" max="100" step="1" value="' + Math.round(heat.heatPoints) + '">' +
+        '<div class="hstack" style="justify-content:space-between;margin-top:8px"><span class="muted">0</span><strong id="heat-slider-value">' + Math.round(heat.heatPoints) + '</strong><span class="muted">100</span></div>' +
+      '</div>';
+    UI.modal({
+      title: "Heatmap bearbeiten · " + UI.vollerName(s),
+      bodyHTML: body,
+      buttons: [
+        { label: "Abbrechen" },
+        { label: "Speichern", className: "primary", onClick: async (close, box) => {
+          const slider = box.querySelector("#heat-slider");
+          const value = Math.max(0, Math.min(100, parseInt(slider.value, 10) || 0));
+          s.heatPoints = value;
+          s.heatLastDecayAt = Store.now();
+          await Store.Schueler.save(s);
+          if (t && t.students) t.students[sid] = s;
+          close();
+          renderSeatCounts(sid);
+          UI.toast("Heatmap gespeichert");
+        }}
+      ],
+      onMount: (box) => {
+        const slider = box.querySelector("#heat-slider");
+        const out = box.querySelector("#heat-slider-value");
+        const sync = () => { out.textContent = slider.value; };
+        slider.addEventListener("input", sync);
+        sync();
+      }
+    });
   }
 
   // =========================================================================
@@ -509,6 +567,17 @@
       "</div>"
     ).join("");
 
+    const heatpunkte = [
+      ["einfach", "Wortmeldung", s.heatPunkteEinfach],
+      ["gut", "Gute Meldung", s.heatPunkteGut],
+      ["sehrgut", "Sehr gute Meldung", s.heatPunkteSehrGut]
+    ].map(([key, label, value]) =>
+      '<div class="form-row" style="align-items:center">' +
+        '<div class="grow"><strong>' + UI.esc(label) + "</strong></div>" +
+        '<input type="number" inputmode="numeric" style="width:110px" data-heat-punkt="' + key + '" value="' + value + '">' +
+      "</div>"
+    ).join("");
+
     const topbar =
       '<button class="iconbtn plain" data-action="home" title="Zurück">‹</button>' +
       '<div class="title-wrap"><h1 class="main">Einstellungen</h1></div>';
@@ -522,7 +591,14 @@
         ]}) +
       "</div>" +
       '<div class="card"><h2>Mitarbeit – Punkte je Ereignistyp</h2>' + punkte +
-        '<div class="field" style="margin-top:14px">' + UI.field("„Kalt“ nach Minuten ohne Meldung (Heatmap)", "heatMinuten", s.heatMinuten, { type: "number", inputmode: "numeric" }) + "</div>" +
+      "</div>" +
+      '<div class="card"><h2>Heatmap</h2>' + heatpunkte +
+        '<div class="field" style="margin-top:14px">' + UI.field("Default-Wert für neue / zurückgesetzte Heatmap", "heatStartWert", s.heatStartWert, { type: "number", inputmode: "numeric", hint: "Wertebereich: 0 bis 100" }) + "</div>" +
+        '<div class="form-row" style="align-items:center">' +
+          '<div class="grow"><strong>Y Heatmap-Punkte verfallen pro X Minuten</strong></div>' +
+          '<input type="number" inputmode="numeric" style="width:110px" id="f-heatVerfallPunkte" value="' + s.heatVerfallPunkte + '">' +
+          '<input type="number" inputmode="numeric" style="width:110px" id="f-heatVerfallMinuten" value="' + s.heatVerfallMinuten + '" placeholder="X Minuten">' +
+        "</div>" +
       "</div>" +
       '<div class="card"><h2>Datensicherung</h2><p class="muted">Alle Daten bleiben lokal im Browser. Sicherung als JSON-Datei empfohlen.</p>' +
         '<div class="btn-row">' +
@@ -538,8 +614,23 @@
     return { topbar, body, mount: () => {
       const sel = UI.$("#f-rundung");
       if (sel) sel.addEventListener("change", async () => { s.rundung = sel.value; await Store.saveSettings(s); UI.toast("Gespeichert"); });
-      const heat = UI.$("#f-heatMinuten");
-      if (heat) heat.addEventListener("change", async () => { s.heatMinuten = Math.max(1, parseInt(heat.value, 10) || 20); await Store.saveSettings(s); });
+      UI.$all("[data-heat-punkt]").forEach((inp) => inp.addEventListener("change", async () => {
+        const key = inp.getAttribute("data-heat-punkt");
+        if (key === "einfach") s.heatPunkteEinfach = Math.max(0, parseInt(inp.value, 10) || 0);
+        else if (key === "gut") s.heatPunkteGut = Math.max(0, parseInt(inp.value, 10) || 0);
+        else if (key === "sehrgut") s.heatPunkteSehrGut = Math.max(0, parseInt(inp.value, 10) || 0);
+        await Store.saveSettings(s); UI.toast("Heatmap-Punkte gespeichert");
+      }));
+      const heatStart = UI.$("#f-heatStartWert");
+      if (heatStart) heatStart.addEventListener("change", async () => {
+        s.heatStartWert = Math.max(0, Math.min(100, parseInt(heatStart.value, 10) || 0));
+        await Store.saveSettings(s);
+        UI.toast("Startwert gespeichert");
+      });
+      const heatVerfallPunkte = UI.$("#f-heatVerfallPunkte");
+      if (heatVerfallPunkte) heatVerfallPunkte.addEventListener("change", async () => { s.heatVerfallPunkte = Math.max(0, parseInt(heatVerfallPunkte.value, 10) || 0); await Store.saveSettings(s); });
+      const heatVerfallMinuten = UI.$("#f-heatVerfallMinuten");
+      if (heatVerfallMinuten) heatVerfallMinuten.addEventListener("change", async () => { s.heatVerfallMinuten = Math.max(1, parseInt(heatVerfallMinuten.value, 10) || 5); await Store.saveSettings(s); });
       UI.$all("[data-punkt]").forEach((inp) => inp.addEventListener("change", async () => {
         s.mitarbeitPunkte[inp.getAttribute("data-punkt")] = parseInt(inp.value, 10) || 0;
         await Store.saveSettings(s); UI.toast("Punkte gespeichert");
@@ -742,7 +833,6 @@
     UI.$all("[data-pick]", m.box).forEach((b) => b.addEventListener("click", async () => {
       const sid = b.getAttribute("data-pick");
       plan.seats.forEach((x) => { if (x.schuelerId === sid) x.schuelerId = null; }); // vorher woanders entfernen
-      seat.schuelerId = sid;
       await Store.Sitzplan.save(plan); m.close(); render();
     }));
     const clr = m.box.querySelector("#seat-clear");
@@ -754,7 +844,6 @@
     const body =
       '<p class="muted">CSV mit Spalten <strong>Vorname, Nachname</strong> (optional Bemerkung). Kopfzeile wird erkannt.</p>' +
       '<input type="file" id="csv-file" accept=".csv,text/csv">' +
-      '<div class="spacer"></div><p class="hint">Alternativ Namen einfügen (eine Zeile pro Person, „Nachname, Vorname“ oder „Vorname Nachname“):</p>' +
       '<textarea id="csv-paste" placeholder="Mustermann, Max"></textarea>';
     const m = UI.modal({ title: "Schülerliste importieren", bodyHTML: body, buttons: [
       { label: "Abbrechen" },
@@ -898,6 +987,7 @@
     "open-besprechung": () => { state.selectedSchuelerId = null; go("besprechung"); },
     "back-to-class": () => { stopHeatTimer(); go("klasse"); },
     "tracker-tap": (el) => trackerTap(el),
+    "tracker-heat-edit": (el) => trackerHeatEditDialog(el.getAttribute("data-sid")),
     "tracker-undo": () => trackerUndo(),
 
     "besprechung-pick": (el) => { state.selectedSchuelerId = el.getAttribute("data-sid"); render(); },
@@ -947,14 +1037,24 @@
     const sid = el.getAttribute("data-sid");
     const typ = el.getAttribute("data-type");
     const punkte = state.settings.mitarbeitPunkte[typ];
+    const heatDelta = typ === "einfach"
+      ? Math.max(0, parseInt(state.settings.heatPunkteEinfach, 10) || 0)
+      : typ === "gut"
+        ? Math.max(0, parseInt(state.settings.heatPunkteGut, 10) || 0)
+        : typ === "sehrgut"
+          ? Math.max(0, parseInt(state.settings.heatPunkteSehrGut, 10) || 0)
+          : 0;
     const e = Store.neuesEreignis(state.klasseId, sid, typ, punkte);
+    e.heatDelta = heatDelta;
     await Store.Ereignisse.save(e);
 
     const t = state.tracker;
+    if (heatDelta > 0) {
+      t.students[sid] = await Store.addHeatPoints(sid, heatDelta) || t.students[sid];
+    }
     t.counts[sid] = (t.counts[sid] || 0) + 1;
     (t.typeCounts[sid] = t.typeCounts[sid] || {});
     t.typeCounts[sid][typ] = (t.typeCounts[sid][typ] || 0) + 1;
-    t.last[sid] = e.timestamp;
     t.undoStack.push(e);
 
     // Sofortiges Feedback direkt am getippten Button + Kachel aktualisieren
@@ -982,10 +1082,9 @@
     if (t.typeCounts[e.schuelerId]) {
       t.typeCounts[e.schuelerId][e.typ] = Math.max(0, (t.typeCounts[e.schuelerId][e.typ] || 1) - 1);
     }
-    // letzte Meldung dieser Session neu bestimmen (nur aus dem Undo-Stack)
-    t.last[e.schuelerId] = t.undoStack
-      .filter((x) => x.schuelerId === e.schuelerId)
-      .reduce((m, x) => Math.max(m, x.timestamp), 0);
+    if (e.heatDelta > 0) {
+      t.students[e.schuelerId] = await Store.addHeatPoints(e.schuelerId, -e.heatDelta) || t.students[e.schuelerId];
+    }
 
     renderSeatCounts(e.schuelerId);
 

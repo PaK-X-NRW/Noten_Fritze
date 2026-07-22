@@ -159,9 +159,29 @@
     return "hsl(" + hue.toFixed(0) + ", " + sat + "%, " + light.toFixed(0) + "%)";
   }
 
+  function heatPunkteAktuell(heatPoints, heatLastDecayAt, verfallMinuten, verfallPunkte, jetzt) {
+    const startWert = Math.max(0, Math.min(100, Number(heatPoints) || 0));
+    const letzteAenderung = Number(heatLastDecayAt) || 0;
+    const aktuelleZeit = jetzt || Store.now();
+    const minuten = Math.max(0, (aktuelleZeit - letzteAenderung) / 60000);
+    const x = Math.max(1, Number(verfallMinuten) || 5);
+    const y = Math.max(0, Number(verfallPunkte) || 1);
+    const aktuell = Math.max(0, Math.min(100, startWert - (minuten / x) * y));
+    return { heatPoints: aktuell, verfallMinuten: x, verfallPunkte: y, minutenSeitLetzterAenderung: minuten };
+  }
+
+  function heatFarbeDurchPunkte(heatPoints) {
+    if (heatPoints === null || heatPoints === undefined || isNaN(Number(heatPoints))) return "#9aa5a1";
+    const t = Math.max(0, Math.min(1, Number(heatPoints) / 100));
+    const hue = 125 * t; // 0 = rot, 1 = grün
+    const sat = 55, light = 72 + t * 8;
+    return "hsl(" + hue.toFixed(0) + ", " + sat + "%, " + light.toFixed(0) + "%)";
+  }
+
   global.Calc = {
     parseNote, formatNote, clampNote, rundeGesamt,
     berechneSchueler, noteFarbe,
-    auswertungMitarbeit, punkteZuNote, heatFarbe
+    auswertungMitarbeit, punkteZuNote, heatFarbe,
+    heatPunkteAktuell, heatFarbeDurchPunkte
   };
 })(window);

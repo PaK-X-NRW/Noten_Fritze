@@ -69,7 +69,8 @@ noten          { id, klasseId, schuelerId, kategorieId, wert(1..6),
 sitzplaene     { klasseId, rows, cols, seats:[{id,row,col,schuelerId}] }
 ereignisse     { id, klasseId, schuelerId, typ, punkte, timestamp, notiz }
 einstellungen  { key:'app', rundung, mitarbeitPunkte, mitarbeitSchwellen,
-                 heatMinuten, anteile }
+                 heatPunkteEinfach, heatPunkteGut, heatPunkteSehrGut,
+                 heatStartWert, heatVerfallPunkte, heatVerfallMinuten, anteile }
 ```
 
 - **Integrität:** Löschen einer Klasse/eines Schülers löscht kaskadierend alle
@@ -111,9 +112,13 @@ sichtbar (Kategorie-Ø, Gewichte, Gruppen-Ø, Gesamt).
   (farbcodiert, mit Tages-Zähler je Typ). Ein Tap auf den passenden Button erzeugt
   sofort das Ereignis mit Zeitstempel – kein Umweg über eine Auswahlleiste.
   **Undo** über Toast oder Button.
-- **Heatmap:** Farbe je Platz fließend grün→rot. Grün = gerade beteiligt, rot = seit
-  Beginn der Stunde nicht mehr gemeldet (Schwelle „kalt nach X Minuten“ einstellbar).
-  Die Heatmap ist **sitzungsbasiert**: bei jedem Öffnen des Trackers starten alle grün.
+- **Heatmap:** Farbe je Platz fließend grün→rot, aber **unabhängig** von den
+  Mitarbeitspunkten. Dafür läuft ein eigenes Heatmap-Punktesystem pro Schüler/in:
+  Wortmeldung / Gute / Sehr gute Meldung bringen jeweils frei einstellbare Punkte;
+  zusätzlich lässt sich einstellen, wie viele Heatmap-Punkte pro X Minuten verfallen.
+  Zusätzlich gibt es einen einstellbaren Default-Wert für neue bzw. zurückgesetzte
+  Heatmaps. Der Wertebereich liegt immer bei 0 bis 100. Negative Meldungen wie
+  Störung oder fehlende HA beeinflussen die Heatmap nicht.
 - **Epochalnote (Vorschlag):** Summe der Punkte / Anzahl aktiver Tage = Ø-Punkte/Tag,
   gemappt über konfigurierbare Schwellen auf eine Note 1–6. Bewusst als **Vorschlag**
   markiert (Auswertungs-Tab, pro Zeitraum: Gesamt / 30 Tage / 7 Tage).
@@ -147,7 +152,7 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   Heatmap-Hintergrund + Legende.
 - **Besprechungsmodus** – ein/e Schüler/in einzeln, groß; nur deren Daten sichtbar
   (Datenschutz bei der Notenbesprechung), Vor/Zurück.
-- **Einstellungen** – Rundung, Mitarbeitspunkte, Heatmap-Schwelle, Backup/Restore,
+- **Einstellungen** – Rundung, Mitarbeitspunkte, Heatmap-Punktverfall, Backup/Restore,
   Demo-Daten, alles löschen.
 
 ## 8. MVP-Funktionsumfang

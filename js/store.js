@@ -16,13 +16,44 @@
   // ---- Ereignis-Typen (Mitarbeit) ------------------------------------------
   // Reihenfolge = Anzeige-Reihenfolge im Tracker.
   const EVENT_TYPES = [
-    { id: "einfach",   label: "Wortmeldung",      kurz: "Meldung",  farbe: "#2e7d32", defaultPunkte: 1,  positiv: true },
-    { id: "gut",       label: "Gute Meldung",     kurz: "gut",      farbe: "#1565c0", defaultPunkte: 2,  positiv: true },
-    { id: "sehrgut",   label: "Sehr gute Meldung",kurz: "sehr gut", farbe: "#6a1b9a", defaultPunkte: 3,  positiv: true },
-    { id: "stoerung",  label: "Störung",          kurz: "Störung",  farbe: "#c62828", defaultPunkte: -2, positiv: false },
-    { id: "keinehausaufgabe", label: "Fehlende HA", kurz: "keine HA", farbe: "#b9770e", defaultPunkte: -1, positiv: false }
+    { id: "einfach",   label: "Wortmeldung",       kurz: "Meldung",  farbe: "#2e7d32", defaultPunkte: 1,  heatDelta: 1, positiv: true },
+    { id: "gut",       label: "Gute Meldung",      kurz: "gut",      farbe: "#1565c0", defaultPunkte: 2,  heatDelta: 2, positiv: true },
+    { id: "sehrgut",   label: "Sehr gute Meldung", kurz: "sehr gut", farbe: "#6a1b9a", defaultPunkte: 3,  heatDelta: 3, positiv: true },
+    { id: "stoerung",  label: "Störung",           kurz: "Störung",  farbe: "#c62828", defaultPunkte: -2, heatDelta: 0, positiv: false },
+    { id: "keinehausaufgabe", label: "Fehlende HA", kurz: "keine HA", farbe: "#b9770e", defaultPunkte: -1, heatDelta: 0, positiv: false }
   ];
   const EVENT_TYPE_MAP = EVENT_TYPES.reduce((m, t) => (m[t.id] = t, m), {});
+  const HEAT_POINTS_MAX = 100;
+
+  function clampHeatPoints(value) {
+    return Math.max(0, Math.min(HEAT_POINTS_MAX, Number(value) || 0));
+  }
+
+  function normalisiereSchuelerHeat(s, settings) {
+    if (!s) return s;
+    const heatStart = Math.max(0, Math.min(HEAT_POINTS_MAX,
+      Number(settings && settings.heatStartWert != null ? settings.heatStartWert : DEFAULT_SETTINGS.heatStartWert) || 0));
+    if (s.heatPoints === null || s.heatPoints === undefined || isNaN(Number(s.heatPoints))) {
+      s.heatPoints = heatStart;
+    } else {
+      s.heatPoints = clampHeatPoints(s.heatPoints);
+    }
+    if (!s.heatLastDecayAt || isNaN(Number(s.heatLastDecayAt))) {
+      s.heatLastDecayAt = now();
+    }
+    return s;
+  }
+
+  function currentHeatPoints(s, settings, jetzt) {
+    const punktestand = normalisiereSchuelerHeat(JSON.parse(JSON.stringify(s || {})));
+    const verfallMinuten = Math.max(1, parseInt((settings && settings.heatVerfallMinuten), 10) || 5);
+    const verfallPunkte = Math.max(0, parseInt((settings && settings.heatVerfallPunkte), 10) || 1);
+    const aktuelleZeit = jetzt || now();
+    const vergangen = Math.max(0, aktuelleZeit - punktestand.heatLastDecayAt);
+    const decay = vergangen / 60000 / verfallMinuten * verfallPunkte;
+    const heatPoints = clampHeatPoints(punktestand.heatPoints - decay);
+    return { heatPoints, heatLastDecayAt: punktestand.heatLastDecayAt, decay, verfallMinuten, verfallPunkte };
+  }
 
   // ---- Standard-Einstellungen ----------------------------------------------
   const DEFAULT_SETTINGS = {
@@ -41,8 +72,15 @@
       { abPunkte: -0.5, note: 5 }
       // darunter: 6
     ],
-    // Heatmap: nach wie vielen Minuten ohne Meldung gilt jemand als "kalt" (rot)
-    heatMinuten: 20,
+    // Heatmap-Erfassungspunkte je Ereignistyp
+    heatPunkteEinfach: 1,
+    heatPunkteGut: 2,
+    heatPunkteSehrGut: 3,
+    // Heatmap-Startwert beim Anlegen / Initialisieren von Schülerdaten
+    heatStartWert: 50,
+    // Heatmap-Verfall: Y Punkte pro X Minuten
+    heatVerfallPunkte: 1,
+    heatVerfallMinuten: 5,
     // Default-Anteile schriftlich/sonstige je Fachtyp (in %)
     anteile: {
       hauptfach: { schriftlich: 50, sonstige: 50 },
@@ -58,7 +96,11 @@
       await DB.put("einstellungen", s);
     }
     // Fehlende Felder aus Defaults ergänzen (Vorwärtskompatibilität)
-    return Object.assign(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), s);
+    s = Object.assign(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), s);
+    if (s.heatPunktVerfallProMinuten && !s.heatVerfallMinuten) {
+      s.heatVerfallMinuten = s.heatPunktVerfallProMinuten;
+    }
+    return s;
   }
   async function saveSettings(s) {
     s.key = "app";
@@ -112,15 +154,23 @@
       nachname: "",
       bemerkung: "",
       sortIndex: t,
+      heatPoints: DEFAULT_SETTINGS.heatStartWert,
+      heatLastDecayAt: t,
       createdAt: t,
       updatedAt: t
     }, data || {});
   }
   const Schueler = {
-    byKlasse: (klasseId) => DB.getAllByIndex("schueler", "klasseId", klasseId)
-      .then((list) => list.sort((a, b) => a.sortIndex - b.sortIndex)),
-    get: (id) => DB.get("schueler", id),
-    async save(s) { s.updatedAt = now(); return DB.put("schueler", s); },
+    async byKlasse(klasseId) {
+      const settings = await getSettings();
+      const list = await DB.getAllByIndex("schueler", "klasseId", klasseId);
+      return list.map((s) => normalisiereSchuelerHeat(s, settings)).sort((a, b) => a.sortIndex - b.sortIndex);
+    },
+    async get(id) {
+      const s = await DB.get("schueler", id);
+      return normalisiereSchuelerHeat(s, await getSettings());
+    },
+    async save(s) { normalisiereSchuelerHeat(s, await getSettings()); s.updatedAt = now(); return DB.put("schueler", s); },
     async remove(id) {
       await DB.delByIndex("noten", "schuelerId", id);
       await DB.delByIndex("ereignisse", "schuelerId", id);
@@ -220,6 +270,19 @@
     remove: (id) => DB.del("ereignisse", id)
   };
 
+  async function addHeatPoints(schuelerId, delta) {
+    const s = await DB.get("schueler", schuelerId);
+    if (!s) return null;
+    normalisiereSchuelerHeat(s);
+    const settings = await getSettings();
+    const current = currentHeatPoints(s, settings, now());
+    s.heatPoints = clampHeatPoints(current.heatPoints + (Number(delta) || 0));
+    s.heatLastDecayAt = now();
+    s.updatedAt = now();
+    await DB.put("schueler", s);
+    return s;
+  }
+
   // ---- Backup (Gesamt-Export/Import als JSON) ------------------------------
   async function exportAll() {
     const [klassen, schueler, kategorien, noten, sitzplaene, ereignisse, settings] = await Promise.all([
@@ -236,7 +299,8 @@
     if (replace) await DB.clearAll();
     const d = backup.data;
     await DB.bulkPut("klassen", d.klassen || []);
-    await DB.bulkPut("schueler", d.schueler || []);
+    const settings = await getSettings();
+    await DB.bulkPut("schueler", (d.schueler || []).map((s) => normalisiereSchuelerHeat(s, settings)));
     await DB.bulkPut("kategorien", d.kategorien || []);
     await DB.bulkPut("noten", d.noten || []);
     await DB.bulkPut("sitzplaene", d.sitzplaene || []);
@@ -321,6 +385,7 @@
     Noten, neueNote,
     Sitzplan, neuerSitzplan,
     Ereignisse, neuesEreignis,
+    addHeatPoints, currentHeatPoints, normalisiereSchuelerHeat,
     exportAll, importAll, seedDemoData
   };
 })(window);
