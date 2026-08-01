@@ -1,0 +1,130 @@
+# AGENTS.md – Instruktionen für KI-Agenten
+
+Diese Datei ist die **verbindliche Arbeitsanleitung** für alle KI-Agenten und
+Coding-Assistenten (Claude, Codex, Kimi, Cursor, Copilot o. ä.), die an diesem
+Repository arbeiten. Bitte vollständig lesen, bevor du Code änderst.
+
+---
+
+## 1. Was ist Noten-Fritze?
+
+Lokale Noten- und Mitarbeitsverwaltung für Lehrkräfte an Gymnasien (Deutschland).
+
+- **100 % lokal**: Alle Daten liegen in IndexedDB im Browser. Kein Server, keine
+  Cloud, kein Login. Datensouveränität ist ein Kernfeature – führe niemals
+  Netzwerk-Calls, Telemetrie oder externe Dienste ein.
+- **Tablet-first**: Optimiert für iPad im Querformat, Touch-Bedienung, PWA
+  (offline nutzbar via Service Worker).
+- Zielgruppe sind Lehrkräfte: **UI-Sprache ist Deutsch**, Fachbegriffe aus dem
+  Schulalltag (z. B. „Epochalnote", „Wortmeldung") beibehalten.
+
+## 2. Harte technische Regeln (nicht verhandelbar)
+
+1. **Kein Build-Schritt, keine Abhängigkeiten.** Vanilla HTML/CSS/JS. Füge keine
+   Pakete, CDNs, Frameworks oder Toolchains hinzu – auch keine „kleinen"
+   Utility-Libraries. Wenn eine Fähigkeit fehlt, implementiere sie selbst.
+2. **Klassische `<script>`-Tags, keine ES-Module.** Die App muss per Doppelklick
+   auf `index.html` (`file://`) lauffähig bleiben; ES-Module scheitern dort an
+   CORS. Modularität entsteht über Dateien + globale Namespaces.
+3. **Keine Transpiler-Syntax.** Code muss in älteren iPad-Safari-Versionen laufen:
+   ES2017+ ist ok (async/await wird genutzt), aber keine optionalen Spielereien,
+   die breite Kompatibilität gefährden. Bisheriger Code-Stil: `const`/`let`,
+   Arrow Functions, Template-Konkatenation mit `+` (keine Template-Literals im
+   bestehenden Code – dem vorhandenen Stil folgen).
+4. **Nutzdaten nur in IndexedDB**, nie in LocalStorage.
+5. **Minimale, fokussierte Änderungen.** Keine ungefragten Refactorings,
+   Reformatierungen oder Umbenennungen außerhalb der eigentlichen Aufgabe.
+
+## 3. Architektur
+
+Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
+
+| Datei | Namespace | Aufgabe |
+|---|---|---|
+| `js/db.js` | `DB` | Generischer IndexedDB-Wrapper (Promises, Schema-Versionierung) |
+| `js/store.js` | `Store` | Domänenmodell, Repositories, Defaults, Ereignistypen, Demo-Daten |
+| `js/calc.js` | `Calc` | Reine Rechenlogik (Noten, Mitarbeit, Heatmap) – **frei von DOM/DB** |
+| `js/csv.js` | `CSV` | CSV-Export/Import (UTF-8 mit BOM) |
+| `js/ui.js` | `UI` | UI-Bausteine: Modal, Toast, Formfelder, `esc`, `$`/`$all` |
+| `js/views.js` | `Views` | Screens, Routing, Interaktion (Aktions-Delegation) |
+| `js/app.js` | – | Bootstrap (DB öffnen, Demo-Daten, erster Render, SW-Registrierung) |
+
+Wichtige Muster:
+
+- Jede Datei ist eine **IIFE** mit `"use strict";` und hängt am Ende ihr
+  Namespace-Objekt an `window` (`(function (global) { ... })(window)`).
+- Jede Datei beginnt mit einem **Header-Kommentarblock** (`/* ===...`), der
+  Zweck und Inhalt beschreibt. Bei neuen Dateien dieses Format übernehmen.
+- HTML wird als String gebaut. **Nutzerdaten immer mit `UI.esc()` escapen**,
+  bevor sie ins HTML wandern (XSS-Schutz, Namen sind Freitext).
+- Interaktionen laufen über **`data-action`-Attribute** und zentrale Delegation
+  in `Views` (siehe `initDelegation` / Action-Map in `views.js`). Neue Buttons
+  bekommen eine `data-action` + einen Eintrag in der Action-Map – keine
+  Inline-`onclick`.
+- Render-Schleife: `Views.render()` rendert Topbar + View neu; nach jeder
+  Datenmutation `render()` aufrufen.
+
+## 4. Datenmodell & Integrität
+
+IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
+
+- **Kaskadierung beachten:** Löschen einer Klasse/eines Schülers muss abhängige
+  Datensätze mitlöschen (Noten, Ereignisse, Sitzplatz-Zuweisung). Bestehende
+  Logik in `store.js` wiederverwenden, nicht umgehen.
+- **Schema-Änderungen sind additiv:** Neuen Store/Index → `DB_VERSION` in
+  `db.js` erhöhen und in `onupgradeneeded` ergänzen. Bestehende Stores nie
+  zerstörerisch umbauen; Daten der Nutzer sind heilig.
+- IDs via `Store`-internem `uid()` (crypto.randomUUID mit Fallback).
+
+## 5. Service Worker – Cache-Falle
+
+`service-worker.js` cached die App-Shell **cache-first** unter dem Namen
+`noten-fritze-v1`.
+
+⚠️ **Bei jeder Änderung an einer gecachten Datei** (`index.html`, `css/`, `js/`,
+Manifest, Icons) muss die **Cache-Version erhöht werden** (`noten-fritze-v1` →
+`-v2` …), sonst bekommen installierte PWAs die Änderung nie zu sehen. Das ist
+die häufigste Ursache für „mein Fix kommt nicht an". Neue Dateien zusätzlich in
+`ASSETS` eintragen.
+
+## 6. Fachlogik – wo was hingehört
+
+- **Berechnungen immer in `calc.js`** (rein, testbar, ohne DOM/DB-Zugriff):
+  Noten-Parsing (`2+` → 1,7), gewichtete Gesamtnote (Kategorie → Art-Gruppe →
+  Gesamt, fehlende Gruppen zählen 100 %), Mitarbeits-Auswertung, Heatmap-Farbe.
+- Ereignistypen (Wortmeldung, Störung, …) sind **zentral in `store.js`
+  (`EVENT_TYPES`)** definiert – Reihenfolge dort = Anzeigereihenfolge. Keine
+  hartcodierten Typen-Listen in Views duplizieren.
+- Heatmap (0–100 Punkte) ist **bewusst unabhängig** von den Mitarbeitspunkten –
+  diese Trennung nicht verwässern.
+
+## 7. Testen & Verifizieren
+
+- Es gibt **kein Test-Framework und keinen Linter**. Verifizierung erfolgt
+  manuell im Browser:
+  - `index.html` doppelklicken (Demo-Daten werden beim ersten Start angelegt), oder
+  - lokal servern: `npx serve .` bzw. `python -m http.server` (für PWA/SW nötig).
+- Nach einer Änderung den betroffenen Flow wirklich durchklicken (z. B. Sitzplan:
+  Schüler zuweisen, verschieben, Platz freimachen).
+- Syntax-Fehler zeigen sich sofort in der Browser-Konsole – vor Übergabe prüfen,
+  dass keine Fehler beim Laden auftreten.
+
+## 8. Kommunikation & Konventionen im Repo
+
+- **Sprache:** UI-Texte, Code-Kommentare und Commit-Messages auf Deutsch,
+  passend zum bestehenden Ton (sachlich, kurz).
+- Commit-Messages: kurze deutsche Imperativ- oder Beschreibungsform, z. B.
+  „Fix: Schüler beim Zuweisen auf gewählten Sitzplatz setzen".
+- Dokumentation aktuell halten: Wenn du Struktur, Konventionen oder Features
+  änderst, die in `README.md` oder dieser Datei beschrieben sind, passe beide
+  Dateien mit an.
+
+## 9. Häufige Fallstricke (Learnings)
+
+- **Service-Worker-Cache vergessen** → siehe Abschnitt 5.
+- **`data-action` ohne Handler** → Button tut nichts; Action-Map in `views.js`
+  ergänzen.
+- **Fehlendes `UI.esc()`** bei Nutzereingaben im HTML-String.
+- **`render()` nach Mutation vergessen** → UI zeigt alten Stand.
+- Änderungen an `calc.js` können weitreichende Folgen haben (Gesamtnote!) –
+  Berechnung im Schüler-Detail / Besprechungsmodus gegenprüfen.
