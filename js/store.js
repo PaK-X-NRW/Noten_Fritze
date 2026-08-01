@@ -70,28 +70,44 @@
   }
 
   // ---- Standard-Einstellungen ----------------------------------------------
-  // Default-Stundenplan: Mo–Fr je 6 Stunden à 45 Min ab 08:00
-  // (5-Min-Pausen, nach der 2. und 4. Stunde je 15 Min).
+  function hhmmZuMinuten(v) {
+    const p = String(v || "").split(":");
+    return (parseInt(p[0], 10) || 0) * 60 + (parseInt(p[1], 10) || 0);
+  }
+  function minZuHHMM(min) {
+    return ("0" + (Math.floor(min / 60) % 24)).slice(-2) + ":" + ("0" + (min % 60)).slice(-2);
+  }
+
+  // Default-Stundenplan: 10 Stunden à 45 Min ab 08:00 – gilt jeden Schultag
+  // gleich (5-Min-Pausen, nach der 2. Stunde 20 Min).
   function defaultStundenplan() {
-    const starts = ["08:00", "08:50", "09:55", "10:45", "11:35", "12:25"];
-    const plan = {};
-    for (let tag = 1; tag <= 5; tag++) {
-      plan[String(tag)] = starts.map((start, i) => {
-        const endeMin = parseInt(start.slice(0, 2), 10) * 60 + parseInt(start.slice(3, 5), 10) + 45;
-        const ende = ("0" + Math.floor(endeMin / 60)).slice(-2) + ":" + ("0" + (endeMin % 60)).slice(-2);
-        return { nr: i + 1, start, ende };
-      });
+    const starts = ["08:00", "08:50", "09:55", "10:45", "11:35", "12:25", "13:15", "14:05", "14:55", "15:45"];
+    return starts.map((start, i) => ({ nr: i + 1, start, ende: minZuHHMM(hhmmZuMinuten(start) + 45) }));
+  }
+
+  // Bringt einen Stundenplan auf genau 10 Einträge { nr, start, ende }:
+  // ungültige Einträge raus, fehlende Stunden ans Ende gehängt
+  // (letzte Stunde + 5 Min Pause, 45 Min).
+  function stundenplanNormalisieren(liste) {
+    const plan = (Array.isArray(liste) ? liste : [])
+      .filter((h) => h && h.start && h.ende)
+      .slice(0, 10)
+      .map((h, i) => ({ nr: i + 1, start: h.start, ende: h.ende }));
+    while (plan.length < 10) {
+      const letzte = plan[plan.length - 1];
+      const startMin = letzte ? hhmmZuMinuten(letzte.ende) + 5 : 8 * 60;
+      plan.push({ nr: plan.length + 1, start: minZuHHMM(startMin), ende: minZuHHMM(startMin + 45) });
     }
     return plan;
   }
 
   const DEFAULT_SETTINGS = {
     key: "app",
-    schemaVersion: 3,
+    schemaVersion: 4,
     // Aktuelles Halbjahr (1 | 2) – neue Noten/Ereignisse werden damit getaggt
     aktuellesHalbjahr: 1,
-    // Wochen-Stundenplan: Schlüssel = Wochentag ("1"=Mo … "5"=Fr),
-    // Wert = Liste von { nr, start: "HH:MM", ende: "HH:MM" }
+    // Stundenplan: flache Liste von genau 10 { nr, start: "HH:MM", ende: "HH:MM" },
+    // gilt für jeden Schultag gleich (kein Wochenplan mehr).
     stundenplan: defaultStundenplan(),
     // Rundung der Gesamtnote: "keine" (2 NK), "eine" (1 NK), "ganze" (ganze Note)
     rundung: "eine",
@@ -134,6 +150,14 @@
     if (s.heatPunktVerfallProMinuten && !s.heatVerfallMinuten) {
       s.heatVerfallMinuten = s.heatPunktVerfallProMinuten;
     }
+    // Altes Format (Wochenplan als Objekt je Wochentag) in die flache
+    // 10-Stunden-Liste überführen: Montagsliste als Basis, sonst Default.
+    if (!Array.isArray(s.stundenplan)) {
+      const alt = s.stundenplan || {};
+      const ersterTag = Object.keys(alt).sort()[0];
+      s.stundenplan = ersterTag ? alt[ersterTag] : null;
+    }
+    s.stundenplan = stundenplanNormalisieren(s.stundenplan);
     return s;
   }
   async function saveSettings(s) {
@@ -151,7 +175,7 @@
   // beim App-Start (app.js, vor dem ersten Render) ausgeführt.
   // Regel: Neue Felder bekommen immer Defaults (Factorys + getSettings-Merge),
   // damit auch nicht migrierte/alte Datensätze ohne das Feld funktionieren.
-  const SCHEMA_VERSION = 3;
+  const SCHEMA_VERSION = 4;
   const MIGRATION_STEPS = {
     // v1 -> v2: Noten und Ereignisse erhalten ein Halbjahr (1 | 2),
     // aus dem Datum abgeleitet (Aug–Jan = 1. HJ, Feb–Jul = 2. HJ).
@@ -169,6 +193,12 @@
     // getSettings-Merge dazu; dieser Schritt persistiert die Einstellungen
     // inkl. Stundenplan (und dokumentiert den Versionsschritt).
     3: async () => {
+      await saveSettings(await getSettings());
+    },
+    // v3 -> v4: Stundenplan wird flach (10 Stunden, jeden Schultag gleich)
+    // statt Wochenplan je Wochentag. Die Konvertierung steckt in getSettings
+    // (Montagsliste als Basis); dieser Schritt persistiert das Ergebnis.
+    4: async () => {
       await saveSettings(await getSettings());
     }
   };

@@ -7,41 +7,17 @@
   const { state } = global.Views;
 
   // ---- Stundenplan (Einstellungen) ------------------------------------------
-  const WOCHENTAGE = [["1", "Montag"], ["2", "Dienstag"], ["3", "Mittwoch"], ["4", "Donnerstag"], ["5", "Freitag"]];
-
+  // Flacher Plan: genau 10 Stunden, die jeden Schultag gleich gelten.
   function stundenplanHTML(s) {
-    const plan = s.stundenplan || {};
-    return WOCHENTAGE.map(([tag, label]) => {
-      const stunden = plan[tag] || [];
-      const rows = stunden.map((h, i) =>
-        '<div class="form-row" style="align-items:center">' +
-          '<span class="muted" style="width:26px">' + (i + 1) + ".</span>" +
-          '<input type="time" data-sp-tag="' + tag + '" data-sp-idx="' + i + '" data-sp-feld="start" value="' + UI.esc(h.start || "") + '">' +
-          '<span class="muted">–</span>' +
-          '<input type="time" data-sp-tag="' + tag + '" data-sp-idx="' + i + '" data-sp-feld="ende" value="' + UI.esc(h.ende || "") + '">' +
-          '<button class="iconbtn plain danger-text" data-action="sp-del" data-tag="' + tag + '" data-idx="' + i + '" title="Stunde entfernen">🗑</button>' +
-        "</div>"
-      ).join("");
-      return '<h3 style="margin:14px 0 4px">' + label + "</h3>" + rows +
-        '<button class="btn small" data-action="sp-add" data-tag="' + tag + '" style="margin-top:6px">＋ Stunde</button>';
-    }).join("");
-  }
-
-  // Speichert den Stundenplan aus den Einstellungen (Zeilen neu nummerieren).
-  async function saveStundenplan() {
-    const s = state.settings;
-    WOCHENTAGE.forEach(([tag]) => {
-      (s.stundenplan[tag] || []).forEach((h, i) => { h.nr = i + 1; });
-    });
-    await Store.saveSettings(s);
-  }
-
-  function hhmmZuMin(v) {
-    const p = String(v || "").split(":");
-    return (parseInt(p[0], 10) || 0) * 60 + (parseInt(p[1], 10) || 0);
-  }
-  function minZuHHMM(min) {
-    return ("0" + (Math.floor(min / 60) % 24)).slice(-2) + ":" + ("0" + (min % 60)).slice(-2);
+    const plan = Array.isArray(s.stundenplan) ? s.stundenplan : [];
+    const zellen = plan.map((h, i) =>
+      '<div class="sp-stunde">' +
+        '<span class="muted">' + (i + 1) + ".</span>" +
+        '<input type="time" lang="de-DE" data-sp-idx="' + i + '" data-sp-feld="start" value="' + UI.esc(h.start || "") + '">' +
+        '<input type="time" lang="de-DE" data-sp-idx="' + i + '" data-sp-feld="ende" value="' + UI.esc(h.ende || "") + '">' +
+      "</div>"
+    ).join("");
+    return '<div class="sp-grid">' + zellen + "</div>";
   }
 
   // =========================================================================
@@ -94,7 +70,7 @@
         "</div>" +
       "</div>" +
       '<div class="card"><h2>Stundenplan</h2>' +
-        '<p class="muted">Der Tracker erkennt damit die laufende Stunde und ihre Restzeit.</p>' +
+        '<p class="muted">Gilt für jeden Schultag gleich. Der Tracker erkennt damit die laufende Stunde und ihre Restzeit.</p>' +
         stundenplanHTML(s) +
       "</div>" +
       '<div class="card"><h2>Datensicherung</h2><p class="muted">Alle Daten bleiben lokal im Browser. Sicherung als JSON-Datei empfohlen.</p>' +
@@ -140,9 +116,8 @@
         await Store.saveSettings(s); UI.toast("Punkte gespeichert");
       }));
       UI.$all("[data-sp-feld]").forEach((inp) => inp.addEventListener("change", async () => {
-        const tag = inp.getAttribute("data-sp-tag");
         const idx = parseInt(inp.getAttribute("data-sp-idx"), 10);
-        const stunde = s.stundenplan && s.stundenplan[tag] && s.stundenplan[tag][idx];
+        const stunde = Array.isArray(s.stundenplan) && s.stundenplan[idx];
         if (!stunde) return;
         stunde[inp.getAttribute("data-sp-feld")] = inp.value;
         await Store.saveSettings(s); UI.toast("Stundenplan gespeichert");
@@ -150,5 +125,5 @@
     }};
   }
 
-  Object.assign(global.Views, { ViewEinstellungen, saveStundenplan, hhmmZuMin, minZuHHMM });
+  Object.assign(global.Views, { ViewEinstellungen });
 })(window);

@@ -130,8 +130,9 @@ fürs ganze Jahr rechnen (Filter „1. HJ · 2. HJ · Jahr“).
   (farbcodiert, mit Tages-Zähler je Typ). Ein Tap auf den passenden Button erzeugt
   sofort das Ereignis mit Zeitstempel – kein Umweg über eine Auswahlleiste.
   **Undo** über Toast oder Button.
-- **Stundenplan & Stundendauer:** In den Einstellungen liegt ein Wochen-Stundenplan
-  (Mo–Fr, Start/Ende je Stunde). Beim Tracker-Start wird nach **Einzel- oder
+- **Stundenplan & Stundendauer:** In den Einstellungen liegt ein Stundenplan aus
+  10 Stunden (Start/Ende je Stunde), der für jeden Schultag gleich gilt. Beim
+  Tracker-Start wird nach **Einzel- oder
   Doppelstunde** gefragt; daraus und aus dem Stundenplan zeigt die Topbar die
   **Restzeit** der laufenden Stunde. Der Heatmap-Verfall (Y Punkte pro X Minuten,
   bezogen auf eine 45-Min-Stunde) skaliert auf die tatsächliche Stundendauer.
@@ -182,8 +183,8 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   Abwesenheits-Toggle, Heatmap-Hintergrund + Legende.
 - **Besprechungsmodus** – ein/e Schüler/in einzeln, groß; nur deren Daten sichtbar
   (Datenschutz bei der Notenbesprechung), Vor/Zurück, Halbjahr-Filter.
-- **Einstellungen** – Rundung, aktuelles Halbjahr, Wochen-Stundenplan,
-  Mitarbeitspunkte, Heatmap-Punktverfall, Backup/Restore,
+- **Einstellungen** – Rundung, aktuelles Halbjahr, Stundenplan (10 Stunden,
+  täglich gleich), Mitarbeitspunkte, Heatmap-Punktverfall, Backup/Restore,
   Demo-Daten, alles löschen.
 
 ## 8. MVP-Funktionsumfang

@@ -11,8 +11,7 @@
     klasseDialog, splitsDialog, schuelerDialog, kategorieDialog, cellDialog,
     studentDetailDialog, seatAssignDialog, importStudentsDialog, backupImportDialog,
     trackerStartDialog, trackerHeatEditDialog, trackerAbwesendToggle,
-    stopHeatTimer, renderSeatCounts,
-    saveStundenplan, hhmmZuMin, minZuHHMM
+    stopHeatTimer, renderSeatCounts
   } = global.Views;
 
   // =========================================================================
@@ -127,26 +126,6 @@
     "ausw-range": (el) => { state.auswertungRange = el.getAttribute("data-range"); render(); },
     "noten-hj": (el) => { state.notenHalbjahr = el.getAttribute("data-hj"); render(); },
     "ausw-hj": (el) => { state.auswertungHalbjahr = el.getAttribute("data-hj"); render(); },
-
-    // Stundenplan (Einstellungen)
-    "sp-add": async (el) => {
-      const s = state.settings;
-      const tag = el.getAttribute("data-tag");
-      if (!s.stundenplan) s.stundenplan = Store.defaultStundenplan();
-      const list = s.stundenplan[tag] = s.stundenplan[tag] || [];
-      // Neue Stunde: ans Ende der letzten (+ 5 Min Pause), 45 Min – sonst 08:00
-      const letzte = list[list.length - 1];
-      const startMin = letzte && letzte.ende ? hhmmZuMin(letzte.ende) + 5 : 8 * 60;
-      list.push({ nr: list.length + 1, start: minZuHHMM(startMin), ende: minZuHHMM(startMin + 45) });
-      await saveStundenplan(); render();
-    },
-    "sp-del": async (el) => {
-      const s = state.settings;
-      const tag = el.getAttribute("data-tag");
-      const idx = parseInt(el.getAttribute("data-idx"), 10);
-      if (s.stundenplan && s.stundenplan[tag]) s.stundenplan[tag].splice(idx, 1);
-      await saveStundenplan(); render();
-    },
 
     // Einstellungen / Backup
     "backup-export": async () => {

@@ -199,17 +199,17 @@
   }
 
   // Findet zur Zeit `jetzt` die laufende Stunde im Stundenplan.
-  //   stundenplan: { "1": [{ nr, start, ende }, ...], ... } (Schlüssel: 1 = Mo … 5 = Fr)
-  // Rückgabe: { tag, index, stunde } oder null (keine laufende Stunde).
+  //   stundenplan: [{ nr, start, ende }, ...] – gilt für jeden Schultag gleich.
+  // Rückgabe: { index, stunde } oder null (Wochenende oder keine laufende Stunde).
   function aktuelleStunde(stundenplan, jetzt) {
     const d = jetzt ? new Date(jetzt) : new Date();
-    const tag = String(d.getDay()); // 0 = So, 1 = Mo …
-    const liste = stundenplan && stundenplan[tag];
-    if (!liste || !liste.length) return null;
+    const wochentag = d.getDay(); // 0 = So, 6 = Sa
+    if (wochentag === 0 || wochentag === 6) return null;
+    if (!Array.isArray(stundenplan) || !stundenplan.length) return null;
     const min = d.getHours() * 60 + d.getMinutes();
-    for (let i = 0; i < liste.length; i++) {
-      if (min >= hhmmZuMinuten(liste[i].start) && min < hhmmZuMinuten(liste[i].ende)) {
-        return { tag, index: i, stunde: liste[i] };
+    for (let i = 0; i < stundenplan.length; i++) {
+      if (min >= hhmmZuMinuten(stundenplan[i].start) && min < hhmmZuMinuten(stundenplan[i].ende)) {
+        return { index: i, stunde: stundenplan[i] };
       }
     }
     return null;
@@ -229,7 +229,7 @@
     }
     const d = new Date(start);
     const tagesbeginn = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    const liste = stundenplan[gefunden.tag];
+    const liste = stundenplan;
     const startMin = hhmmZuMinuten(gefunden.stunde.start);
     let endeMin = hhmmZuMinuten(gefunden.stunde.ende);
     if (doppel) {
