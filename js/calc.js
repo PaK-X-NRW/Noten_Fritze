@@ -181,10 +181,64 @@
     return "hsl(" + hue.toFixed(0) + ", " + sat + "%, " + light.toFixed(0) + "%)";
   }
 
+  // ---- Stundenplan-Auswertung ----------------------------------------------
+  function hhmmZuMinuten(v) {
+    const p = String(v || "").split(":");
+    return (parseInt(p[0], 10) || 0) * 60 + (parseInt(p[1], 10) || 0);
+  }
+
+  // Findet zur Zeit `jetzt` die laufende Stunde im Stundenplan.
+  //   stundenplan: { "1": [{ nr, start, ende }, ...], ... } (Schlüssel: 1 = Mo … 5 = Fr)
+  // Rückgabe: { tag, index, stunde } oder null (keine laufende Stunde).
+  function aktuelleStunde(stundenplan, jetzt) {
+    const d = jetzt ? new Date(jetzt) : new Date();
+    const tag = String(d.getDay()); // 0 = So, 1 = Mo …
+    const liste = stundenplan && stundenplan[tag];
+    if (!liste || !liste.length) return null;
+    const min = d.getHours() * 60 + d.getMinutes();
+    for (let i = 0; i < liste.length; i++) {
+      if (min >= hhmmZuMinuten(liste[i].start) && min < hhmmZuMinuten(liste[i].ende)) {
+        return { tag, index: i, stunde: liste[i] };
+      }
+    }
+    return null;
+  }
+
+  // Baut die Tracker-Session (Start/Ende) aus Stundenplan + Angabe
+  // Einzel-/Doppelstunde. Doppelstunde = bis zum Ende der Folgestunde
+  // (bzw. + eine Stundendauer, wenn keine Folgestunde im Plan steht).
+  // Ohne laufende Stunde im Plan: Fallback 45/90 Min ab jetzt.
+  // Rückgabe: { startTs, endeTs, dauerMin, quelle: "plan" | "fallback", stundeNr }
+  function trackerSession(stundenplan, jetzt, doppel) {
+    const start = jetzt || Store.now();
+    const gefunden = aktuelleStunde(stundenplan, start);
+    if (!gefunden) {
+      const dauerMin = doppel ? 90 : 45;
+      return { startTs: start, endeTs: start + dauerMin * 60000, dauerMin, quelle: "fallback", stundeNr: null };
+    }
+    const d = new Date(start);
+    const tagesbeginn = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const liste = stundenplan[gefunden.tag];
+    const startMin = hhmmZuMinuten(gefunden.stunde.start);
+    let endeMin = hhmmZuMinuten(gefunden.stunde.ende);
+    if (doppel) {
+      const folge = liste[gefunden.index + 1];
+      endeMin = folge ? hhmmZuMinuten(folge.ende) : endeMin + (endeMin - startMin);
+    }
+    return {
+      startTs: tagesbeginn + startMin * 60000,
+      endeTs: tagesbeginn + endeMin * 60000,
+      dauerMin: endeMin - startMin,
+      quelle: "plan",
+      stundeNr: gefunden.stunde.nr != null ? gefunden.stunde.nr : gefunden.index + 1
+    };
+  }
+
   global.Calc = {
     parseNote, formatNote, clampNote, rundeGesamt,
     berechneSchueler, noteFarbe,
     auswertungMitarbeit, punkteZuNote, heatFarbe,
-    heatPunkteAktuell, heatFarbeDurchPunkte
+    heatPunkteAktuell, heatFarbeDurchPunkte,
+    aktuelleStunde, trackerSession
   };
 })(window);

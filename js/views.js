@@ -17,6 +17,7 @@
     selectedSchuelerId: null,
     // Tracker (flüchtig)
     tracker: null,
+    pendingSession: null,  // vom Start-Dialog übergebene Stunden-Session
     settings: null
   };
 
@@ -365,8 +366,10 @@
     });
     state.tracker = {
       openedAt: Store.now(),
+      session: state.pendingSession || null,
       counts, typeCounts, last, names, students: sMap, undoStack: [], heatTimer: null
     };
+    state.pendingSession = null;
 
     // Legende erklärt Farbe + Kurzlabel der Buttons auf den Kacheln
     const legende = Store.EVENT_TYPES.map((t) =>
@@ -382,6 +385,7 @@
       '<div class="title-wrap"><h1 class="main">Mitarbeit · ' + UI.esc(k.name) + "</h1>" +
       '<span class="sub">Tippe direkt den passenden Button auf der Kachel</span></div>' +
       '<div class="grow"></div>' +
+      (state.tracker.session ? '<span class="chip accent" id="tracker-restzeit" style="align-self:center">' + restzeitText() + "</span>" : "") +
       '<button class="btn" data-action="tracker-undo" id="undo-btn" disabled>↶ Rückgängig</button>';
 
     const body =
@@ -396,11 +400,38 @@
     return { topbar, body, mount: startHeatTimer, fullWidth: true };
   }
 
+  // Effektive Heatmap-Verfallszeit im Tracker: heatVerfallMinuten aus den
+  // Einstellungen gilt für eine 45-Minuten-Standardstunde und wird auf die
+  // tatsächliche Stundendauer (Einzel-/Doppelstunde) skaliert.
+  function trackerVerfallMinuten() {
+    const base = Math.max(1, parseInt(state.settings.heatVerfallMinuten, 10) || 5);
+    const t = state.tracker;
+    if (t && t.session && t.session.dauerMin) {
+      return Math.max(1, Math.round(base * t.session.dauerMin / 45));
+    }
+    return base;
+  }
+
+  // Restzeit-Text für die Topbar ("noch 37 Min (bis 10:20)").
+  function restzeitText() {
+    const t = state.tracker;
+    if (!t || !t.session) return "";
+    const ende = new Date(t.session.endeTs);
+    const endeHHMM = ("0" + ende.getHours()).slice(-2) + ":" + ("0" + ende.getMinutes()).slice(-2);
+    const restMin = Math.ceil((t.session.endeTs - Store.now()) / 60000);
+    if (restMin <= 0) return "Stunde vorbei (" + endeHHMM + " Uhr)";
+    return "noch " + restMin + " Min (bis " + endeHHMM + " Uhr)";
+  }
+  function updateRestzeit() {
+    const el = document.getElementById("tracker-restzeit");
+    if (el) el.textContent = restzeitText();
+  }
+
   function seatTrackerHTML(seat, sMap) {
     const s = seat.schuelerId ? sMap[seat.schuelerId] : null;
     if (!s) return '<div class="seat tracker empty">·</div>';
     const t = state.tracker;
-    const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, state.settings.heatVerfallMinuten, state.settings.heatVerfallPunkte);
+    const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, trackerVerfallMinuten(), state.settings.heatVerfallPunkte);
     const bg = Calc.heatFarbeDurchPunkte(heat.heatPoints);
     const total = t.counts[s.id] || 0;
     const tc = t.typeCounts[s.id] || {};
@@ -436,11 +467,12 @@
   }
   function recolorSeats() {
     const t = state.tracker; if (!t) return;
+    updateRestzeit();
     UI.$all("#tracker-grid .seat.heat").forEach((el) => {
       const sid = el.getAttribute("data-sid");
       const s = t.students && t.students[sid];
       if (!s) return;
-      const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, state.settings.heatVerfallMinuten, state.settings.heatVerfallPunkte);
+      const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, trackerVerfallMinuten(), state.settings.heatVerfallPunkte);
       el.style.background = Calc.heatFarbeDurchPunkte(heat.heatPoints);
     });
   }
@@ -461,7 +493,7 @@
     });
     const s = t.students && t.students[sid];
     if (s) {
-      const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, state.settings.heatVerfallMinuten, state.settings.heatVerfallPunkte);
+      const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, trackerVerfallMinuten(), state.settings.heatVerfallPunkte);
       seat.style.background = Calc.heatFarbeDurchPunkte(heat.heatPoints);
     }
   }
@@ -478,7 +510,7 @@
     const t = state.tracker;
     const s = t && t.students ? t.students[sid] : await Store.Schueler.get(sid);
     if (!s) return;
-    const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, state.settings.heatVerfallMinuten, state.settings.heatVerfallPunkte);
+    const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, trackerVerfallMinuten(), state.settings.heatVerfallPunkte);
     const body =
       '<p class="muted">Heatmap direkt setzen. Der Wert wird sofort gespeichert.</p>' +
       '<div class="field"><label for="heat-slider">Heatmap-Punkte</label>' +
@@ -662,7 +694,7 @@
       '<div class="card"><h2>Heatmap</h2>' + heatpunkte +
         '<div class="field" style="margin-top:14px">' + UI.field("Default-Wert für neue / zurückgesetzte Heatmap", "heatStartWert", s.heatStartWert, { type: "number", inputmode: "numeric", hint: "Wertebereich: 0 bis 100" }) + "</div>" +
         '<div class="form-row" style="align-items:center">' +
-          '<div class="grow"><strong>Y Heatmap-Punkte verfallen pro X Minuten</strong></div>' +
+          '<div class="grow"><strong>Y Heatmap-Punkte verfallen pro X Minuten</strong><div class="hint">Bezogen auf eine 45-Minuten-Stunde; der Tracker skaliert auf die tatsächliche Stundendauer.</div></div>' +
           '<input type="number" inputmode="numeric" style="width:110px" id="f-heatVerfallPunkte" value="' + s.heatVerfallPunkte + '">' +
           '<input type="number" inputmode="numeric" style="width:110px" id="f-heatVerfallMinuten" value="' + s.heatVerfallMinuten + '" placeholder="X Minuten">' +
         "</div>" +
@@ -722,6 +754,28 @@
         await Store.saveSettings(s); UI.toast("Stundenplan gespeichert");
       }));
     }};
+  }
+
+  // ---- Tracker-Start: Einzel- oder Doppelstunde -----------------------------
+  function trackerStartDialog() {
+    const jetzt = Store.now();
+    const einzel = Calc.trackerSession(state.settings.stundenplan, jetzt, false);
+    const doppel = Calc.trackerSession(state.settings.stundenplan, jetzt, true);
+    const info = einzel.quelle === "plan"
+      ? "Erkannt: " + einzel.stundeNr + ". Stunde laut Stundenplan (Ende " +
+        new Date(einzel.endeTs).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) +
+        " Uhr, Doppelstunde bis " +
+        new Date(doppel.endeTs).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr)."
+      : "Gerade läuft laut Stundenplan keine Stunde – es wird mit 45 bzw. 90 Min ab jetzt gerechnet.";
+    UI.modal({
+      title: "Tracker starten",
+      bodyHTML: "<p>Wie lange dauert die Stunde?</p>" + '<p class="muted">' + info + "</p>",
+      buttons: [
+        { label: "Einzelstunde", className: "primary", onClick: (close) => { state.pendingSession = einzel; close(); go("tracker"); } },
+        { label: "Doppelstunde", className: "primary", onClick: (close) => { state.pendingSession = doppel; close(); go("tracker"); } },
+        { label: "Ohne Zeitangabe", onClick: (close) => { state.pendingSession = null; close(); go("tracker"); } }
+      ]
+    });
   }
 
   // =========================================================================
@@ -1072,7 +1126,7 @@
     },
 
     // Tracker / Besprechung Navigation
-    "open-tracker": () => { state.selectedSchuelerId = null; go("tracker"); },
+    "open-tracker": () => trackerStartDialog(),
     "open-besprechung": () => { state.selectedSchuelerId = null; go("besprechung"); },
     "back-to-class": () => { stopHeatTimer(); go("klasse"); },
     "tracker-tap": (el) => trackerTap(el),
