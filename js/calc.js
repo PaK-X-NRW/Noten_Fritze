@@ -45,12 +45,15 @@
   // ---- Notenberechnung -----------------------------------------------------
   // Liefert eine nachvollziehbare Struktur mit Zwischenergebnissen.
   //   kategorien: Array {id, name, art, gewichtung}
-  //   notenFuerSchueler: Array {kategorieId, wert}
+  //   notenFuerSchueler: Array {kategorieId, wert, halbjahr}
   //   klasse: {anteilSchriftlich, anteilSonstige}
-  function berechneSchueler(kategorien, notenFuerSchueler, klasse, rundung) {
+  //   halbjahr: optional 1 | 2 (nur dieses Halbjahr rechnen), null = ganzes Jahr.
+  //   Noten ohne halbjahr-Feld (alte Datensätze) fließen immer ein.
+  function berechneSchueler(kategorien, notenFuerSchueler, klasse, rundung, halbjahr) {
     const notenByKat = {};
     notenFuerSchueler.forEach((n) => {
       if (n.wert === null || n.wert === undefined || isNaN(n.wert)) return;
+      if (halbjahr && n.halbjahr && n.halbjahr !== halbjahr) return;
       (notenByKat[n.kategorieId] = notenByKat[n.kategorieId] || []).push(n.wert);
     });
 

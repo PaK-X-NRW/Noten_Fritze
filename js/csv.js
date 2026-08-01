@@ -105,11 +105,11 @@
   function exportEinzelnoten(klasse, schuelerListe, kategorien, notenAll) {
     const sMap = {}; schuelerListe.forEach((s) => (sMap[s.id] = s));
     const kMap = {}; kategorien.forEach((k) => (kMap[k.id] = k));
-    const rows = [["Vorname", "Nachname", "Kategorie", "Art", "Titel", "Note", "Datum"]];
+    const rows = [["Vorname", "Nachname", "Kategorie", "Art", "Titel", "Note", "Datum", "Halbjahr"]];
     notenAll.forEach((no) => {
       const s = sMap[no.schuelerId], k = kMap[no.kategorieId];
       if (!s || !k) return;
-      rows.push([s.vorname, s.nachname, k.name, k.art, no.titel, n(no.wert), no.datum]);
+      rows.push([s.vorname, s.nachname, k.name, k.art, no.titel, n(no.wert), no.datum, no.halbjahr || ""]);
     });
     downloadCSV("einzelnoten_" + safe(klasse.name) + ".csv", rows);
   }

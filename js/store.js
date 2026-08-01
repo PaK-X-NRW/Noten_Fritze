@@ -55,10 +55,21 @@
     return { heatPoints, heatLastDecayAt: punktestand.heatLastDecayAt, decay, verfallMinuten, verfallPunkte };
   }
 
+  // ---- Halbjahr ------------------------------------------------------------
+  // Leitet aus einem Datum (YYYY-MM-DD) das Halbjahr ab:
+  // Aug–Jan = 1. Halbjahr, Feb–Jul = 2. Halbjahr (deutsches Schuljahr).
+  function halbjahrAusDatum(datum) {
+    const m = parseInt(String(datum || "").slice(5, 7), 10);
+    if (!m) return 1;
+    return (m >= 8 || m <= 1) ? 1 : 2;
+  }
+
   // ---- Standard-Einstellungen ----------------------------------------------
   const DEFAULT_SETTINGS = {
     key: "app",
-    schemaVersion: 1,
+    schemaVersion: 2,
+    // Aktuelles Halbjahr (1 | 2) – neue Noten/Ereignisse werden damit getaggt
+    aktuellesHalbjahr: 1,
     // Rundung der Gesamtnote: "keine" (2 NK), "eine" (1 NK), "ganze" (ganze Note)
     rundung: "eine",
     // Punkte je Ereignistyp (überschreibbar)
@@ -105,6 +116,45 @@
   async function saveSettings(s) {
     s.key = "app";
     return DB.put("einstellungen", s);
+  }
+
+  // ---- Daten-Migrationen (schemaVersion) -------------------------------------
+  // Zweistufiges Migrationskonzept:
+  //   DB_VERSION (db.js)   = Struktur der Object-Stores (Stores/Indizes, additiv)
+  //   SCHEMA_VERSION (hier) = Form der Datensätze (neue Felder, Defaults)
+  // MIGRATION_STEPS: Schlüssel = Ziel-Version. Jede Funktion führt genau den
+  // Schritt von (Version - 1) auf (Version) aus. Neue Versionen werden hinten
+  // angehängt – die Kette läuft kaskadiert v1 -> v2 -> v3 ... und wird einmalig
+  // beim App-Start (app.js, vor dem ersten Render) ausgeführt.
+  // Regel: Neue Felder bekommen immer Defaults (Factorys + getSettings-Merge),
+  // damit auch nicht migrierte/alte Datensätze ohne das Feld funktionieren.
+  const SCHEMA_VERSION = 2;
+  const MIGRATION_STEPS = {
+    // v1 -> v2: Noten und Ereignisse erhalten ein Halbjahr (1 | 2),
+    // aus dem Datum abgeleitet (Aug–Jan = 1. HJ, Feb–Jul = 2. HJ).
+    2: async () => {
+      const noten = await DB.getAll("noten");
+      noten.forEach((n) => { if (!n.halbjahr) n.halbjahr = halbjahrAusDatum(n.datum); });
+      await DB.bulkPut("noten", noten);
+      const ereignisse = await DB.getAll("ereignisse");
+      ereignisse.forEach((e) => {
+        if (!e.halbjahr) e.halbjahr = halbjahrAusDatum(new Date(e.timestamp).toISOString().slice(0, 10));
+      });
+      await DB.bulkPut("ereignisse", ereignisse);
+    }
+  };
+  async function migrateSchema() {
+    const s = await getSettings();
+    let v = parseInt(s.schemaVersion, 10) || 1;
+    while (v < SCHEMA_VERSION) {
+      v++;
+      if (MIGRATION_STEPS[v]) await MIGRATION_STEPS[v]();
+    }
+    if (s.schemaVersion !== SCHEMA_VERSION) {
+      s.schemaVersion = SCHEMA_VERSION;
+      await saveSettings(s);
+    }
+    return s;
   }
 
   // ---- Klassen -------------------------------------------------------------
@@ -216,6 +266,7 @@
 
   // ---- Noten (Einzelnoten) -------------------------------------------------
   function neueNote(data) {
+    const datum = new Date().toISOString().slice(0, 10);
     return Object.assign({
       id: uid(),
       klasseId: null,
@@ -223,7 +274,8 @@
       kategorieId: null,
       wert: null,           // Zahl 1..6 (mit Nachkomma, z. B. 2.3)
       titel: "",
-      datum: new Date().toISOString().slice(0, 10),
+      datum,
+      halbjahr: halbjahrAusDatum(datum),   // 1 | 2; Aufrufer setzen i. d. R. settings.aktuellesHalbjahr
       createdAt: now()
     }, data || {});
   }
@@ -260,6 +312,7 @@
       typ,
       punkte,           // zum Zeitpunkt der Erfassung eingefrorene Punktzahl
       timestamp: now(),
+      halbjahr: halbjahrAusDatum(new Date().toISOString().slice(0, 10)),
       notiz: ""
     };
   }
@@ -378,6 +431,7 @@
   global.Store = {
     uid, now,
     EVENT_TYPES, EVENT_TYPE_MAP, DEFAULT_SETTINGS,
+    SCHEMA_VERSION, migrateSchema, halbjahrAusDatum,
     getSettings, saveSettings,
     Klassen, neueKlasse,
     Schueler, neuerSchueler,

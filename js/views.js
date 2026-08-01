@@ -11,12 +11,29 @@
     klasseId: null,
     tab: "schueler",       // schueler | noten | kategorien | sitzplan | auswertung
     auswertungRange: "alle",
+    notenHalbjahr: "",      // "1" | "2" | "jahr" ("" = Default aus Einstellungen)
+    auswertungHalbjahr: "", // dto. für die Mitarbeits-Auswertung
     // Besprechung
     selectedSchuelerId: null,
     // Tracker (flüchtig)
     tracker: null,
     settings: null
   };
+
+  // Liest den Halbjahr-Filter ("1" | "2" | "jahr"); Default = Einstellung.
+  // Rückgabe: 1 | 2 | null (null = ganzes Jahr).
+  function hjFilter(key) {
+    if (!state[key]) state[key] = String((state.settings && state.settings.aktuellesHalbjahr) || 1);
+    return state[key] === "jahr" ? null : parseInt(state[key], 10);
+  }
+
+  // Filter-Tabs „1. HJ · 2. HJ · Jahr“ (gemeinsames Markup für Noten/Auswertung)
+  function hjTabsHTML(key, action) {
+    const aktuell = state[key] || String((state.settings && state.settings.aktuellesHalbjahr) || 1);
+    return [["1", "1. HJ"], ["2", "2. HJ"], ["jahr", "Jahr"]].map(([id, l]) =>
+      '<button class="tab ' + (aktuell === id ? "active" : "") + '" data-action="' + action + '" data-hj="' + id + '">' + l + "</button>"
+    ).join("");
+  }
 
   // ---- Navigation ----------------------------------------------------------
   async function go(view, params) {
@@ -211,6 +228,7 @@
 
     const notenBySchueler = {};
     notenAll.forEach((n) => (notenBySchueler[n.schuelerId] = notenBySchueler[n.schuelerId] || []).push(n));
+    const hj = hjFilter("notenHalbjahr");
 
     const kopf = "<tr><th>Name</th>" + kats.map((c) =>
       '<th class="num">' + UI.esc(c.name) + '<br><span class="muted" style="text-transform:none;font-weight:400">' +
@@ -218,7 +236,7 @@
     ).join("") + '<th class="num">Gesamt</th></tr>';
 
     const body = schueler.map((s) => {
-      const res = Calc.berechneSchueler(kats, notenBySchueler[s.id] || [], k, state.settings.rundung);
+      const res = Calc.berechneSchueler(kats, notenBySchueler[s.id] || [], k, state.settings.rundung, hj);
       const zellen = kats.map((c) => {
         const ke = res.kategorien.find((x) => x.id === c.id);
         const hat = ke && ke.schnitt !== null;
@@ -239,6 +257,7 @@
 
     return (
       '<div class="hstack wrap" style="margin-bottom:var(--gap)">' +
+        '<div class="tabs" style="margin:0">' + hjTabsHTML("notenHalbjahr", "noten-hj") + "</div>" +
         '<div class="grow muted">Tippe auf eine Zelle, um Einzelnoten zu erfassen. Tippe auf den Namen für die Berechnung.</div>' +
         '<button class="btn small" data-action="export-noten">Noten-CSV</button>' +
         '<button class="btn small" data-action="export-einzelnoten">Einzelnoten-CSV</button>' +
@@ -286,7 +305,9 @@
     const now = Store.now();
     const ranges = { alle: 0, "30": 30 * 86400000, "7": 7 * 86400000 };
     const von = state.auswertungRange === "alle" ? 0 : now - ranges[state.auswertungRange];
-    const ausw = Calc.auswertungMitarbeit(ereignisse, state.settings, von, now);
+    const hj = hjFilter("auswertungHalbjahr");
+    const ereignisseGefiltert = hj ? ereignisse.filter((e) => !e.halbjahr || e.halbjahr === hj) : ereignisse;
+    const ausw = Calc.auswertungMitarbeit(ereignisseGefiltert, state.settings, von, now);
 
     const rangeBtns = [["alle", "Gesamt"], ["30", "30 Tage"], ["7", "7 Tage"]].map(([id, l]) =>
       '<button class="tab ' + (state.auswertungRange === id ? "active" : "") + '" data-action="ausw-range" data-range="' + id + '">' + l + "</button>"
@@ -311,6 +332,7 @@
     return (
       '<div class="hstack wrap" style="margin-bottom:var(--gap)">' +
         '<div class="tabs" style="margin:0">' + rangeBtns + "</div>" +
+        '<div class="tabs" style="margin:0">' + hjTabsHTML("auswertungHalbjahr", "ausw-hj") + "</div>" +
         '<div class="grow"></div>' +
         '<button class="btn small" data-action="export-events">Mitarbeit-CSV</button>' +
       "</div>" +
@@ -517,7 +539,7 @@
     const s = schueler[idx];
     if (!s) { state.selectedSchuelerId = null; return ViewBesprechung(); }
     const notenS = notenAll.filter((n) => n.schuelerId === s.id);
-    const res = Calc.berechneSchueler(kats, notenS, k, state.settings.rundung);
+    const res = Calc.berechneSchueler(kats, notenS, k, state.settings.rundung, hjFilter("notenHalbjahr"));
 
     const body =
       '<div class="discussion">' +
@@ -526,6 +548,8 @@
           '<div class="who">' + UI.esc(UI.vollerName(s)) + "</div>" +
           '<button class="iconbtn" data-action="besprechung-next"' + (idx >= schueler.length - 1 ? " disabled" : "") + ">›</button>" +
         "</div>" +
+        '<div class="hstack" style="justify-content:center;margin-bottom:10px"><div class="tabs" style="margin:0">' +
+          hjTabsHTML("notenHalbjahr", "noten-hj") + "</div></div>" +
         '<div class="card">' +
           '<div class="big-grade" style="color:' + Calc.noteFarbe(res.gesamt) + '">' +
             (res.gesamt !== null ? Calc.formatNote(res.gesamt, state.settings.rundung === "ganze" ? 0 : 1) : "–") + "</div>" +
@@ -590,6 +614,10 @@
           { value: "keine", label: "Zwei Nachkommastellen (2,33)" },
           { value: "ganze", label: "Ganze Note (2)" }
         ]}) +
+        UI.field("Aktuelles Halbjahr", "aktuellesHalbjahr", s.aktuellesHalbjahr, { type: "select", options: [
+          { value: "1", label: "1. Halbjahr" },
+          { value: "2", label: "2. Halbjahr" }
+        ], hint: "Neue Noten und Mitarbeits-Ereignisse werden diesem Halbjahr zugeordnet." }) +
       "</div>" +
       '<div class="card"><h2>Mitarbeit – Punkte je Ereignistyp</h2>' + punkte +
       "</div>" +
@@ -610,11 +638,18 @@
         "</div>" +
       "</div>" +
       '<div class="card"><h2>Über</h2><p class="muted">Noten-Fritze · lokale PWA · keine Cloud, keine Konten. ' +
-        "Schema-Version " + DB.DB_VERSION + ".</p></div>";
+        "Daten-Version " + Store.SCHEMA_VERSION + " · DB-Schema " + DB.DB_VERSION + ".</p></div>";
 
     return { topbar, body, mount: () => {
       const sel = UI.$("#f-rundung");
       if (sel) sel.addEventListener("change", async () => { s.rundung = sel.value; await Store.saveSettings(s); UI.toast("Gespeichert"); });
+      const selHj = UI.$("#f-aktuellesHalbjahr");
+      if (selHj) selHj.addEventListener("change", async () => {
+        s.aktuellesHalbjahr = parseInt(selHj.value, 10) || 1;
+        await Store.saveSettings(s);
+        state.notenHalbjahr = ""; state.auswertungHalbjahr = ""; // Filter-Defaults neu ziehen
+        UI.toast("Halbjahr gespeichert");
+      });
       UI.$all("[data-heat-punkt]").forEach((inp) => inp.addEventListener("change", async () => {
         const key = inp.getAttribute("data-heat-punkt");
         if (key === "einfach") s.heatPunkteEinfach = Math.max(0, parseInt(inp.value, 10) || 0);
@@ -762,7 +797,8 @@
       return noten.map((n) =>
         '<div class="line" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line)">' +
           '<span class="note-badge" style="background:' + Calc.noteFarbe(n.wert) + '">' + Calc.formatNote(n.wert) + "</span>" +
-          '<span class="grow">' + UI.esc(n.titel || "") + ' <span class="muted">' + UI.esc(n.datum) + "</span></span>" +
+          '<span class="grow">' + UI.esc(n.titel || "") + ' <span class="muted">' + UI.esc(n.datum) +
+            (n.halbjahr ? " · " + n.halbjahr + ". HJ" : "") + "</span></span>" +
           '<button class="iconbtn plain danger-text" data-del="' + n.id + '">🗑</button>' +
         "</div>"
       ).join("");
@@ -798,7 +834,8 @@
       const val = Calc.parseNote(inp.value);
       if (val === null) { UI.toast("Bitte gültige Note 1–6 eingeben"); inp.focus(); return; }
       const titel = box.querySelector("#new-title").value.trim();
-      const n = Store.neueNote({ klasseId: k.id, schuelerId: sid, kategorieId: cid, wert: val, titel });
+      const n = Store.neueNote({ klasseId: k.id, schuelerId: sid, kategorieId: cid, wert: val, titel,
+        halbjahr: parseInt(state.settings.aktuellesHalbjahr, 10) || 1 });
       await Store.Noten.save(n);
       noten.push(n);
       inp.value = ""; box.querySelector("#new-title").value = "";
@@ -812,7 +849,7 @@
   async function studentDetailDialog(k, sid) {
     const s = await Store.Schueler.get(sid);
     const [kats, notenAll] = await Promise.all([Store.Kategorien.byKlasse(k.id), Store.Noten.byKlasse(k.id)]);
-    const res = Calc.berechneSchueler(kats, notenAll.filter((n) => n.schuelerId === sid), k, state.settings.rundung);
+    const res = Calc.berechneSchueler(kats, notenAll.filter((n) => n.schuelerId === sid), k, state.settings.rundung, hjFilter("notenHalbjahr"));
     UI.modal({ title: UI.vollerName(s), bodyHTML: breakdownHTML(res), buttons: [{ label: "Schließen", className: "primary" }] });
   }
 
@@ -998,6 +1035,8 @@
     "besprechung-prev": async () => { await besprechungStep(-1); },
 
     "ausw-range": (el) => { state.auswertungRange = el.getAttribute("data-range"); render(); },
+    "noten-hj": (el) => { state.notenHalbjahr = el.getAttribute("data-hj"); render(); },
+    "ausw-hj": (el) => { state.auswertungHalbjahr = el.getAttribute("data-hj"); render(); },
 
     // Einstellungen / Backup
     "backup-export": async () => {
@@ -1048,6 +1087,7 @@
           : 0;
     const e = Store.neuesEreignis(state.klasseId, sid, typ, punkte);
     e.heatDelta = heatDelta;
+    e.halbjahr = parseInt(state.settings.aktuellesHalbjahr, 10) || 1;
     await Store.Ereignisse.save(e);
 
     const t = state.tracker;

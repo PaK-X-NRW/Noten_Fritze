@@ -11,6 +11,8 @@
       await DB.open();
       // Beim allerersten Start Demo-Daten anlegen (nur wenn DB leer ist)
       await Store.seedDemoData();
+      // Daten-Migrationen (schemaVersion) vor dem ersten Render ausführen
+      await Store.migrateSchema();
     } catch (e) {
       console.error("DB-Fehler:", e);
       document.getElementById("view").innerHTML =
