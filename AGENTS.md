@@ -69,12 +69,20 @@ Wichtige Muster:
 IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
 
 - **Kaskadierung beachten:** Löschen einer Klasse/eines Schülers muss abhängige
-  Datensätze mitlöschen (Noten, Ereignisse, Sitzplatz-Zuweisung). Bestehende
-  Logik in `store.js` wiederverwenden, nicht umgehen.
-- **Schema-Änderungen sind additiv:** Neuen Store/Index → `DB_VERSION` in
-  `db.js` erhöhen und in `onupgradeneeded` ergänzen. Bestehende Stores nie
-  zerstörerisch umbauen; Daten der Nutzer sind heilig.
+  Datensätze mitlöschen (Noten, Ereignisse, Abwesenheiten, Sitzplatz-Zuweisung).
+  Bestehende Logik in `store.js` wiederverwenden, nicht umgehen.
+- **Versionierung ist zweistufig:**
+  1. **Struktur** (Stores/Indizes): `DB_VERSION` in `db.js` erhöhen, Store in
+     `STORES` ergänzen – `onupgradeneeded` legt Fehlendes additiv an.
+     Bestehende Stores nie zerstörerisch umbauen; Daten der Nutzer sind heilig.
+  2. **Datenform** (neue/geänderte Felder): `SCHEMA_VERSION` in `store.js`
+     erhöhen und einen Schritt in `MIGRATION_STEPS` (Schlüssel = Ziel-Version)
+     ergänzen. `migrateSchema()` läuft beim App-Start kaskadiert
+     (v1→v2→v3 …). Neue Felder bekommen zusätzlich immer Defaults
+     (Factorys + `getSettings`-Merge), damit alte Datensätze nicht crashen.
 - IDs via `Store`-internem `uid()` (crypto.randomUUID mit Fallback).
+- Tages-Zuordnungen (Abwesenheiten, aktive Tage) nutzen das **lokale** Datum
+  (`Store.datumLokal()` / `Calc.tagVonTs()`), nicht `toISOString()` (UTC).
 
 ## 5. Service Worker – Cache-Falle
 
@@ -97,6 +105,16 @@ die häufigste Ursache für „mein Fix kommt nicht an". Neue Dateien zusätzlic
   hartcodierten Typen-Listen in Views duplizieren.
 - Heatmap (0–100 Punkte) ist **bewusst unabhängig** von den Mitarbeitspunkten –
   diese Trennung nicht verwässern.
+- **Halbjahr:** Noten und Ereignisse tragen `halbjahr` (1|2), beim Anlegen aus
+  `settings.aktuellesHalbjahr`. `Calc.berechneSchueler` und die Auswertungen
+  filtern optional danach; Datensätze ohne das Feld fließen immer ein.
+- **Stundenplan/Tracker:** Der Tracker fragt beim Start Einzel-/Doppelstunde ab
+  (`Calc.trackerSession`), zeigt die Restzeit und skaliert den Heatmap-Verfall
+  auf die tatsächliche Stundendauer (`heatVerfallMinuten` gilt bezogen auf eine
+  45-Min-Stunde).
+- **Abwesenheiten** (Store `abwesenheiten`, Toggle pro Schüler/Tag): eingefrorene
+  Heatmap, deaktivierte Ereignis-Buttons, und der Tag zählt in
+  `Calc.auswertungMitarbeit` weder als aktiv noch bringt er Punkte.
 
 ## 7. Testen & Verifizieren
 

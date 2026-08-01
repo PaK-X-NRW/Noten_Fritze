@@ -65,18 +65,25 @@ schueler       { id, klasseId, vorname, nachname, bemerkung, sortIndex, ... }
 kategorien     { id, klasseId, name, art('schriftlich'|'sonstige'),
                  gewichtung, sortIndex }
 noten          { id, klasseId, schuelerId, kategorieId, wert(1..6),
-                 titel, datum(YYYY-MM-DD), createdAt }
+                 titel, datum(YYYY-MM-DD), halbjahr(1|2), createdAt }
 sitzplaene     { klasseId, rows, cols, seats:[{id,row,col,schuelerId}] }
-ereignisse     { id, klasseId, schuelerId, typ, punkte, timestamp, notiz }
-einstellungen  { key:'app', rundung, mitarbeitPunkte, mitarbeitSchwellen,
+ereignisse     { id, klasseId, schuelerId, typ, punkte, timestamp, halbjahr(1|2), notiz }
+abwesenheiten  { id(schuelerId_datum), klasseId, schuelerId, datum(YYYY-MM-DD), createdAt }
+einstellungen  { key:'app', schemaVersion, aktuellesHalbjahr(1|2), stundenplan,
+                 rundung, mitarbeitPunkte, mitarbeitSchwellen,
                  heatPunkteEinfach, heatPunkteGut, heatPunkteSehrGut,
                  heatStartWert, heatVerfallPunkte, heatVerfallMinuten, anteile }
 ```
 
 - **Integrität:** Löschen einer Klasse/eines Schülers löscht kaskadierend alle
-  abhängigen Datensätze (Noten, Ereignisse, Sitzplatz-Zuweisung).
-- **Versionierbarkeit:** `DB_VERSION` + `onupgradeneeded` legen Stores/Indizes an;
-  spätere Migrationen additiv ergänzen. Zusätzlich JSON-Voll-Backup als Sicherung.
+  abhängigen Datensätze (Noten, Ereignisse, Abwesenheiten, Sitzplatz-Zuweisung).
+- **Versionierbarkeit (zweistufig):** `DB_VERSION` + `onupgradeneeded` in `db.js`
+  versioniert die **Struktur** (Stores/Indizes, additiv). Zusätzlich versioniert
+  `schemaVersion` im einstellungen-Store die **Datenform**: eine kaskadierte
+  Migrations-Pipeline in `store.js` (`MIGRATION_STEPS`, Schlüssel = Ziel-Version)
+  transformiert Datensätze beim App-Start Schritt für Schritt (v1→v2→v3 …).
+  Neue Felder bekommen immer Defaults, damit alte Datensätze nicht crashen.
+  Zusätzlich JSON-Voll-Backup als Sicherung.
 
 ## 4. Rechenlogik – gewichtete Gesamtnote
 
@@ -96,6 +103,11 @@ oder ganze Note. Noteneingabe akzeptiert `2`, `2,3`, `2.3`, `2+` (→ 1,7), `2-`
 Die Aufschlüsselung ist im **Besprechungsmodus** und im Schüler-Detail transparent
 sichtbar (Kategorie-Ø, Gewichte, Gruppen-Ø, Gesamt).
 
+**Halbjahre:** Jede Note (und jedes Mitarbeits-Ereignis) gehört zum 1. oder
+2. Halbjahr – beim Anlegen aus der Einstellung „Aktuelles Halbjahr“ übernommen.
+Noten-Tab, Besprechungsmodus und Mitarbeits-Auswertung können je Halbjahr oder
+fürs ganze Jahr rechnen (Filter „1. HJ · 2. HJ · Jahr“).
+
 ## 5. Mitarbeits-Tracker & Punktesystem
 
 - **Ereignistypen** (Standardpunkte, konfigurierbar in den Einstellungen):
@@ -112,6 +124,15 @@ sichtbar (Kategorie-Ø, Gewichte, Gruppen-Ø, Gesamt).
   (farbcodiert, mit Tages-Zähler je Typ). Ein Tap auf den passenden Button erzeugt
   sofort das Ereignis mit Zeitstempel – kein Umweg über eine Auswahlleiste.
   **Undo** über Toast oder Button.
+- **Stundenplan & Stundendauer:** In den Einstellungen liegt ein Wochen-Stundenplan
+  (Mo–Fr, Start/Ende je Stunde). Beim Tracker-Start wird nach **Einzel- oder
+  Doppelstunde** gefragt; daraus und aus dem Stundenplan zeigt die Topbar die
+  **Restzeit** der laufenden Stunde. Der Heatmap-Verfall (Y Punkte pro X Minuten,
+  bezogen auf eine 45-Min-Stunde) skaliert auf die tatsächliche Stundendauer.
+- **Abwesenheit:** Schüler/innen lassen sich für den Tag als krank/abwesend markieren
+  (Toggle in Tracker-Kachel und Sitzplan, rückgängig machbar). Abwesende: Kachel
+  ausgegraut, Ereignis-Buttons deaktiviert, Heatmap-Wert eingefroren, und der Tag
+  fließt nicht in die Epochalnoten-Auswertung ein.
 - **Heatmap:** Farbe je Platz fließend grün→rot, aber **unabhängig** von den
   Mitarbeitspunkten. Dafür läuft ein eigenes Heatmap-Punktesystem pro Schüler/in:
   Wortmeldung / Gute / Sehr gute Meldung bringen jeweils frei einstellbare Punkte;
@@ -121,7 +142,8 @@ sichtbar (Kategorie-Ø, Gewichte, Gruppen-Ø, Gesamt).
   Störung oder fehlende HA beeinflussen die Heatmap nicht.
 - **Epochalnote (Vorschlag):** Summe der Punkte / Anzahl aktiver Tage = Ø-Punkte/Tag,
   gemappt über konfigurierbare Schwellen auf eine Note 1–6. Bewusst als **Vorschlag**
-  markiert (Auswertungs-Tab, pro Zeitraum: Gesamt / 30 Tage / 7 Tage).
+  markiert (Auswertungs-Tab, pro Zeitraum: Gesamt / 30 Tage / 7 Tage, je Halbjahr
+  filterbar). Tage mit Abwesenheit zählen nicht als aktive Tage.
 
 ## 6. CSV-Schema
 
@@ -130,7 +152,7 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
 
 - **Schülerliste** (`schueler_<Klasse>.csv`): `Vorname, Nachname, Bemerkung`
 - **Noten (breit)** (`noten_<Klasse>.csv`): `Vorname, Nachname, <Kategorie> (Ø)…, Gesamtnote`
-- **Einzelnoten (lang)** (`einzelnoten_<Klasse>.csv`): `Vorname, Nachname, Kategorie, Art, Titel, Note, Datum`
+- **Einzelnoten (lang)** (`einzelnoten_<Klasse>.csv`): `Vorname, Nachname, Kategorie, Art, Titel, Note, Datum, Halbjahr`
 - **Mitarbeit** (`mitarbeit_<Klasse>.csv`): `Vorname, Nachname, Ereignistyp, Punkte, Zeitpunkt`
 - **Import:** Schülerlisten per CSV-Datei **oder** eingefügter Namensliste
   („Nachname, Vorname“ bzw. „Vorname Nachname“).
@@ -144,22 +166,28 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
 - **Klasse** – Tabs: *Schüler/innen · Noten · Kategorien · Sitzplan · Mitarbeit*.
   Oben schnell erreichbar: **Tracker**, **Besprechung**, Bearbeiten.
 - **Noten** – Matrix Schüler × Kategorie mit farbigen Ø-Badges + Gesamtnote; Zelle
-  antippen → Einzelnoten erfassen; Namen antippen → Berechnung.
+  antippen → Einzelnoten erfassen; Namen antippen → Berechnung. Halbjahr-Filter
+  (1. HJ · 2. HJ · Jahr).
 - **Sitzplan** – Raster (Reihen/Spalten frei), Plätze antippen zum Zuweisen,
-  „Automatisch belegen“.
-- **Tracker** – Kacheln je Schüler/in mit 5 direkten Ereignis-Buttons (Wortmeldung,
+  „Automatisch belegen“, Abwesenheits-Toggle (🤒) je Platz.
+- **Tracker** – Start-Dialog (Einzel-/Doppelstunde), Restzeit in der Topbar,
+  Kacheln je Schüler/in mit 5 direkten Ereignis-Buttons (Wortmeldung,
   Gute/Sehr gute Meldung, Störung, Fehlende HA), Tages-Zähler je Typ, Undo,
-  Heatmap-Hintergrund + Legende.
+  Abwesenheits-Toggle, Heatmap-Hintergrund + Legende.
 - **Besprechungsmodus** – ein/e Schüler/in einzeln, groß; nur deren Daten sichtbar
-  (Datenschutz bei der Notenbesprechung), Vor/Zurück.
-- **Einstellungen** – Rundung, Mitarbeitspunkte, Heatmap-Punktverfall, Backup/Restore,
+  (Datenschutz bei der Notenbesprechung), Vor/Zurück, Halbjahr-Filter.
+- **Einstellungen** – Rundung, aktuelles Halbjahr, Wochen-Stundenplan,
+  Mitarbeitspunkte, Heatmap-Punktverfall, Backup/Restore,
   Demo-Daten, alles löschen.
 
 ## 8. MVP-Funktionsumfang
 
 **Enthalten (funktionsfähig):**
-Klassen/Schüler/Kategorien CRUD · Einzelnoten & gewichtete Gesamtnote · Sitzplan-Editor ·
-Tracker mit Tap/Undo/Heatmap · Mitarbeits-Auswertung + Notenvorschlag · Besprechungsmodus ·
+Klassen/Schüler/Kategorien CRUD · Einzelnoten & gewichtete Gesamtnote ·
+Halbjahre (1./2. HJ) für Noten & Mitarbeit · Sitzplan-Editor ·
+Tracker mit Stundenplan/Restzeit (Einzel-/Doppelstunde), Tap/Undo/Heatmap ·
+Abwesenheiten (tageweise, beeinflusst Heatmap & Epochalnote) ·
+Mitarbeits-Auswertung + Notenvorschlag · Besprechungsmodus ·
 CSV-Export (4 Arten) · CSV-Import Schüler · JSON-Voll-Backup · PWA/Offline · Demo-Daten.
 
 **Bewusst später (klar als Ausbau markiert):**
