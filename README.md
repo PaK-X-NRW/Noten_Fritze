@@ -39,7 +39,13 @@ Sie können die App als PWA installieren („Zum Home-Bildschirm hinzufügen") u
   - `calc.js` – reine Rechenlogik (Noten, Mitarbeit, Farben) – frei von DOM/DB
   - `csv.js` – CSV-Export/Import
   - `ui.js` – UI-Bausteine (Modal, Toast, Formfelder)
-  - `views.js` – Screens, Routing, Interaktion
+  - `views.core.js` – Views-Kern (State, Routing, Render-Schleife)
+  - `views.home-klasse.js` – Home + Klassenansicht mit Tabs
+  - `views.tracker.js` – Mitarbeits-Tracker
+  - `views.besprechung.js` – Besprechungsmodus
+  - `views.einstellungen.js` – Einstellungen inkl. Stundenplan
+  - `views.dialoge.js` – modale Dialoge
+  - `views.js` – Aktions-Dispatcher (Action-Map, Delegation)
   - `app.js` – Bootstrap
 - **PWA:** `manifest.webmanifest` + `service-worker.js` (App-Shell-Cache) für
   Offline-Betrieb und „Zum Home-Bildschirm hinzufügen“. Der Service Worker aktiviert
@@ -210,7 +216,13 @@ Noten_Fritze/
    ├─ calc.js               Noten-/Mitarbeitslogik
    ├─ csv.js                CSV-Export/Import
    ├─ ui.js                 Modal/Toast/Formfelder
-   ├─ views.js              Screens + Routing
+   ├─ views.core.js         Views-Kern (State, Routing, Render)
+   ├─ views.home-klasse.js  Home + Klassenansicht mit Tabs
+   ├─ views.tracker.js      Mitarbeits-Tracker
+   ├─ views.besprechung.js  Besprechungsmodus
+   ├─ views.einstellungen.js Einstellungen inkl. Stundenplan
+   ├─ views.dialoge.js      modale Dialoge
+   ├─ views.js              Aktions-Dispatcher (Action-Map)
    └─ app.js                Bootstrap
 ```
 

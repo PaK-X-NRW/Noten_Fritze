@@ -46,13 +46,27 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/calc.js` | `Calc` | Reine Rechenlogik (Noten, Mitarbeit, Heatmap) – **frei von DOM/DB** |
 | `js/csv.js` | `CSV` | CSV-Export/Import (UTF-8 mit BOM) |
 | `js/ui.js` | `UI` | UI-Bausteine: Modal, Toast, Formfelder, `esc`, `$`/`$all` |
-| `js/views.js` | `Views` | Screens, Routing, Interaktion (Aktions-Delegation) |
+| `js/views.core.js` | `Views` | Views-Kern: State, Navigation (`go`), Render-Schleife (`render`) |
+| `js/views.home-klasse.js` | `Views` | Home (Klassenübersicht) + Klassenansicht mit Tabs |
+| `js/views.tracker.js` | `Views` | Mitarbeits-Tracker (Kacheln, Heatmap, Restzeit, Start-Dialog) |
+| `js/views.besprechung.js` | `Views` | Besprechungsmodus + Noten-Aufschlüsselung (`breakdownHTML`) |
+| `js/views.einstellungen.js` | `Views` | Einstellungen inkl. Stundenplan |
+| `js/views.dialoge.js` | `Views` | Modale Dialoge (Klasse, Schüler, Kategorie, Noten, Sitzplatz, Importe) |
+| `js/views.js` | `Views` | Aktions-Dispatcher: Action-Map + zentrale Delegation |
 | `js/app.js` | – | Bootstrap (DB öffnen, Demo-Daten, erster Render, SW-Registrierung) |
 
 Wichtige Muster:
 
 - Jede Datei ist eine **IIFE** mit `"use strict";` und hängt am Ende ihr
   Namespace-Objekt an `window` (`(function (global) { ... })(window)`).
+- Die Views sind auf mehrere Dateien aufgeteilt, die sich **denselben**
+  Namespace teilen: `views.core.js` legt `window.Views` an (State, `go`,
+  `render`), die Module `views.*.js` hängen ihre Funktionen per
+  `Object.assign(global.Views, { ... })` an und holen sich Kern-Funktionen
+  per `const { state, go, render } = global.Views;` am Dateianfang.
+  `views.js` (Dispatcher) lädt **zuletzt** und destrukturiert alles, was die
+  Action-Map braucht – aufgerufen wird erst zur Laufzeit per Klick.
+  `render()` löst die Views über die Registry auf (`api.ViewHome()`).
 - Jede Datei beginnt mit einem **Header-Kommentarblock** (`/* ===...`), der
   Zweck und Inhalt beschreibt. Bei neuen Dateien dieses Format übernehmen.
 - HTML wird als String gebaut. **Nutzerdaten immer mit `UI.esc()` escapen**,

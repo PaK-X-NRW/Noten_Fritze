@@ -3,7 +3,7 @@
    Cache-first für die statischen Dateien. Nutzdaten liegen in IndexedDB
    und werden vom Service Worker nicht angefasst.
    ========================================================================= */
-const CACHE = "noten-fritze-v6";
+const CACHE = "noten-fritze-v7";
 const ASSETS = [
   "./",
   "./index.html",
@@ -13,6 +13,12 @@ const ASSETS = [
   "./js/calc.js",
   "./js/csv.js",
   "./js/ui.js",
+  "./js/views.core.js",
+  "./js/views.home-klasse.js",
+  "./js/views.tracker.js",
+  "./js/views.besprechung.js",
+  "./js/views.einstellungen.js",
+  "./js/views.dialoge.js",
   "./js/views.js",
   "./js/app.js",
   "./manifest.webmanifest",
