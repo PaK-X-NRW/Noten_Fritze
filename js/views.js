@@ -834,6 +834,7 @@
     UI.$all("[data-pick]", m.box).forEach((b) => b.addEventListener("click", async () => {
       const sid = b.getAttribute("data-pick");
       plan.seats.forEach((x) => { if (x.schuelerId === sid) x.schuelerId = null; }); // vorher woanders entfernen
+      seat.schuelerId = sid; // auf gewählten Platz setzen
       await Store.Sitzplan.save(plan); m.close(); render();
     }));
     const clr = m.box.querySelector("#seat-clear");
