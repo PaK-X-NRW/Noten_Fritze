@@ -65,11 +65,29 @@
   }
 
   // ---- Standard-Einstellungen ----------------------------------------------
+  // Default-Stundenplan: Mo–Fr je 6 Stunden à 45 Min ab 08:00
+  // (5-Min-Pausen, nach der 2. und 4. Stunde je 15 Min).
+  function defaultStundenplan() {
+    const starts = ["08:00", "08:50", "09:55", "10:45", "11:35", "12:25"];
+    const plan = {};
+    for (let tag = 1; tag <= 5; tag++) {
+      plan[String(tag)] = starts.map((start, i) => {
+        const endeMin = parseInt(start.slice(0, 2), 10) * 60 + parseInt(start.slice(3, 5), 10) + 45;
+        const ende = ("0" + Math.floor(endeMin / 60)).slice(-2) + ":" + ("0" + (endeMin % 60)).slice(-2);
+        return { nr: i + 1, start, ende };
+      });
+    }
+    return plan;
+  }
+
   const DEFAULT_SETTINGS = {
     key: "app",
-    schemaVersion: 2,
+    schemaVersion: 3,
     // Aktuelles Halbjahr (1 | 2) – neue Noten/Ereignisse werden damit getaggt
     aktuellesHalbjahr: 1,
+    // Wochen-Stundenplan: Schlüssel = Wochentag ("1"=Mo … "5"=Fr),
+    // Wert = Liste von { nr, start: "HH:MM", ende: "HH:MM" }
+    stundenplan: defaultStundenplan(),
     // Rundung der Gesamtnote: "keine" (2 NK), "eine" (1 NK), "ganze" (ganze Note)
     rundung: "eine",
     // Punkte je Ereignistyp (überschreibbar)
@@ -128,7 +146,7 @@
   // beim App-Start (app.js, vor dem ersten Render) ausgeführt.
   // Regel: Neue Felder bekommen immer Defaults (Factorys + getSettings-Merge),
   // damit auch nicht migrierte/alte Datensätze ohne das Feld funktionieren.
-  const SCHEMA_VERSION = 2;
+  const SCHEMA_VERSION = 3;
   const MIGRATION_STEPS = {
     // v1 -> v2: Noten und Ereignisse erhalten ein Halbjahr (1 | 2),
     // aus dem Datum abgeleitet (Aug–Jan = 1. HJ, Feb–Jul = 2. HJ).
@@ -141,6 +159,12 @@
         if (!e.halbjahr) e.halbjahr = halbjahrAusDatum(new Date(e.timestamp).toISOString().slice(0, 10));
       });
       await DB.bulkPut("ereignisse", ereignisse);
+    },
+    // v2 -> v3: Stundenplan in den Einstellungen. Der Default kommt über den
+    // getSettings-Merge dazu; dieser Schritt persistiert die Einstellungen
+    // inkl. Stundenplan (und dokumentiert den Versionsschritt).
+    3: async () => {
+      await saveSettings(await getSettings());
     }
   };
   async function migrateSchema() {
@@ -440,6 +464,7 @@
     Sitzplan, neuerSitzplan,
     Ereignisse, neuesEreignis,
     addHeatPoints, currentHeatPoints, normalisiereSchuelerHeat,
+    defaultStundenplan,
     exportAll, importAll, seedDemoData
   };
 })(window);

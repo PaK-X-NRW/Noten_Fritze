@@ -580,6 +580,44 @@
       "</div>";
   }
 
+  // ---- Stundenplan (Einstellungen) ------------------------------------------
+  const WOCHENTAGE = [["1", "Montag"], ["2", "Dienstag"], ["3", "Mittwoch"], ["4", "Donnerstag"], ["5", "Freitag"]];
+
+  function stundenplanHTML(s) {
+    const plan = s.stundenplan || {};
+    return WOCHENTAGE.map(([tag, label]) => {
+      const stunden = plan[tag] || [];
+      const rows = stunden.map((h, i) =>
+        '<div class="form-row" style="align-items:center">' +
+          '<span class="muted" style="width:26px">' + (i + 1) + ".</span>" +
+          '<input type="time" data-sp-tag="' + tag + '" data-sp-idx="' + i + '" data-sp-feld="start" value="' + UI.esc(h.start || "") + '">' +
+          '<span class="muted">–</span>' +
+          '<input type="time" data-sp-tag="' + tag + '" data-sp-idx="' + i + '" data-sp-feld="ende" value="' + UI.esc(h.ende || "") + '">' +
+          '<button class="iconbtn plain danger-text" data-action="sp-del" data-tag="' + tag + '" data-idx="' + i + '" title="Stunde entfernen">🗑</button>' +
+        "</div>"
+      ).join("");
+      return '<h3 style="margin:14px 0 4px">' + label + "</h3>" + rows +
+        '<button class="btn small" data-action="sp-add" data-tag="' + tag + '" style="margin-top:6px">＋ Stunde</button>';
+    }).join("");
+  }
+
+  // Speichert den Stundenplan aus den Einstellungen (Zeilen neu nummerieren).
+  async function saveStundenplan() {
+    const s = state.settings;
+    WOCHENTAGE.forEach(([tag]) => {
+      (s.stundenplan[tag] || []).forEach((h, i) => { h.nr = i + 1; });
+    });
+    await Store.saveSettings(s);
+  }
+
+  function hhmmZuMin(v) {
+    const p = String(v || "").split(":");
+    return (parseInt(p[0], 10) || 0) * 60 + (parseInt(p[1], 10) || 0);
+  }
+  function minZuHHMM(min) {
+    return ("0" + (Math.floor(min / 60) % 24)).slice(-2) + ":" + ("0" + (min % 60)).slice(-2);
+  }
+
   // =========================================================================
   //  EINSTELLUNGEN
   // =========================================================================
@@ -629,6 +667,10 @@
           '<input type="number" inputmode="numeric" style="width:110px" id="f-heatVerfallMinuten" value="' + s.heatVerfallMinuten + '" placeholder="X Minuten">' +
         "</div>" +
       "</div>" +
+      '<div class="card"><h2>Stundenplan</h2>' +
+        '<p class="muted">Der Tracker erkennt damit die laufende Stunde und ihre Restzeit.</p>' +
+        stundenplanHTML(s) +
+      "</div>" +
       '<div class="card"><h2>Datensicherung</h2><p class="muted">Alle Daten bleiben lokal im Browser. Sicherung als JSON-Datei empfohlen.</p>' +
         '<div class="btn-row">' +
           '<button class="btn" data-action="backup-export">Backup exportieren (JSON)</button>' +
@@ -670,6 +712,14 @@
       UI.$all("[data-punkt]").forEach((inp) => inp.addEventListener("change", async () => {
         s.mitarbeitPunkte[inp.getAttribute("data-punkt")] = parseInt(inp.value, 10) || 0;
         await Store.saveSettings(s); UI.toast("Punkte gespeichert");
+      }));
+      UI.$all("[data-sp-feld]").forEach((inp) => inp.addEventListener("change", async () => {
+        const tag = inp.getAttribute("data-sp-tag");
+        const idx = parseInt(inp.getAttribute("data-sp-idx"), 10);
+        const stunde = s.stundenplan && s.stundenplan[tag] && s.stundenplan[tag][idx];
+        if (!stunde) return;
+        stunde[inp.getAttribute("data-sp-feld")] = inp.value;
+        await Store.saveSettings(s); UI.toast("Stundenplan gespeichert");
       }));
     }};
   }
@@ -1037,6 +1087,26 @@
     "ausw-range": (el) => { state.auswertungRange = el.getAttribute("data-range"); render(); },
     "noten-hj": (el) => { state.notenHalbjahr = el.getAttribute("data-hj"); render(); },
     "ausw-hj": (el) => { state.auswertungHalbjahr = el.getAttribute("data-hj"); render(); },
+
+    // Stundenplan (Einstellungen)
+    "sp-add": async (el) => {
+      const s = state.settings;
+      const tag = el.getAttribute("data-tag");
+      if (!s.stundenplan) s.stundenplan = Store.defaultStundenplan();
+      const list = s.stundenplan[tag] = s.stundenplan[tag] || [];
+      // Neue Stunde: ans Ende der letzten (+ 5 Min Pause), 45 Min – sonst 08:00
+      const letzte = list[list.length - 1];
+      const startMin = letzte && letzte.ende ? hhmmZuMin(letzte.ende) + 5 : 8 * 60;
+      list.push({ nr: list.length + 1, start: minZuHHMM(startMin), ende: minZuHHMM(startMin + 45) });
+      await saveStundenplan(); render();
+    },
+    "sp-del": async (el) => {
+      const s = state.settings;
+      const tag = el.getAttribute("data-tag");
+      const idx = parseInt(el.getAttribute("data-idx"), 10);
+      if (s.stundenplan && s.stundenplan[tag]) s.stundenplan[tag].splice(idx, 1);
+      await saveStundenplan(); render();
+    },
 
     // Einstellungen / Backup
     "backup-export": async () => {
