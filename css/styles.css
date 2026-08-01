@@ -275,6 +275,11 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   font-size: 13px; font-weight: 800; box-shadow: var(--shadow);
 }
 .seat.heat { color: #14231f; }
+/* Abwesende Schüler: ausgegraut, Ereignis-Buttons deaktiviert */
+.seat.abwesend { opacity: .5; filter: grayscale(.8); }
+.seat .abw-btn { position: absolute; top: 2px; right: 2px; min-height: 28px; padding: 0 6px; z-index: 1; }
+.seat .abw-btn.aktiv, .typebtn.gear.aktiv { outline: 2px solid var(--accent); }
+.typebtn[disabled] { opacity: .45; pointer-events: none; }
 .seat .flash { position: absolute; inset: 0; border-radius: inherit; background: #fff; opacity: 0; }
 .seat.pulse .flash { animation: flash .4s ease; }
 @keyframes flash { from { opacity: .55; } to { opacity: 0; } }

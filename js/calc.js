@@ -112,13 +112,25 @@
   }
 
   // ---- Mitarbeit / Epochalnote ---------------------------------------------
+  // Lokales Tages-Datum (YYYY-MM-DD) eines Timestamps – Schlüssel für
+  // Tages-Zählungen und Abwesenheiten.
+  function tagVonTs(ts) {
+    const d = new Date(ts);
+    return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  }
+
   // Aggregiert Ereignisse je Schüler innerhalb eines Zeitraums.
   //   ereignisse: Array {schuelerId, typ, punkte, timestamp}
-  function auswertungMitarbeit(ereignisse, settings, vonTs, bisTs) {
+  //   abwesendTage: optional Set "schuelerId|YYYY-MM-DD" – Ereignisse an Tagen,
+  //   an denen der Schüler abwesend gemeldet war, fließen nicht in die
+  //   Auswertung ein (der Tag zählt weder als aktiv noch bringt er Punkte).
+  function auswertungMitarbeit(ereignisse, settings, vonTs, bisTs, abwesendTage) {
     const von = vonTs || 0, bis = bisTs || Store.now() + 1;
     const proSchueler = {};
     ereignisse.forEach((e) => {
       if (e.timestamp < von || e.timestamp > bis) return;
+      const tag = tagVonTs(e.timestamp);
+      if (abwesendTage && abwesendTage.has(e.schuelerId + "|" + tag)) return;
       const s = proSchueler[e.schuelerId] || (proSchueler[e.schuelerId] = {
         schuelerId: e.schuelerId, anzahl: 0, punkte: 0, letzte: 0,
         typen: {}, tage: {}
@@ -127,7 +139,6 @@
       s.punkte += (e.punkte != null ? e.punkte : (settings.mitarbeitPunkte[e.typ] || 0));
       s.letzte = Math.max(s.letzte, e.timestamp);
       s.typen[e.typ] = (s.typen[e.typ] || 0) + 1;
-      const tag = new Date(e.timestamp).toISOString().slice(0, 10);
       s.tage[tag] = true;
     });
     Object.values(proSchueler).forEach((s) => {

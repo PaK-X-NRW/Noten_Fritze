@@ -7,7 +7,8 @@
   "use strict";
 
   const DB_NAME = "noten-fritze";
-  const DB_VERSION = 1;
+  // v2: neuer Store "abwesenheiten" (Schüler tageweise als abwesend markieren)
+  const DB_VERSION = 2;
 
   // Definition der Object-Stores + Indizes. Zentral, damit Migrationen
   // (spätere DB_VERSION-Erhöhungen) übersichtlich bleiben.
@@ -25,6 +26,12 @@
                       { name: "klasseId", keyPath: "klasseId" },
                       { name: "schuelerId", keyPath: "schuelerId" },
                       { name: "timestamp", keyPath: "timestamp" }
+                    ] },
+    // Abwesenheiten: id = schuelerId + "_" + datum (YYYY-MM-DD, lokal)
+    abwesenheiten:{ keyPath: "id", indexes: [
+                      { name: "klasseId", keyPath: "klasseId" },
+                      { name: "schuelerId", keyPath: "schuelerId" },
+                      { name: "datum", keyPath: "datum" }
                     ] },
     einstellungen:{ keyPath: "key", indexes: [] }
   };

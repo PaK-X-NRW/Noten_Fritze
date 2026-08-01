@@ -269,14 +269,21 @@
 
   // ---- Tab: Sitzplan (Editor) ---------------------------------------------
   async function TabSitzplan(k) {
-    const [plan, schueler] = await Promise.all([Store.Sitzplan.get(k.id), Store.Schueler.byKlasse(k.id)]);
+    const [plan, schueler, abwList] = await Promise.all([
+      Store.Sitzplan.get(k.id), Store.Schueler.byKlasse(k.id),
+      Store.Abwesenheiten.byKlasseUndTag(k.id, Store.datumLokal())
+    ]);
     const sMap = {}; schueler.forEach((s) => (sMap[s.id] = s));
+    const abwMap = {}; abwList.forEach((a) => { abwMap[a.schuelerId] = true; });
     const belegt = plan.seats.filter((x) => x.schuelerId).length;
 
     const seats = plan.seats.map((seat) => {
       const s = seat.schuelerId ? sMap[seat.schuelerId] : null;
       if (s) {
-        return '<div class="seat" data-action="seat-assign" data-seat="' + seat.id + '">' +
+        const abw = !!abwMap[s.id];
+        return '<div class="seat' + (abw ? " abwesend" : "") + '" data-action="seat-assign" data-seat="' + seat.id + '">' +
+          '<button class="iconbtn plain abw-btn' + (abw ? " aktiv" : "") + '" data-action="seat-abwesend" data-id="' + s.id + '"' +
+            ' title="' + (abw ? "Wieder anwesend melden" : "Heute abwesend/krank") + '">🤒</button>' +
           '<div class="nm">' + UI.esc(s.vorname) + "</div><div class=\"sub\">" + UI.esc(s.nachname) + "</div></div>";
       }
       return '<div class="seat empty" data-action="seat-assign" data-seat="' + seat.id + '">＋</div>';
@@ -300,15 +307,17 @@
 
   // ---- Tab: Mitarbeit-Auswertung ------------------------------------------
   async function TabAuswertung(k) {
-    const [schueler, ereignisse] = await Promise.all([
-      Store.Schueler.byKlasse(k.id), Store.Ereignisse.byKlasse(k.id)
+    const [schueler, ereignisse, abwList] = await Promise.all([
+      Store.Schueler.byKlasse(k.id), Store.Ereignisse.byKlasse(k.id),
+      Store.Abwesenheiten.byKlasse(k.id)
     ]);
     const now = Store.now();
     const ranges = { alle: 0, "30": 30 * 86400000, "7": 7 * 86400000 };
     const von = state.auswertungRange === "alle" ? 0 : now - ranges[state.auswertungRange];
     const hj = hjFilter("auswertungHalbjahr");
     const ereignisseGefiltert = hj ? ereignisse.filter((e) => !e.halbjahr || e.halbjahr === hj) : ereignisse;
-    const ausw = Calc.auswertungMitarbeit(ereignisseGefiltert, state.settings, von, now);
+    const abwesendTage = new Set(abwList.map((a) => a.schuelerId + "|" + a.datum));
+    const ausw = Calc.auswertungMitarbeit(ereignisseGefiltert, state.settings, von, now, abwesendTage);
 
     const rangeBtns = [["alle", "Gesamt"], ["30", "30 Tage"], ["7", "7 Tage"]].map(([id, l]) =>
       '<button class="tab ' + (state.auswertungRange === id ? "active" : "") + '" data-action="ausw-range" data-range="' + id + '">' + l + "</button>"
@@ -337,7 +346,7 @@
         '<div class="grow"></div>' +
         '<button class="btn small" data-action="export-events">Mitarbeit-CSV</button>' +
       "</div>" +
-      '<p class="muted">Notenvorschlag = Ø Punkte pro aktivem Tag, gemappt über die Schwellen in den Einstellungen. Nur ein Vorschlag – bitte prüfen.</p>' +
+      '<p class="muted">Notenvorschlag = Ø Punkte pro aktivem Tag, gemappt über die Schwellen in den Einstellungen. Tage mit Abwesenheit zählen nicht. Nur ein Vorschlag – bitte prüfen.</p>' +
       '<div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Meld.</th><th class="num">Punkte</th><th class="num">Ø/Tag</th><th>Zuletzt</th><th class="num">Vorschlag</th><th>Aufschlüsselung</th></tr></thead><tbody>' + rows + "</tbody></table></div>"
     );
   }
@@ -347,8 +356,9 @@
   // =========================================================================
   async function ViewTracker() {
     const k = await Store.Klassen.get(state.klasseId);
-    const [plan, schueler, ereignisse] = await Promise.all([
-      Store.Sitzplan.get(k.id), Store.Schueler.byKlasse(k.id), Store.Ereignisse.byKlasse(k.id)
+    const [plan, schueler, ereignisse, abwList] = await Promise.all([
+      Store.Sitzplan.get(k.id), Store.Schueler.byKlasse(k.id), Store.Ereignisse.byKlasse(k.id),
+      Store.Abwesenheiten.byKlasseUndTag(k.id, Store.datumLokal())
     ]);
     const sMap = {}; schueler.forEach((s) => (sMap[s.id] = s));
 
@@ -367,9 +377,11 @@
     state.tracker = {
       openedAt: Store.now(),
       session: state.pendingSession || null,
-      counts, typeCounts, last, names, students: sMap, undoStack: [], heatTimer: null
+      counts, typeCounts, last, names, students: sMap, undoStack: [], heatTimer: null,
+      abwesend: {} // schuelerId -> true, wenn heute abwesend gemeldet
     };
     state.pendingSession = null;
+    abwList.forEach((a) => { state.tracker.abwesend[a.schuelerId] = true; });
 
     // Legende erklärt Farbe + Kurzlabel der Buttons auf den Kacheln
     const legende = Store.EVENT_TYPES.map((t) =>
@@ -431,15 +443,18 @@
     const s = seat.schuelerId ? sMap[seat.schuelerId] : null;
     if (!s) return '<div class="seat tracker empty">·</div>';
     const t = state.tracker;
+    const abwesend = !!(t.abwesend && t.abwesend[s.id]);
     const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, trackerVerfallMinuten(), state.settings.heatVerfallPunkte);
     const bg = Calc.heatFarbeDurchPunkte(heat.heatPoints);
     const total = t.counts[s.id] || 0;
     const tc = t.typeCounts[s.id] || {};
 
     // Pro Ereignistyp ein eigener Button direkt auf der Kachel
+    // (bei Abwesenheit deaktiviert – keine Ereignisse für abwesende Schüler)
     const buttons = Store.EVENT_TYPES.map((et) => {
       const c = tc[et.id] || 0;
-      return '<button class="typebtn" data-action="tracker-tap" data-sid="' + s.id + '" data-type="' + et.id + '" style="--c:' + et.farbe + '">' +
+      return '<button class="typebtn" data-action="tracker-tap" data-sid="' + s.id + '" data-type="' + et.id + '" style="--c:' + et.farbe + '"' +
+        (abwesend ? " disabled" : "") + '>' +
         '<span class="tlabel">' + UI.esc(et.kurz) + "</span>" +
         '<span class="tcount">' + (c ? c : "") + "</span>" +
       "</button>";
@@ -449,12 +464,18 @@
       '<span class="tlabel">⚙️</span>' +
       "</button>";
 
-    return '<div class="seat tracker heat" style="background:' + bg + '" data-sid="' + s.id + '" data-seat="' + seat.id + '">' +
+    // Toggle: Schüler für heute als krank/abwesend markieren (rückgängig machbar)
+    const abwToggle = '<button class="typebtn gear' + (abwesend ? " aktiv" : "") + '" data-action="tracker-abwesend" data-sid="' + s.id + '"' +
+      ' title="' + (abwesend ? "Wieder anwesend melden" : "Heute abwesend/krank") + '">' +
+      '<span class="tlabel">🤒</span>' +
+      "</button>";
+
+    return '<div class="seat tracker heat' + (abwesend ? " abwesend" : "") + '" style="background:' + bg + '" data-sid="' + s.id + '" data-seat="' + seat.id + '">' +
       '<div class="seat-head">' +
-        '<span class="nm">' + UI.esc(UI.vollerName(s)) + "</span>" +
+        '<span class="nm">' + UI.esc(UI.vollerName(s)) + (abwesend ? ' <span class="muted">(abwesend)</span>' : "") + "</span>" +
         '<span class="tcount-total"' + (total ? "" : ' style="visibility:hidden"') + ">Σ " + total + "</span>" +
       "</div>" +
-      '<div class="typebtns">' + buttons + heatEdit + "</div>" +
+      '<div class="typebtns">' + buttons + heatEdit + abwToggle + "</div>" +
     "</div>";
   }
 
@@ -472,6 +493,7 @@
       const sid = el.getAttribute("data-sid");
       const s = t.students && t.students[sid];
       if (!s) return;
+      if (t.abwesend && t.abwesend[sid]) return; // abwesend: Wert eingefroren
       const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, trackerVerfallMinuten(), state.settings.heatVerfallPunkte);
       el.style.background = Calc.heatFarbeDurchPunkte(heat.heatPoints);
     });
@@ -492,10 +514,41 @@
       if (cEl) cEl.textContent = tc[et.id] ? tc[et.id] : "";
     });
     const s = t.students && t.students[sid];
-    if (s) {
+    if (s && !(t.abwesend && t.abwesend[sid])) {
       const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, trackerVerfallMinuten(), state.settings.heatVerfallPunkte);
       seat.style.background = Calc.heatFarbeDurchPunkte(heat.heatPoints);
     }
+  }
+
+  // Baut eine einzelne Tracker-Kachel neu auf (z. B. nach Abwesenheits-Toggle).
+  async function refreshTrackerSeat(sid) {
+    const t = state.tracker; if (!t) return;
+    const seatEl = UI.$('#tracker-grid .seat[data-sid="' + sid + '"]');
+    if (!seatEl) return;
+    const plan = await Store.Sitzplan.get(state.klasseId);
+    const seat = plan.seats.find((x) => String(x.id) === String(seatEl.getAttribute("data-seat")));
+    if (!seat) return;
+    const tmp = document.createElement("div");
+    tmp.innerHTML = seatTrackerHTML(seat, t.students);
+    seatEl.replaceWith(tmp.firstElementChild);
+  }
+
+  // Schüler für heute als abwesend/anwesend umschalten (Toggle, persistiert).
+  async function trackerAbwesendToggle(sid) {
+    const t = state.tracker;
+    const istAbwesend = await Store.Abwesenheiten.toggle(state.klasseId, sid, Store.datumLokal());
+    // Heatmap-Uhr neu starten: der aktuelle Stand bleibt erhalten, aber die
+    // abwesende Zeit holt der Verfall nicht nach (eingefrorener Wert).
+    const s = t && t.students ? t.students[sid] : null;
+    if (s) {
+      const heat = Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, trackerVerfallMinuten(), state.settings.heatVerfallPunkte);
+      s.heatPoints = Math.round(heat.heatPoints);
+      s.heatLastDecayAt = Store.now();
+      await Store.Schueler.save(s);
+    }
+    if (t) t.abwesend[sid] = istAbwesend;
+    await refreshTrackerSeat(sid);
+    UI.toast((t && t.names && t.names[sid] ? t.names[sid] + " · " : "") + (istAbwesend ? "heute abwesend" : "wieder anwesend"));
   }
 
   function heatGainForType(typ) {
@@ -1124,6 +1177,11 @@
       plan.seats.forEach((s) => { s.schuelerId = null; });
       await Store.Sitzplan.save(plan); render();
     },
+    "seat-abwesend": async (el) => {
+      const istAbwesend = await Store.Abwesenheiten.toggle(state.klasseId, el.getAttribute("data-id"), Store.datumLokal());
+      render();
+      UI.toast(istAbwesend ? "Heute als abwesend markiert" : "Wieder anwesend gemeldet");
+    },
 
     // Tracker / Besprechung Navigation
     "open-tracker": () => trackerStartDialog(),
@@ -1131,6 +1189,7 @@
     "back-to-class": () => { stopHeatTimer(); go("klasse"); },
     "tracker-tap": (el) => trackerTap(el),
     "tracker-heat-edit": (el) => trackerHeatEditDialog(el.getAttribute("data-sid")),
+    "tracker-abwesend": (el) => trackerAbwesendToggle(el.getAttribute("data-sid")),
     "tracker-undo": () => trackerUndo(),
 
     "besprechung-pick": (el) => { state.selectedSchuelerId = el.getAttribute("data-sid"); render(); },
@@ -1200,6 +1259,7 @@
   // ---- Tracker: Tap & Undo -------------------------------------------------
   async function trackerTap(el) {
     const sid = el.getAttribute("data-sid");
+    if (state.tracker && state.tracker.abwesend && state.tracker.abwesend[sid]) return; // abwesend: keine Ereignisse
     const typ = el.getAttribute("data-type");
     const punkte = state.settings.mitarbeitPunkte[typ];
     const heatDelta = typ === "einfach"

@@ -56,6 +56,11 @@
   }
 
   // ---- Halbjahr ------------------------------------------------------------
+  // Lokales Datum als YYYY-MM-DD (für Tages-Zuordnungen wie Abwesenheiten).
+  function datumLokal(d) {
+    d = d || new Date();
+    return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  }
   // Leitet aus einem Datum (YYYY-MM-DD) das Halbjahr ab:
   // Aug–Jan = 1. Halbjahr, Feb–Jul = 2. Halbjahr (deutsches Schuljahr).
   function halbjahrAusDatum(datum) {
@@ -213,6 +218,7 @@
       await DB.delByIndex("kategorien", "klasseId", id);
       await DB.delByIndex("noten", "klasseId", id);
       await DB.delByIndex("ereignisse", "klasseId", id);
+      await DB.delByIndex("abwesenheiten", "klasseId", id);
       await DB.del("sitzplaene", id);
       await DB.del("klassen", id);
     }
@@ -248,6 +254,7 @@
     async remove(id) {
       await DB.delByIndex("noten", "schuelerId", id);
       await DB.delByIndex("ereignisse", "schuelerId", id);
+      await DB.delByIndex("abwesenheiten", "schuelerId", id);
       // Sitzplatz-Zuweisung entfernen
       const s = await DB.get("schueler", id);
       if (s) {
@@ -360,15 +367,36 @@
     return s;
   }
 
+  // ---- Abwesenheiten ---------------------------------------------------------
+  // Schüler tageweise als krank/abwesend markieren (Toggle).
+  // Datensatz: { id: schuelerId + "_" + datum, klasseId, schuelerId, datum, createdAt }
+  const Abwesenheiten = {
+    byKlasse: (klasseId) => DB.getAllByIndex("abwesenheiten", "klasseId", klasseId),
+    byKlasseUndTag: (klasseId, datum) => DB.getAllByIndex("abwesenheiten", "klasseId", klasseId)
+      .then((list) => list.filter((a) => a.datum === datum)),
+    // Gibt true zurück, wenn der Schüler danach abwesend ist.
+    async toggle(klasseId, schuelerId, datum) {
+      datum = datum || datumLokal();
+      const id = schuelerId + "_" + datum;
+      if (await DB.get("abwesenheiten", id)) {
+        await DB.del("abwesenheiten", id);
+        return false;
+      }
+      await DB.put("abwesenheiten", { id, klasseId, schuelerId, datum, createdAt: now() });
+      return true;
+    }
+  };
+
   // ---- Backup (Gesamt-Export/Import als JSON) ------------------------------
   async function exportAll() {
-    const [klassen, schueler, kategorien, noten, sitzplaene, ereignisse, settings] = await Promise.all([
+    const [klassen, schueler, kategorien, noten, sitzplaene, ereignisse, abwesenheiten, settings] = await Promise.all([
       DB.getAll("klassen"), DB.getAll("schueler"), DB.getAll("kategorien"),
-      DB.getAll("noten"), DB.getAll("sitzplaene"), DB.getAll("ereignisse"), getSettings()
+      DB.getAll("noten"), DB.getAll("sitzplaene"), DB.getAll("ereignisse"),
+      DB.getAll("abwesenheiten"), getSettings()
     ]);
     return {
       app: "noten-fritze", schemaVersion: DB.DB_VERSION, exportedAt: new Date().toISOString(),
-      data: { klassen, schueler, kategorien, noten, sitzplaene, ereignisse, settings }
+      data: { klassen, schueler, kategorien, noten, sitzplaene, ereignisse, abwesenheiten, settings }
     };
   }
   async function importAll(backup, { replace }) {
@@ -382,6 +410,7 @@
     await DB.bulkPut("noten", d.noten || []);
     await DB.bulkPut("sitzplaene", d.sitzplaene || []);
     await DB.bulkPut("ereignisse", d.ereignisse || []);
+    await DB.bulkPut("abwesenheiten", d.abwesenheiten || []);
     if (d.settings) await saveSettings(d.settings);
   }
 
@@ -463,6 +492,7 @@
     Noten, neueNote,
     Sitzplan, neuerSitzplan,
     Ereignisse, neuesEreignis,
+    Abwesenheiten, datumLokal,
     addHeatPoints, currentHeatPoints, normalisiereSchuelerHeat,
     defaultStundenplan,
     exportAll, importAll, seedDemoData
