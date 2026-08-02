@@ -8,7 +8,8 @@
 
   const DB_NAME = "noten-fritze";
   // v2: neuer Store "abwesenheiten" (Schüler tageweise als abwesend markieren)
-  const DB_VERSION = 2;
+  // v3: neuer Store "stunden" (Unterrichtsstunden) + Index "stundeId" auf ereignisse
+  const DB_VERSION = 3;
 
   // Definition der Object-Stores + Indizes. Zentral, damit Migrationen
   // (spätere DB_VERSION-Erhöhungen) übersichtlich bleiben.
@@ -25,7 +26,13 @@
     ereignisse:   { keyPath: "id", indexes: [
                       { name: "klasseId", keyPath: "klasseId" },
                       { name: "schuelerId", keyPath: "schuelerId" },
-                      { name: "timestamp", keyPath: "timestamp" }
+                      { name: "timestamp", keyPath: "timestamp" },
+                      { name: "stundeId", keyPath: "stundeId" }
+                    ] },
+    // Unterrichtsstunden: Einheit, in der der Tracker erfasst wird
+    stunden:      { keyPath: "id", indexes: [
+                      { name: "klasseId", keyPath: "klasseId" },
+                      { name: "datum", keyPath: "datum" }
                     ] },
     // Abwesenheiten: id = schuelerId + "_" + datum (YYYY-MM-DD, lokal)
     abwesenheiten:{ keyPath: "id", indexes: [

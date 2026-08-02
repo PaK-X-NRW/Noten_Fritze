@@ -58,19 +58,23 @@
   }
 
   function breakdownHTML(res) {
-    function grpHTML(g, titel, anteil) {
+    function grpHTML(g, titel, anteil, zeugnisNote) {
       if (!g.kategorien.length) return "";
       const lines = g.kategorien.map((c) =>
         '<div class="line"><span>' + UI.esc(c.name) + ' <span class="muted">(Gew ' + c.gewichtung + ", " + c.anzahl + " Noten)</span></span>" +
         '<span class="r">' + Calc.formatNote(c.schnitt) + "</span></div>"
       ).join("");
       return '<div class="grp"><h3>' + titel + " – Ø " + Calc.formatNote(g.schnitt) +
-        (anteil ? " · Anteil " + Math.round(anteil * 100) + " %" : "") + "</h3>" + lines + "</div>";
+        (anteil ? " · Anteil " + Math.round(anteil * 100) + " %" : "") + "</h3>" + lines +
+        '<div class="line"><span class="muted">gerundet</span><span class="r">' + Calc.formatZeugnisnote(zeugnisNote) + "</span></div>" +
+        "</div>";
     }
+    const z = Calc.zeugnisErgebnis(res);
     return '<div class="breakdown">' +
-      grpHTML(res.schriftlich, "Schriftlich", res.effAnteilS) +
-      grpHTML(res.sonstige, "Sonstige", res.effAnteilO) +
+      grpHTML(res.schriftlich, "Schriftlich", res.effAnteilS, z.schriftlich) +
+      grpHTML(res.sonstige, "Sonstige", res.effAnteilO, z.sonstige) +
       '<div class="total"><span>Gesamtnote</span><span>' + (res.gesamt !== null ? Calc.formatNote(res.gesamt) : "–") + "</span></div>" +
+      '<div class="total"><span>Zeugnisnote</span><span>' + Calc.formatZeugnisnote(z.zeugnis) + "</span></div>" +
       "</div>";
   }
 

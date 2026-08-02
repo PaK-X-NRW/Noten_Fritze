@@ -20,6 +20,17 @@
   --warn: #b9770e;
   --ok: #2e7d32;
 
+  /* Spaltengruppen der Notenübersicht (Zellen / Kopfzeile / Sammelspalte) */
+  --grp-schriftlich: #eef3fa;
+  --grp-schriftlich-kopf: #e3ecf7;
+  --grp-schriftlich-stark: #d9e6f5;
+  --grp-sonstige: #fdf5e9;
+  --grp-sonstige-kopf: #f9ecd8;
+  --grp-sonstige-stark: #f5e5c6;
+  --grp-zeugnis: #eaf3ef;
+  --grp-zeugnis-kopf: #ddece5;
+  --grp-zeugnis-stark: #d2e6dc;
+
   /* Maße */
   --radius: 16px;
   --radius-sm: 10px;
@@ -173,6 +184,53 @@ th { background: var(--surface-2); font-size: 13px; text-transform: uppercase; l
 tr:last-child td { border-bottom: none; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .row-hover:active { background: var(--accent-soft); }
+/* Sammelspalten der Notenübersicht: Trennlinie am Gruppenanfang.
+   Die Flächenfarbe kommt aus den Gruppenklassen weiter unten. */
+td.summe, th.summe { border-left: 2px solid var(--line); }
+
+/* Spaltengruppen der Notenübersicht: schriftliche Leistungen, sonstige
+   Leistungen und Zeugnis (Gesamt + Zeugnisnote). `summe-stark` markiert die
+   Ergebnisspalte am Ende einer Gruppe und wird kräftiger getönt. */
+th.grp-schriftlich { background: var(--grp-schriftlich-kopf); }
+tbody td.grp-schriftlich { background: var(--grp-schriftlich); }
+th.grp-schriftlich.summe-stark { background: var(--grp-schriftlich-stark); }
+tbody td.grp-schriftlich.summe-stark { background: var(--grp-schriftlich-stark); }
+th.grp-sonstige { background: var(--grp-sonstige-kopf); }
+tbody td.grp-sonstige { background: var(--grp-sonstige); }
+th.grp-sonstige.summe-stark { background: var(--grp-sonstige-stark); }
+tbody td.grp-sonstige.summe-stark { background: var(--grp-sonstige-stark); }
+th.grp-zeugnis { background: var(--grp-zeugnis-kopf); }
+tbody td.grp-zeugnis { background: var(--grp-zeugnis); }
+th.grp-zeugnis.summe-stark { background: var(--grp-zeugnis-stark); }
+tbody td.grp-zeugnis.summe-stark { background: var(--grp-zeugnis-stark); }
+
+/* Notenübersicht: Namensspalte beim Querscrollen stehen lassen.
+   Der Hintergrund muss deckend sein, sonst scheinen die Notenspalten durch;
+   die Kante als box-shadow, weil ein border-right mitscrollen würde. */
+.noten-tab th:first-child, .noten-tab td:first-child {
+  position: sticky; left: 0;
+  background: var(--surface);
+  box-shadow: 1px 0 0 var(--line);
+}
+.noten-tab thead th { z-index: 1; }
+.noten-tab tbody td:first-child { z-index: 2; }
+.noten-tab thead th:first-child { z-index: 3; background: var(--surface-2); }
+
+/* Leerraum rechts neben der Tabelle (Breite kommt aus --rand, gesetzt beim
+   Mount): erlaubt, weiter zu scrollen, bis auch die letzten Spalten direkt
+   neben der Namensspalte stehen. */
+.noten-wrap { display: flex; }
+.noten-wrap > .noten-tab { flex: 0 0 auto; width: auto; min-width: 100%; }
+.noten-wrap > .noten-rand { flex: 0 0 auto; width: var(--rand, 0px); }
+
+/* Spalten per Ziehen am Kopf umsortieren. `pan-y` überlässt dem Browser nur
+   das vertikale Scrollen – waagerechte Gesten am Kopf gehören dem Ziehen. */
+.noten-tab th.zieh { cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.noten-tab.spalten-ziehen { user-select: none; -webkit-user-select: none; }
+.noten-tab.spalten-ziehen th.zieh { cursor: grabbing; }
+.noten-tab th.zieht { opacity: .45; }
+.noten-tab .ziel-vor { box-shadow: inset 3px 0 0 var(--accent); }
+.noten-tab .ziel-nach { box-shadow: inset -3px 0 0 var(--accent); }
 
 /* ---------- Forms ---------- */
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
@@ -250,6 +308,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   min-width: 44px; height: 40px; padding: 0 8px; border-radius: 10px;
   font-weight: 700; font-variant-numeric: tabular-nums; color: #fff;
 }
+.note-badge.tappable { border: none; font-family: inherit; font-size: 17px; cursor: pointer; }
 .grade-cell { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .grade-pill {
   min-height: 40px; padding: 0 12px; border-radius: 10px; border: 1px dashed var(--line);
@@ -289,7 +348,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 /* Abwesende Schüler: ausgegraut, Ereignis-Buttons deaktiviert */
 .seat.abwesend { opacity: .5; filter: grayscale(.8); }
 .seat .abw-btn { position: absolute; top: 2px; right: 2px; min-height: 28px; padding: 0 6px; z-index: 1; }
-.seat .abw-btn.aktiv, .typebtn.gear.aktiv { outline: 2px solid var(--accent); }
+.seat .abw-btn.aktiv { outline: 2px solid var(--accent); }
 .typebtn[disabled] { opacity: .45; pointer-events: none; }
 .seat .flash { position: absolute; inset: 0; border-radius: inherit; background: #fff; opacity: 0; }
 .seat.pulse .flash { animation: flash .4s ease; }
@@ -333,7 +392,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   background: rgba(255, 255, 255, .78); border-radius: 999px; padding: 1px 8px;
 }
 
-.typebtns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: auto; }
+.typebtns { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: auto; }
 .typebtn {
   position: relative; min-height: 46px; border-radius: 10px;
   border: 2px solid var(--c); background: #fff; color: var(--c);
@@ -350,9 +409,48 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .typebtn .tcount:empty { display: none; }
 .typebtn.pulse { animation: btnpulse .45s ease; }
 @keyframes btnpulse { 0% { background: var(--c); color: #fff; } 100% { background: #fff; color: var(--c); } }
-.typebtn.gear { border-color: var(--line); background: var(--surface-2); color: var(--text); }
-.typebtn.gear .tlabel { font-size: 18px; }
-.typebtn.gear .tcount { display: none; }
+/* Vermerk „keine HA“ neben dem Namen (gilt für die laufende Stunde) */
+.tag-ha {
+  display: inline-block; padding: 1px 8px; border-radius: 999px;
+  background: var(--warn); color: #fff; font-size: 11px; font-weight: 800;
+  vertical-align: middle;
+}
+
+/* ---------- Tracker-Modi (Abwesend / keine HA / Heatmap) ---------- */
+/* Ein aktiver Modus färbt Topbar und Seite um, damit der Wechsel des
+   Tippverhaltens sofort erkennbar ist. Die ganze Kachel wird zum Tap-Ziel. */
+.modusbar { display: flex; gap: 8px; }
+.modusbtn { min-height: 44px; padding: 0 14px; font-size: 15px; }
+.modusbtn.aktiv {
+  background: var(--modus-color, var(--accent));
+  border-color: var(--modus-color, var(--accent));
+  color: #fff;
+}
+
+.modus-banner {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; margin-bottom: var(--gap);
+  border-radius: var(--radius);
+  border: 2px solid var(--modus-color, var(--accent));
+  background: var(--modus-soft, var(--accent-soft));
+}
+.modus-banner .modus-icon { font-size: 26px; }
+.modus-banner .grow { flex: 1; min-width: 0; }
+.modus-banner .hint { color: var(--text); opacity: .8; }
+
+body.modus-abwesend { --modus-color: #c0392b; --modus-soft: #fbe9e7; }
+body.modus-keineha  { --modus-color: #b9770e; --modus-soft: #fdf1de; }
+body.modus-heat     { --modus-color: #1565c0; --modus-soft: #e3edfa; }
+body.modus-abwesend, body.modus-keineha, body.modus-heat { background: var(--modus-soft); }
+body.modus-abwesend .content, body.modus-keineha .content, body.modus-heat .content { background: var(--modus-soft); }
+body.modus-abwesend .topbar, body.modus-keineha .topbar, body.modus-heat .topbar {
+  background: var(--modus-soft);
+  border-bottom: 3px solid var(--modus-color);
+}
+
+.seat.tracker.modus { cursor: pointer; outline: 2px dashed var(--modus-color); outline-offset: -4px; }
+/* Im Modus zählt der Tap auf die ganze Kachel – die Typ-Buttons reichen ihn durch */
+.seat.tracker.modus .typebtn { opacity: .3; pointer-events: none; }
 
 /* ---------- Besprechungsmodus ---------- */
 .discussion { max-width: 680px; margin: 0 auto; }

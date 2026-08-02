@@ -12,12 +12,17 @@
     tab: "schueler",       // schueler | noten | kategorien | sitzplan | auswertung
     auswertungRange: "alle",
     notenHalbjahr: "",      // "1" | "2" | "jahr" ("" = Default aus Einstellungen)
+    // Spaltenreihenfolge der Notenansicht, per Ziehen am Kopf gesetzt:
+    // { key: "<klasseId>|<1|2|jahr>", ids: [...] }. Bewusst nur im State –
+    // beim Neuladen gilt wieder die Default-Reihenfolge.
+    notenSpalten: null,
     auswertungHalbjahr: "", // dto. für die Mitarbeits-Auswertung
     // Besprechung
     selectedSchuelerId: null,
     // Tracker (flüchtig)
     tracker: null,
-    pendingSession: null,  // vom Start-Dialog übergebene Stunden-Session
+    pendingStunde: null,   // vom Start-Dialog übergebene (neue/fortgesetzte) Stunde
+    trackerModus: null,    // null | "abwesend" | "keineha" | "heat"
     settings: null
   };
 

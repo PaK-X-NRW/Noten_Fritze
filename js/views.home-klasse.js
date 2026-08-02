@@ -5,7 +5,7 @@
 (function (global) {
   "use strict";
 
-  const { state, hjFilter, hjTabsHTML } = global.Views;
+  const { state, render, hjFilter, hjTabsHTML } = global.Views;
 
   // =========================================================================
   //  HOME – Klassenübersicht
@@ -90,19 +90,25 @@
 
   function mountKlasse(k) {
     if (state.tab === "sitzplan") mountSitzplanEditor(k);
+    else if (state.tab === "noten") mountNotenTabelle(k);
   }
 
   // ---- Tab: Schüler --------------------------------------------------------
   async function TabSchueler(k) {
     const schueler = await Store.Schueler.byKlasse(k.id);
+    // Bei alphabetischer Sortierung wären die ▲/▼-Buttons wirkungslos –
+    // sie erscheinen nur im Modus "manuell".
+    const manuell = state.settings.schuelerSortierung === "manuell";
     const rows = schueler.map((s, i) =>
       "<tr>" +
         '<td class="num muted">' + (i + 1) + "</td>" +
         "<td><strong>" + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
         "<td>" + UI.esc(s.bemerkung || "") + "</td>" +
         '<td class="right nowrap">' +
-          '<button class="iconbtn plain" data-action="move-student" data-id="' + s.id + '" data-dir="up" title="Nach oben">▲</button>' +
-          '<button class="iconbtn plain" data-action="move-student" data-id="' + s.id + '" data-dir="down" title="Nach unten">▼</button>' +
+          (manuell
+            ? '<button class="iconbtn plain" data-action="move-student" data-id="' + s.id + '" data-dir="up" title="Nach oben">▲</button>' +
+              '<button class="iconbtn plain" data-action="move-student" data-id="' + s.id + '" data-dir="down" title="Nach unten">▼</button>'
+            : "") +
           '<button class="iconbtn plain" data-action="edit-student" data-id="' + s.id + '" title="Bearbeiten">✎</button>' +
           '<button class="iconbtn plain danger-text" data-action="delete-student" data-id="' + s.id + '" title="Löschen">🗑</button>' +
         "</td>" +
@@ -113,12 +119,17 @@
       ? '<div class="table-wrap"><table><thead><tr><th>#</th><th>Name</th><th>Bemerkung</th><th class="right">Aktionen</th></tr></thead><tbody>' + rows + "</tbody></table></div>"
       : '<div class="empty"><div class="big">🧑‍🏫</div><p>Noch keine Schüler/innen.</p></div>';
 
+    const sortHinweis = manuell
+      ? "Reihenfolge: manuell (▲/▼) – in den Einstellungen änderbar."
+      : "Reihenfolge: alphabetisch nach Nachname – in den Einstellungen änderbar.";
+
     return (
       '<div class="btn-row" style="margin-bottom:var(--gap)">' +
         '<button class="btn primary" data-action="add-student">＋ Schüler/in</button>' +
         '<button class="btn" data-action="import-students">CSV importieren</button>' +
         '<button class="btn" data-action="export-students">CSV exportieren</button>' +
-      "</div>" + table
+      "</div>" +
+      '<div class="muted" style="margin-bottom:var(--gap)">' + sortHinweis + "</div>" + table
     );
   }
 
@@ -127,13 +138,17 @@
     const kats = await Store.Kategorien.byKlasse(k.id);
     function gruppe(art, titel) {
       const list = kats.filter((c) => c.art === art);
-      const gewSumme = list.reduce((a, c) => a + (Number(c.gewichtung) || 0), 0) || 1;
+      // Kategorien, die nur zählen (vergessene HA), gehen nicht in die Gewichtung ein
+      const gewSumme = list.filter((c) => c.anzeige !== "fehlendeHA")
+        .reduce((a, c) => a + (Number(c.gewichtung) || 0), 0) || 1;
       const rows = list.map((c) => {
+        const zaehltNicht = c.anzeige === "fehlendeHA";
         const anteil = ((Number(c.gewichtung) || 0) / gewSumme * 100).toFixed(0);
         return "<tr>" +
-          "<td><strong>" + UI.esc(c.name) + "</strong></td>" +
-          '<td class="num">' + UI.esc(String(c.gewichtung)) + "</td>" +
-          '<td class="num">' + anteil + " %</td>" +
+          "<td><strong>" + UI.esc(c.name) + "</strong>" +
+            (zaehltNicht ? ' <span class="chip">zählt nicht in die Note · vergessene HA</span>' : "") + "</td>" +
+          '<td class="num">' + (zaehltNicht ? '<span class="muted">–</span>' : UI.esc(String(c.gewichtung))) + "</td>" +
+          '<td class="num">' + (zaehltNicht ? '<span class="muted">–</span>' : anteil + " %") + "</td>" +
           '<td class="right nowrap">' +
             '<button class="iconbtn plain" data-action="edit-category" data-id="' + c.id + '">✎</button>' +
             '<button class="iconbtn plain danger-text" data-action="delete-category" data-id="' + c.id + '">🗑</button>' +
@@ -163,53 +178,327 @@
   }
 
   // ---- Tab: Noten ----------------------------------------------------------
+  // Badge für eine Note auf der Zeugnisskala (ganze Note bzw. 4-).
+  function zeugnisBadge(note) {
+    if (note === null || note === undefined) return '<span class="muted">–</span>';
+    return '<span class="note-badge" style="background:' + Calc.noteFarbe(note) + '">' + Calc.formatZeugnisnote(note) + "</span>";
+  }
+
   async function TabNoten(k) {
-    const [schueler, kats, notenAll] = await Promise.all([
+    const [schueler, katsRoh, notenAll, ereignisse] = await Promise.all([
       Store.Schueler.byKlasse(k.id),
       Store.Kategorien.byKlasse(k.id),
-      Store.Noten.byKlasse(k.id)
+      Store.Noten.byKlasse(k.id),
+      Store.Ereignisse.byKlasse(k.id)
     ]);
     if (!schueler.length) return '<div class="empty"><div class="big">📋</div><p>Erst Schüler/innen anlegen.</p></div>';
-    if (!kats.length) return '<div class="empty"><div class="big">🏷️</div><p>Erst Kategorien anlegen.</p><button class="btn primary" data-action="class-tab" data-tab="kategorien">Zu den Kategorien</button></div>';
+    if (!katsRoh.length) return '<div class="empty"><div class="big">🏷️</div><p>Erst Kategorien anlegen.</p><button class="btn primary" data-action="class-tab" data-tab="kategorien">Zu den Kategorien</button></div>';
+
+    // Spalten gruppiert: erst die schriftlichen, dann die sonstigen Kategorien –
+    // so stehen die Sammelspalten direkt hinter ihrer Gruppe.
+    const schriftlicheKats = katsRoh.filter((c) => c.art === "schriftlich");
+    const sonstigeKats = katsRoh.filter((c) => c.art !== "schriftlich");
+    const kats = schriftlicheKats.concat(sonstigeKats);
 
     const notenBySchueler = {};
     notenAll.forEach((n) => (notenBySchueler[n.schuelerId] = notenBySchueler[n.schuelerId] || []).push(n));
     const hj = hjFilter("notenHalbjahr");
+    const key = spaltenKey(k.id, hj);
+    const eigeneReihenfolge = !!(state.notenSpalten && state.notenSpalten.key === key);
 
-    const kopf = "<tr><th>Name</th>" + kats.map((c) =>
-      '<th class="num">' + UI.esc(c.name) + '<br><span class="muted" style="text-transform:none;font-weight:400">' +
-        (c.art === "schriftlich" ? "schriftl." : "sonst.") + " · Gew " + c.gewichtung + "</span></th>"
-    ).join("") + '<th class="num">Gesamt</th></tr>';
+    const spalten = spaltenOrdnen(
+      hj === null ? jahresSpalten() : halbjahrSpalten(schriftlicheKats, sonstigeKats), key
+    );
 
     const body = schueler.map((s) => {
-      const res = Calc.berechneSchueler(kats, notenBySchueler[s.id] || [], k, state.settings.rundung, hj);
-      const zellen = kats.map((c) => {
-        const ke = res.kategorien.find((x) => x.id === c.id);
-        const hat = ke && ke.schnitt !== null;
-        const badge = hat
-          ? '<span class="note-badge" style="background:' + Calc.noteFarbe(ke.schnitt) + '">' + Calc.formatNote(ke.schnitt) + "</span>"
-          : '<span class="muted">–</span>';
-        const anz = ke && ke.anzahl ? '<span class="muted"> n=' + ke.anzahl + "</span>" : "";
-        return '<td class="num pointer row-hover" data-action="edit-cell" data-sid="' + s.id + '" data-cid="' + c.id + '">' + badge + anz + "</td>";
-      }).join("");
+      const noten = notenBySchueler[s.id] || [];
+      if (hj === null) {
+        const hj1 = Calc.zeugnisErgebnis(Calc.berechneSchueler(kats, noten, k, state.settings.rundung, 1));
+        const hj2 = Calc.zeugnisErgebnis(Calc.berechneSchueler(kats, noten, k, state.settings.rundung, 2));
+        return notenZeile(spalten, s, { hj1, hj2, jahr: Calc.jahresnote(hj1.zeugnis, hj2.zeugnis) });
+      }
+      const res = Calc.berechneSchueler(kats, noten, k, state.settings.rundung, hj);
       const gBadge = res.gesamt !== null
-        ? '<span class="note-badge" style="background:' + Calc.noteFarbe(res.gesamt) + '">' + Calc.formatNote(res.gesamt, state.settings.rundung === "ganze" ? 0 : (state.settings.rundung === "keine" ? 2 : 1)) + "</span>"
-        : "–";
-      return "<tr>" +
-        '<td class="pointer" data-action="student-detail" data-sid="' + s.id + '"><strong>' + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
-        zellen +
-        '<td class="num">' + gBadge + "</td></tr>";
+        ? '<span class="note-badge" style="background:' + Calc.noteFarbe(res.gesamt) + '">' +
+          Calc.formatNote(res.gesamt, state.settings.rundung === "ganze" ? 0 : (state.settings.rundung === "keine" ? 2 : 1)) + "</span>"
+        : '<span class="muted">–</span>';
+      return notenZeile(spalten, s, { s, res, gBadge, ereignisse, hj, zeugnis: Calc.zeugnisErgebnis(res) });
     }).join("");
+
+    const hinweis = hj === null
+      ? "Jahresübersicht: beide Halbjahre nebeneinander. Die Jahresnote entsteht aus den beiden Zeugnisnoten (je 50 %, bei Gleichstand zählt das 2. Halbjahr)."
+      : "Tippe auf eine Zelle, um Einzelnoten zu erfassen. Tippe auf den Namen für die Berechnung. Spaltenköpfe lassen sich seitlich verschieben.";
 
     return (
       '<div class="hstack wrap" style="margin-bottom:var(--gap)">' +
         '<div class="tabs" style="margin:0">' + hjTabsHTML("notenHalbjahr", "noten-hj") + "</div>" +
-        '<div class="grow muted">Tippe auf eine Zelle, um Einzelnoten zu erfassen. Tippe auf den Namen für die Berechnung.</div>' +
+        '<div class="grow muted">' + hinweis + "</div>" +
+        (eigeneReihenfolge ? '<button class="btn small" data-action="noten-spalten-reset">Spalten zurücksetzen</button>' : "") +
         '<button class="btn small" data-action="export-noten">Noten-CSV</button>' +
         '<button class="btn small" data-action="export-einzelnoten">Einzelnoten-CSV</button>' +
       "</div>" +
-      '<div class="table-wrap"><table><thead>' + kopf + "</thead><tbody>" + body + "</tbody></table></div>"
+      '<div class="table-wrap noten-wrap"><table class="noten-tab"><thead>' +
+        spaltenKopfZeile(spalten) + "</thead><tbody>" + body + "</tbody></table>" +
+        '<div class="noten-rand"></div>' +
+      "</div>"
     );
+  }
+
+  // ---- Noten: Spaltenmodell -------------------------------------------------
+  // Jede Spalte kennt ihre ID (Basis fürs Umsortieren), ihre Farbgruppe, den
+  // Kopftext und wie ihre Datenzelle gefüllt wird. Die Namensspalte gehört
+  // bewusst nicht dazu: sie bleibt fixiert ganz links stehen.
+  function grpKlasse(art) {
+    return art === "schriftlich" ? "grp-schriftlich" : "grp-sonstige";
+  }
+  function spaltenKlassen(sp, extra) {
+    return "num " + sp.grp + (sp.trenner ? " summe" : "") + (sp.stark ? " summe-stark" : "") + (extra ? " " + extra : "");
+  }
+  function spaltenZelle(sp, inhalt, extra, attr) {
+    return '<td class="' + spaltenKlassen(sp, extra) + '"' + (attr || "") + ">" + inhalt + "</td>";
+  }
+
+  function katSpalte(c) {
+    const zusatz = c.anzeige === "fehlendeHA"
+      ? "vergessene HA"
+      : (c.art === "schriftlich" ? "schriftl." : "sonst.") + " · Gew " + c.gewichtung;
+    return {
+      id: "kat:" + c.id,
+      grp: grpKlasse(c.art),
+      kopf: UI.esc(c.name) + '<br><span class="muted" style="text-transform:none;font-weight:400">' + zusatz + "</span>",
+      zelle: (sp, ctx) => {
+        if (c.anzeige === "fehlendeHA") {
+          const anzahl = ctx.ereignisse.filter((e) =>
+            e.schuelerId === ctx.s.id && e.typ === "keinehausaufgabe" && (!ctx.hj || !e.halbjahr || e.halbjahr === ctx.hj)
+          ).length;
+          return spaltenZelle(sp, anzahl ? "<strong>" + anzahl + "×</strong>" : '<span class="muted">–</span>');
+        }
+        const ke = ctx.res.kategorien.find((x) => x.id === c.id);
+        const badge = ke && ke.schnitt !== null
+          ? '<span class="note-badge" style="background:' + Calc.noteFarbe(ke.schnitt) + '">' + Calc.formatNote(ke.schnitt) + "</span>"
+          : '<span class="muted">–</span>';
+        const anz = ke && ke.anzahl ? '<span class="muted"> n=' + ke.anzahl + "</span>" : "";
+        return spaltenZelle(sp, badge + anz, "pointer row-hover",
+          ' data-action="edit-cell" data-sid="' + ctx.s.id + '" data-cid="' + c.id + '"');
+      }
+    };
+  }
+
+  // Halbjahrestabelle: Kategorien, dahinter je Gruppe eine Sammelspalte.
+  function halbjahrSpalten(schriftlicheKats, sonstigeKats) {
+    return [].concat(
+      schriftlicheKats.map(katSpalte),
+      [{ id: "sum:schriftlich", grp: "grp-schriftlich", trenner: true, stark: true, kopf: "Schriftlich",
+         zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.zeugnis.schriftlich)) }],
+      sonstigeKats.map(katSpalte),
+      [{ id: "sum:sonstige", grp: "grp-sonstige", trenner: true, stark: true, kopf: "Sonstige",
+         zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.zeugnis.sonstige)) },
+       { id: "sum:gesamt", grp: "grp-zeugnis", trenner: true, kopf: "Gesamt",
+         zelle: (sp, ctx) => spaltenZelle(sp, ctx.gBadge) },
+       { id: "sum:zeugnis", grp: "grp-zeugnis", stark: true, kopf: "Zeugnis",
+         zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.zeugnis.zeugnis)) }]
+    );
+  }
+
+  // Jahresübersicht: keine Einzelleistungen, sondern beide Halbjahre nebeneinander.
+  function jahresSpalten() {
+    const hjSpalte = (nr, feld, grp, label, trenner) => ({
+      id: "jahr:" + nr + ":" + feld,
+      grp: grp,
+      trenner: !!trenner,
+      kopf: nr + ". HJ " + label,
+      zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx["hj" + nr][feld]))
+    });
+    return [
+      hjSpalte(1, "schriftlich", "grp-schriftlich", "schriftl.", true),
+      hjSpalte(1, "sonstige", "grp-sonstige", "sonstige"),
+      hjSpalte(1, "zeugnis", "grp-zeugnis", "Zeugnis"),
+      hjSpalte(2, "schriftlich", "grp-schriftlich", "schriftl.", true),
+      hjSpalte(2, "sonstige", "grp-sonstige", "sonstige"),
+      hjSpalte(2, "zeugnis", "grp-zeugnis", "Zeugnis"),
+      { id: "jahr:gesamt", grp: "grp-zeugnis", trenner: true, stark: true, kopf: "Jahr",
+        zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.jahr)) }
+    ];
+  }
+
+  function spaltenKey(klasseId, hj) {
+    return klasseId + "|" + (hj === null ? "jahr" : hj);
+  }
+
+  // Wendet eine per Ziehen gemerkte Reihenfolge an. Sie liegt nur im State
+  // (nicht in IndexedDB): nach einem Neuladen steht die Tabelle wieder in der
+  // Default-Reihenfolge. Passt die Spaltenmenge nicht mehr (neue oder gelöschte
+  // Kategorie), gilt wieder der Default.
+  function spaltenOrdnen(spalten, key) {
+    const merk = state.notenSpalten;
+    if (!merk || merk.key !== key || merk.ids.length !== spalten.length) return spalten;
+    const nachId = {};
+    spalten.forEach((sp) => { nachId[sp.id] = sp; });
+    const sortiert = [];
+    for (const id of merk.ids) {
+      if (!nachId[id]) return spalten;
+      sortiert.push(nachId[id]);
+    }
+    return sortiert;
+  }
+
+  function spaltenKopfZeile(spalten) {
+    return "<tr><th>Name</th>" + spalten.map((sp) =>
+      '<th class="' + spaltenKlassen(sp, "zieh") + '" data-spalte="' + UI.esc(sp.id) + '">' + sp.kopf + "</th>"
+    ).join("") + "</tr>";
+  }
+
+  function notenZeile(spalten, s, ctx) {
+    ctx.s = s;
+    return "<tr>" +
+      '<td class="pointer" data-action="student-detail" data-sid="' + s.id + '"><strong>' + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
+      spalten.map((sp) => sp.zelle(sp, ctx)).join("") +
+    "</tr>";
+  }
+
+  // ---- Noten: Scroll-Spielraum und Spalten ziehen ---------------------------
+  function mountNotenTabelle(k) {
+    const wrap = UI.$(".noten-wrap");
+    const table = wrap && UI.$(".noten-tab", wrap);
+    if (!table) return;
+    randSpielraum(wrap, table);
+    spaltenZiehen(wrap, table, spaltenKey(k.id, hjFilter("notenHalbjahr")));
+  }
+
+  // Zusätzlicher Platz rechts neben der Tabelle, damit sich auch die letzten
+  // Spalten bis direkt neben die fixierte Namensspalte schieben lassen.
+  function randSpielraum(wrap, table) {
+    wrap.style.setProperty("--rand", "0px");
+    if (wrap.scrollWidth <= wrap.clientWidth + 1) return;   // passt ohnehin
+    const koepfe = UI.$all("thead th", table);
+    const nameBreite = koepfe[0].getBoundingClientRect().width;
+    const letzteBreite = koepfe[koepfe.length - 1].getBoundingClientRect().width;
+    const rand = Math.max(0, Math.round(wrap.clientWidth - nameBreite - letzteBreite));
+    wrap.style.setProperty("--rand", rand + "px");
+  }
+
+  // Spalten per Ziehen am Kopf umsortieren. Bewusst mit Pointer-Events statt
+  // HTML5-Drag&Drop – letzteres gibt es auf iPad-Safari nicht. Während des
+  // Ziehens wird nur die Zielspalte markiert; sortiert (und neu gerendert)
+  // wird erst beim Loslassen, damit der Pointer nicht sein Element verliert.
+  function spaltenZiehen(wrap, table, key) {
+    const koepfe = UI.$all("thead th[data-spalte]", table);
+    if (koepfe.length < 2) return;
+
+    let quelle = null;      // gezogener <th>
+    let quelleId = null;
+    let startX = 0;
+    let letztesX = 0;
+    let aktiv = false;
+    let ziel = -1;          // Einfügeposition 0 .. koepfe.length
+    let rafId = 0;
+    let rollen = 0;         // Pixel pro Frame beim Rand-Scrollen
+
+    koepfe.forEach((th) => th.addEventListener("pointerdown", starten));
+
+    function starten(ev) {
+      if (ev.button) return;                    // nur linke Maustaste / Touch
+      quelle = ev.currentTarget;
+      quelleId = quelle.getAttribute("data-spalte");
+      startX = letztesX = ev.clientX;
+      aktiv = false; ziel = -1;
+      quelle.setPointerCapture(ev.pointerId);
+      quelle.addEventListener("pointermove", bewegen);
+      quelle.addEventListener("pointerup", loslassen);
+      quelle.addEventListener("pointercancel", abbrechen);
+    }
+
+    function bewegen(ev) {
+      letztesX = ev.clientX;
+      if (!aktiv) {
+        if (Math.abs(letztesX - startX) < 8) return;   // Schwelle: kein Tap
+        aktiv = true;
+        table.classList.add("spalten-ziehen");
+        quelle.classList.add("zieht");
+      }
+      ev.preventDefault();
+      zielSetzen(zielAus(letztesX));
+      randRollen(letztesX);
+    }
+
+    // Einfügeposition aus der X-Koordinate: vor der Spalte, in deren linke
+    // Hälfte gezeigt wird – sonst hinter der letzten.
+    function zielAus(x) {
+      for (let i = 0; i < koepfe.length; i++) {
+        const r = koepfe[i].getBoundingClientRect();
+        if (x < r.left + r.width / 2) return i;
+      }
+      return koepfe.length;
+    }
+
+    function spaltenZellen(i) {
+      return UI.$all("tr > :nth-child(" + (i + 2) + ")", table);   // +2: Namensspalte
+    }
+    function markierungWeg() {
+      UI.$all(".ziel-vor, .ziel-nach", table).forEach((z) => {
+        z.classList.remove("ziel-vor"); z.classList.remove("ziel-nach");
+      });
+    }
+    function zielSetzen(pos) {
+      if (pos === ziel) return;
+      markierungWeg();
+      ziel = pos;
+      const letzte = pos >= koepfe.length;
+      spaltenZellen(letzte ? koepfe.length - 1 : pos)
+        .forEach((z) => z.classList.add(letzte ? "ziel-nach" : "ziel-vor"));
+    }
+
+    // Am linken/rechten Rand automatisch weiterscrollen, damit auch weit
+    // entfernte Positionen in einem Zug erreichbar sind.
+    function randRollen(x) {
+      const r = wrap.getBoundingClientRect();
+      const zone = 56;
+      rollen = x < r.left + zone ? -14 : (x > r.right - zone ? 14 : 0);
+      if (rollen && !rafId) rafId = requestAnimationFrame(rollenTick);
+    }
+    function rollenTick() {
+      rafId = 0;
+      if (!aktiv || !rollen) return;
+      wrap.scrollLeft += rollen;
+      zielSetzen(zielAus(letztesX));
+      rafId = requestAnimationFrame(rollenTick);
+    }
+
+    function aufraeumen(ev) {
+      if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+      rollen = 0;
+      markierungWeg();
+      table.classList.remove("spalten-ziehen");
+      if (quelle) {
+        quelle.classList.remove("zieht");
+        quelle.removeEventListener("pointermove", bewegen);
+        quelle.removeEventListener("pointerup", loslassen);
+        quelle.removeEventListener("pointercancel", abbrechen);
+        if (ev && quelle.hasPointerCapture && quelle.hasPointerCapture(ev.pointerId)) {
+          quelle.releasePointerCapture(ev.pointerId);
+        }
+      }
+      quelle = null;
+    }
+
+    function abbrechen(ev) { aktiv = false; aufraeumen(ev); }
+
+    function loslassen(ev) {
+      const warAktiv = aktiv;
+      const pos = ziel;
+      const id = quelleId;
+      aktiv = false;
+      aufraeumen(ev);
+      if (!warAktiv || pos < 0) return;         // reiner Tap: nichts tun
+      const ids = koepfe.map((th) => th.getAttribute("data-spalte"));
+      const von = ids.indexOf(id);
+      const nach = pos > von ? pos - 1 : pos;   // eigene Spalte fällt vorher raus
+      if (von < 0 || nach === von) return;
+      ids.splice(von, 1);
+      ids.splice(nach, 0, id);
+      state.notenSpalten = { key, ids };
+      render();
+    }
   }
 
   // ---- Tab: Sitzplan (Editor) ---------------------------------------------
@@ -251,18 +540,35 @@
   function mountSitzplanEditor(k) { /* Grid-Inputs werden über Buttons gelesen */ }
 
   // ---- Tab: Mitarbeit-Auswertung ------------------------------------------
-  async function TabAuswertung(k) {
-    const [schueler, ereignisse, abwList] = await Promise.all([
+  // Gemeinsamer Rechenkontext der Mitarbeits-Auswertung (Tab + Herleitungs-Dialog):
+  // wendet Zeitraum- und Halbjahr-Filter an und liefert das Ergebnis je Schüler.
+  async function auswertungKontext(k) {
+    const [schueler, ereignisse, abwList, stunden] = await Promise.all([
       Store.Schueler.byKlasse(k.id), Store.Ereignisse.byKlasse(k.id),
-      Store.Abwesenheiten.byKlasse(k.id)
+      Store.Abwesenheiten.byKlasse(k.id), Store.Stunden.byKlasse(k.id)
     ]);
     const now = Store.now();
     const ranges = { alle: 0, "30": 30 * 86400000, "7": 7 * 86400000 };
     const von = state.auswertungRange === "alle" ? 0 : now - ranges[state.auswertungRange];
     const hj = hjFilter("auswertungHalbjahr");
     const ereignisseGefiltert = hj ? ereignisse.filter((e) => !e.halbjahr || e.halbjahr === hj) : ereignisse;
+    const stundenGefiltert = hj ? stunden.filter((st) => !st.halbjahr || st.halbjahr === hj) : stunden;
     const abwesendTage = new Set(abwList.map((a) => a.schuelerId + "|" + a.datum));
-    const ausw = Calc.auswertungMitarbeit(ereignisseGefiltert, state.settings, von, now, abwesendTage);
+    const schwellen = Calc.schwellenFuer(state.settings, k);
+    const ausw = Calc.auswertungMitarbeit(ereignisseGefiltert, state.settings, {
+      vonTs: von, bisTs: now, abwesendTage, stunden: stundenGefiltert,
+      schuelerIds: schueler.map((s) => s.id), schwellen
+    });
+    return {
+      schueler, ausw, schwellen, stunden: stundenGefiltert,
+      eigeneSchwellen: !!(Array.isArray(k.mitarbeitSchwellen) && k.mitarbeitSchwellen.length)
+    };
+  }
+
+  async function TabAuswertung(k) {
+    const ktx = await auswertungKontext(k);
+    const schueler = ktx.schueler, ausw = ktx.ausw;
+    const stundenGefiltert = ktx.stunden, eigeneSchwellen = ktx.eigeneSchwellen;
 
     const rangeBtns = [["alle", "Gesamt"], ["30", "30 Tage"], ["7", "7 Tage"]].map(([id, l]) =>
       '<button class="tab ' + (state.auswertungRange === id ? "active" : "") + '" data-action="ausw-range" data-range="' + id + '">' + l + "</button>"
@@ -277,9 +583,12 @@
         "<td><strong>" + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
         '<td class="num">' + (a ? a.anzahl : 0) + "</td>" +
         '<td class="num">' + (a ? a.punkte : 0) + "</td>" +
-        '<td class="num">' + (a ? a.punkteProTag.toFixed(1).replace(".", ",") : "–") + "</td>" +
+        '<td class="num">' + (a ? a.nenner : 0) + "</td>" +
+        '<td class="num">' + (a ? a.punkteProStunde.toFixed(1).replace(".", ",") : "–") + "</td>" +
         "<td>" + (a && a.letzte ? UI.relZeit(a.letzte) : '<span class="danger-text">nie</span>') + "</td>" +
-        '<td class="num">' + (note ? '<span class="note-badge" style="background:' + Calc.noteFarbe(note) + '">' + note + "</span>" : "–") + "</td>" +
+        '<td class="num">' + (note
+          ? '<button class="note-badge tappable" data-action="ausw-herleitung" data-sid="' + s.id + '" title="So kommt der Vorschlag zustande" style="background:' + Calc.noteFarbe(note) + '">' + note + "</button>"
+          : "–") + "</td>" +
         "<td>" + typen + "</td>" +
       "</tr>";
     }).join("");
@@ -289,12 +598,16 @@
         '<div class="tabs" style="margin:0">' + rangeBtns + "</div>" +
         '<div class="tabs" style="margin:0">' + hjTabsHTML("auswertungHalbjahr", "ausw-hj") + "</div>" +
         '<div class="grow"></div>' +
+        '<button class="btn small" data-action="edit-schwellen">Schwellen' + (eigeneSchwellen ? " (eigene)" : "") + "</button>" +
         '<button class="btn small" data-action="export-events">Mitarbeit-CSV</button>' +
       "</div>" +
-      '<p class="muted">Notenvorschlag = Ø Punkte pro aktivem Tag, gemappt über die Schwellen in den Einstellungen. Tage mit Abwesenheit zählen nicht. Nur ein Vorschlag – bitte prüfen.</p>' +
-      '<div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Meld.</th><th class="num">Punkte</th><th class="num">Ø/Tag</th><th>Zuletzt</th><th class="num">Vorschlag</th><th>Aufschlüsselung</th></tr></thead><tbody>' + rows + "</tbody></table></div>"
+      '<p class="muted">Notenvorschlag = Punkte ÷ gehaltene Stunden, gemappt über die Notenschwellen' +
+        (eigeneSchwellen ? " dieser Klasse" : " aus den Einstellungen") + ". " +
+        stundenGefiltert.length + " Stunde" + (stundenGefiltert.length === 1 ? "" : "n") + " im gewählten Zeitraum. " +
+        "Stunden ohne Meldung zählen mit, Tage mit Abwesenheit nicht. Tippe auf einen Vorschlag, um die Rechnung zu sehen.</p>" +
+      '<div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Meld.</th><th class="num">Punkte</th><th class="num">Stunden</th><th class="num">Ø/Stunde</th><th>Zuletzt</th><th class="num">Vorschlag</th><th>Aufschlüsselung</th></tr></thead><tbody>' + rows + "</tbody></table></div>"
     );
   }
 
-  Object.assign(global.Views, { ViewHome, ViewKlasse });
+  Object.assign(global.Views, { ViewHome, ViewKlasse, auswertungKontext });
 })(window);

@@ -5,7 +5,10 @@
 (function (global) {
   "use strict";
 
-  const { state, go, render, hjFilter, breakdownHTML } = global.Views;
+  const {
+    state, go, render, hjFilter, breakdownHTML,
+    schwellenFelderHTML, schwellenAusFormular, auswertungKontext
+  } = global.Views;
 
   // =========================================================================
   //  AKTIONEN (Dialoge & Handler)
@@ -67,6 +70,86 @@
     ]});
   }
 
+  // ---- Notenschwellen der Klasse -------------------------------------------
+  // Eigene Schwellen überschreiben die globale Einstellung; ausgeschaltet
+  // rechnet die Klasse wieder mit den Werten aus den Einstellungen.
+  function schwellenDialog(k) {
+    const eigene = !!(Array.isArray(k.mitarbeitSchwellen) && k.mitarbeitSchwellen.length);
+    const werte = eigene ? k.mitarbeitSchwellen : state.settings.mitarbeitSchwellen;
+    const body =
+      '<p class="muted">Ab wie vielen Ø-Punkten pro gehaltener Stunde welche Mitarbeitsnote vorgeschlagen wird.</p>' +
+      '<div class="field"><label class="hstack"><input type="checkbox" id="schwellen-eigene" style="width:auto;min-height:auto"' +
+        (eigene ? " checked" : "") + "> Eigene Schwellen für diese Klasse verwenden</label>" +
+        '<div class="hint">Aus = globale Einstellung. Beim Einschalten werden die globalen Werte als Startpunkt übernommen.</div></div>' +
+      '<div id="schwellen-felder">' + schwellenFelderHTML(werte) + "</div>";
+    UI.modal({
+      title: "Notenschwellen · " + k.name,
+      bodyHTML: body,
+      onMount: (box) => {
+        const cb = box.querySelector("#schwellen-eigene");
+        const felder = box.querySelector("#schwellen-felder");
+        const sync = () => {
+          felder.style.opacity = cb.checked ? "1" : ".45";
+          UI.$all("[data-schwelle]", felder).forEach((inp) => { inp.disabled = !cb.checked; });
+        };
+        cb.addEventListener("change", sync);
+        sync();
+      },
+      buttons: [
+        { label: "Abbrechen" },
+        { label: "Speichern", className: "primary", onClick: async (close, box) => {
+          const eigeneJetzt = box.querySelector("#schwellen-eigene").checked;
+          const liste = eigeneJetzt ? schwellenAusFormular(box) : null;
+          if (eigeneJetzt && !liste.length) { UI.toast("Bitte mindestens eine Schwelle angeben"); return; }
+          k.mitarbeitSchwellen = liste;
+          await Store.Klassen.save(k);
+          close(); render();
+          UI.toast(eigeneJetzt ? "Eigene Schwellen gespeichert" : "Globale Schwellen aktiv");
+        }}
+      ]
+    });
+  }
+
+  // ---- Herleitung des Mitarbeits-Vorschlags --------------------------------
+  // Macht sichtbar, wie aus Ereignissen und gehaltenen Stunden die Note wird.
+  async function mitarbeitHerleitungDialog(sid) {
+    const k = await Store.Klassen.get(state.klasseId);
+    const ktx = await auswertungKontext(k);
+    const s = ktx.schueler.find((x) => x.id === sid);
+    const a = ktx.ausw[sid];
+    if (!s || !a) return;
+
+    const zeilen = Store.EVENT_TYPES.filter((t) => a.typen[t.id]).map((t) => {
+      const anzahl = a.typen[t.id];
+      const wert = state.settings.mitarbeitPunkte[t.id] || 0;
+      return '<div class="line"><span>' + UI.esc(t.label) + ' <span class="muted">(' + anzahl + " × " +
+        (wert > 0 ? "+" : "") + wert + ")</span></span>" +
+        '<span class="r">' + (anzahl * wert > 0 ? "+" : "") + (anzahl * wert) + "</span></div>";
+    }).join("") || '<div class="line"><span class="muted">Keine Ereignisse im Zeitraum</span><span class="r">0</span></div>';
+
+    const schwelle = ktx.schwellen.filter((x) => a.punkteProStunde >= x.abPunkte)[0];
+    const body =
+      '<div class="breakdown">' +
+        '<div class="grp"><h3>Erfasste Ereignisse</h3>' + zeilen + "</div>" +
+        '<div class="grp"><h3>Rechnung</h3>' +
+          '<div class="line"><span>Punkte gesamt</span><span class="r">' + a.punkte + "</span></div>" +
+          '<div class="line"><span>Gehaltene Stunden (anwesend)</span><span class="r">' + a.nenner + "</span></div>" +
+          '<div class="line"><span class="muted">davon mit Meldung</span><span class="r muted">' + a.stundenMitEreignis + "</span></div>" +
+          '<div class="line"><span>Ø Punkte pro Stunde</span><span class="r">' + a.punkteProStunde.toFixed(2).replace(".", ",") + "</span></div>" +
+        "</div>" +
+        '<div class="grp"><h3>Schwelle</h3>' +
+          '<div class="line"><span>' + (schwelle
+            ? "Note " + schwelle.note + " ab " + String(schwelle.abPunkte).replace(".", ",") + " Ø-Punkten"
+            : "unter der letzten Schwelle") + "</span>" +
+            '<span class="r">' + (ktx.eigeneSchwellen ? "eigene Schwellen" : "globale Schwellen") + "</span></div>" +
+        "</div>" +
+        '<div class="total"><span>Notenvorschlag</span><span>' + a.notenvorschlag + "</span></div>" +
+      "</div>" +
+      '<p class="muted">Nur ein Vorschlag – Tage mit gemeldeter Abwesenheit sind herausgerechnet.</p>';
+
+    UI.modal({ title: "Mitarbeit · " + UI.vollerName(s), bodyHTML: body, buttons: [{ label: "Schließen", className: "primary" }] });
+  }
+
   // ---- Schüler anlegen/bearbeiten -----------------------------------------
   function schuelerDialog(k, s) {
     const isNew = !s;
@@ -104,14 +187,22 @@
           { value: "sonstige", label: "Sonstige Leistung" }
         ]}) +
         UI.field("Gewichtung", "gewichtung", data.gewichtung, { type: "number", inputmode: "decimal", hint: "relativ innerhalb der Art" }) +
-      "</div>";
+      "</div>" +
+      UI.field("Anzeige in der Notenübersicht", "anzeige", data.anzeige || "note", { type: "select", options: [
+        { value: "note", label: "Note (zählt in die Gesamtnote)" },
+        { value: "fehlendeHA", label: "Anzahl vergessener Hausaufgaben (zählt nicht)" }
+      ], hint: "Bei der Zählung wird die Gewichtung ignoriert; die Zahl kommt aus dem Tracker." });
     UI.modal({ title: isNew ? "Neue Kategorie" : "Kategorie bearbeiten", bodyHTML: body, buttons: [
       { label: "Abbrechen" },
       { label: isNew ? "Anlegen" : "Speichern", className: "primary", onClick: async (close, box) => {
         const v = UI.formValues(box);
         if (!v.name.trim()) { UI.toast("Bitte Namen eingeben"); return; }
         if (isNew) { const list = await Store.Kategorien.byKlasse(k.id); data.sortIndex = list.length; }
-        Object.assign(data, { name: v.name.trim(), art: v.art, gewichtung: Math.max(0, parseFloat(String(v.gewichtung).replace(",", ".")) || 0) });
+        Object.assign(data, {
+          name: v.name.trim(), art: v.art,
+          anzeige: v.anzeige === "fehlendeHA" ? "fehlendeHA" : "note",
+          gewichtung: Math.max(0, parseFloat(String(v.gewichtung).replace(",", ".")) || 0)
+        });
         await Store.Kategorien.save(data); close(); render();
       }}
     ]});
@@ -266,6 +357,7 @@
 
   Object.assign(global.Views, {
     klasseDialog, splitsDialog, schuelerDialog, kategorieDialog, cellDialog,
-    studentDetailDialog, seatAssignDialog, importStudentsDialog, backupImportDialog
+    studentDetailDialog, seatAssignDialog, importStudentsDialog, backupImportDialog,
+    schwellenDialog, mitarbeitHerleitungDialog
   });
 })(window);

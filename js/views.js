@@ -10,8 +10,9 @@
   const {
     klasseDialog, splitsDialog, schuelerDialog, kategorieDialog, cellDialog,
     studentDetailDialog, seatAssignDialog, importStudentsDialog, backupImportDialog,
-    trackerStartDialog, trackerHeatEditDialog, trackerAbwesendToggle,
-    stopHeatTimer, renderSeatCounts
+    schwellenDialog, mitarbeitHerleitungDialog,
+    trackerStartDialog, trackerModusToggle, trackerModusEnde, trackerModusTap,
+    trackerStundeBeenden, trackerVerlassen, trackerHeatAddieren, renderSeatCounts
   } = global.Views;
 
   // =========================================================================
@@ -63,8 +64,11 @@
 
     "export-noten": async () => {
       const k = await Store.Klassen.get(state.klasseId);
-      const [s, kt, n] = await Promise.all([Store.Schueler.byKlasse(k.id), Store.Kategorien.byKlasse(k.id), Store.Noten.byKlasse(k.id)]);
-      CSV.exportNoten(k, s, kt, n, state.settings); UI.toast("Noten-CSV exportiert");
+      const [s, kt, n, ev] = await Promise.all([
+        Store.Schueler.byKlasse(k.id), Store.Kategorien.byKlasse(k.id),
+        Store.Noten.byKlasse(k.id), Store.Ereignisse.byKlasse(k.id)
+      ]);
+      CSV.exportNoten(k, s, kt, n, state.settings, ev); UI.toast("Noten-CSV exportiert");
     },
     "export-einzelnoten": async () => {
       const k = await Store.Klassen.get(state.klasseId);
@@ -112,10 +116,12 @@
     // Tracker / Besprechung Navigation
     "open-tracker": () => trackerStartDialog(),
     "open-besprechung": () => { state.selectedSchuelerId = null; go("besprechung"); },
-    "back-to-class": () => { stopHeatTimer(); go("klasse"); },
+    "back-to-class": async () => { if (state.view === "tracker") await trackerVerlassen(); go("klasse"); },
     "tracker-tap": (el) => trackerTap(el),
-    "tracker-heat-edit": (el) => trackerHeatEditDialog(el.getAttribute("data-sid")),
-    "tracker-abwesend": (el) => trackerAbwesendToggle(el.getAttribute("data-sid")),
+    "tracker-modus": (el) => trackerModusToggle(el.getAttribute("data-modus")),
+    "tracker-modus-ende": () => trackerModusEnde(),
+    "tracker-modus-tap": (el) => trackerModusTap(el.getAttribute("data-sid")),
+    "tracker-stunde-beenden": () => trackerStundeBeenden(),
     "tracker-undo": () => trackerUndo(),
 
     "besprechung-pick": (el) => { state.selectedSchuelerId = el.getAttribute("data-sid"); render(); },
@@ -124,7 +130,10 @@
     "besprechung-prev": async () => { await besprechungStep(-1); },
 
     "ausw-range": (el) => { state.auswertungRange = el.getAttribute("data-range"); render(); },
+    "edit-schwellen": async () => schwellenDialog(await Store.Klassen.get(state.klasseId)),
+    "ausw-herleitung": async (el) => mitarbeitHerleitungDialog(el.getAttribute("data-sid")),
     "noten-hj": (el) => { state.notenHalbjahr = el.getAttribute("data-hj"); render(); },
+    "noten-spalten-reset": () => { state.notenSpalten = null; render(); },
     "ausw-hj": (el) => { state.auswertungHalbjahr = el.getAttribute("data-hj"); render(); },
 
     // Einstellungen / Backup
@@ -165,6 +174,7 @@
   // ---- Tracker: Tap & Undo -------------------------------------------------
   async function trackerTap(el) {
     const sid = el.getAttribute("data-sid");
+    if (state.trackerModus) return; // im Modus zählt der Tap auf die ganze Kachel
     if (state.tracker && state.tracker.abwesend && state.tracker.abwesend[sid]) return; // abwesend: keine Ereignisse
     const typ = el.getAttribute("data-type");
     const punkte = state.settings.mitarbeitPunkte[typ];
@@ -175,15 +185,13 @@
         : typ === "sehrgut"
           ? Math.max(0, parseInt(state.settings.heatPunkteSehrGut, 10) || 0)
           : 0;
-    const e = Store.neuesEreignis(state.klasseId, sid, typ, punkte);
+    const t = state.tracker;
+    const e = Store.neuesEreignis(state.klasseId, sid, typ, punkte, t && t.stunde ? t.stunde.id : null);
     e.heatDelta = heatDelta;
     e.halbjahr = parseInt(state.settings.aktuellesHalbjahr, 10) || 1;
     await Store.Ereignisse.save(e);
 
-    const t = state.tracker;
-    if (heatDelta > 0) {
-      t.students[sid] = await Store.addHeatPoints(sid, heatDelta) || t.students[sid];
-    }
+    if (heatDelta > 0) await trackerHeatAddieren(sid, heatDelta);
     t.counts[sid] = (t.counts[sid] || 0) + 1;
     (t.typeCounts[sid] = t.typeCounts[sid] || {});
     t.typeCounts[sid][typ] = (t.typeCounts[sid][typ] || 0) + 1;
@@ -214,9 +222,7 @@
     if (t.typeCounts[e.schuelerId]) {
       t.typeCounts[e.schuelerId][e.typ] = Math.max(0, (t.typeCounts[e.schuelerId][e.typ] || 1) - 1);
     }
-    if (e.heatDelta > 0) {
-      t.students[e.schuelerId] = await Store.addHeatPoints(e.schuelerId, -e.heatDelta) || t.students[e.schuelerId];
-    }
+    if (e.heatDelta > 0) await trackerHeatAddieren(e.schuelerId, -e.heatDelta);
 
     renderSeatCounts(e.schuelerId);
 
@@ -232,6 +238,11 @@
       if (!el) return;
       const action = el.getAttribute("data-action");
       if (ACTIONS[action]) { ev.preventDefault(); ACTIONS[action](el, ev); }
+    });
+    // Esc beendet einen aktiven Tracker-Modus (Tastatur am iPad/Desktop)
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Escape") return;
+      if (state.view === "tracker" && state.trackerModus) { ev.preventDefault(); trackerModusEnde(); }
     });
   }
 

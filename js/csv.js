@@ -79,10 +79,12 @@
 
   // ---- Export: Noten einer Klasse -----------------------------------------
   // Breites Format: je Schüler eine Zeile, je Kategorie Ø + Gesamtnote.
-  function exportNoten(klasse, schuelerListe, kategorien, notenAll, settings) {
+  // ereignisse werden für Kategorien mit anzeige="fehlendeHA" gebraucht
+  // (dort steht die Anzahl vergessener Hausaufgaben statt eines Ø).
+  function exportNoten(klasse, schuelerListe, kategorien, notenAll, settings, ereignisse) {
     const kopf = ["Vorname", "Nachname"];
-    kategorien.forEach((k) => kopf.push(k.name + " (Ø)"));
-    kopf.push("Gesamtnote");
+    kategorien.forEach((k) => kopf.push(k.name + (k.anzeige === "fehlendeHA" ? " (Anzahl)" : " (Ø)")));
+    kopf.push("Schriftlich", "Sonstige", "Gesamtnote", "Zeugnisnote");
     const rows = [kopf];
 
     const notenBySchueler = {};
@@ -90,12 +92,19 @@
 
     schuelerListe.forEach((s) => {
       const res = Calc.berechneSchueler(kategorien, notenBySchueler[s.id] || [], klasse, settings.rundung);
+      const z = Calc.zeugnisErgebnis(res);
       const zeile = [s.vorname, s.nachname];
       kategorien.forEach((k) => {
+        if (k.anzeige === "fehlendeHA") {
+          zeile.push(String((ereignisse || []).filter((e) => e.schuelerId === s.id && e.typ === "keinehausaufgabe").length));
+          return;
+        }
         const ke = res.kategorien.find((x) => x.id === k.id);
         zeile.push(ke && ke.schnitt !== null ? n(ke.schnitt) : "");
       });
+      zeile.push(Calc.formatZeugnisnote(z.schriftlich), Calc.formatZeugnisnote(z.sonstige));
       zeile.push(res.gesamt !== null ? n(res.gesamt) : "");
+      zeile.push(Calc.formatZeugnisnote(z.zeugnis));
       rows.push(zeile);
     });
     downloadCSV("noten_" + safe(klasse.name) + ".csv", rows);

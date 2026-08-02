@@ -42,13 +42,73 @@
     return Math.round(n * 10) / 10; // "eine" (Standard)
   }
 
+  // ---- Zeugnisskala --------------------------------------------------------
+  // Auf dem Zeugnis sind nur ganze Noten und als einzige Tendenz die 4- (=4,3)
+  // zulässig. Grenzen: bis 1,5 -> 1 · bis 2,5 -> 2 · bis 3,5 -> 3 ·
+  // unter 4,15 -> 4 · bis 4,5 -> 4- · bis 5,5 -> 5 · darüber 6.
+  // Genau auf einer Grenze gewinnt die bessere Note (4,5 ist also noch 4-).
+  const EPS = 1e-9;
+  const ZEUGNIS_GRENZEN = [1.5, 2.5, 3.5, 4.15, 4.5, 5.5];
+
+  function zeugnisnote(wert) {
+    if (wert === null || wert === undefined || isNaN(wert)) return null;
+    const w = clampNote(Number(wert));
+    if (w <= 1.5 + EPS) return 1;
+    if (w <= 2.5 + EPS) return 2;
+    if (w <= 3.5 + EPS) return 3;
+    if (w < 4.15 - EPS) return 4;
+    if (w <= 4.5 + EPS) return 4.3;
+    if (w <= 5.5 + EPS) return 5;
+    return 6;
+  }
+
+  function formatZeugnisnote(n) {
+    if (n === null || n === undefined || isNaN(n)) return "–";
+    if (Math.abs(n - 4.3) < 0.01) return "4-";
+    return String(Math.round(n));
+  }
+
+  // Liegt ein Wert exakt auf einer Grenze, ist die Rundung nicht eindeutig.
+  function istGrenzwert(wert) {
+    return ZEUGNIS_GRENZEN.some((g) => Math.abs(wert - g) < EPS);
+  }
+
+  // Zeugnis-Teilnoten und Zeugnisnote aus dem Ergebnis von berechneSchueler.
+  // Gerechnet wird mit den GERUNDETEN Teilnoten (so wie sie in der Übersicht
+  // stehen); landet das Ergebnis genau auf einer Grenze, entscheiden die
+  // ungerundeten Werte (gesamtRoh).
+  function zeugnisErgebnis(res) {
+    const schriftlich = zeugnisnote(res.schriftlich.schnitt);
+    const sonstige = zeugnisnote(res.sonstige.schnitt);
+    let zeugnis = null;
+    if (schriftlich !== null && sonstige !== null) {
+      const kandidat = schriftlich * res.effAnteilS + sonstige * res.effAnteilO;
+      zeugnis = istGrenzwert(kandidat) ? zeugnisnote(res.gesamtRoh) : zeugnisnote(kandidat);
+    } else if (schriftlich !== null) {
+      zeugnis = schriftlich;
+    } else if (sonstige !== null) {
+      zeugnis = sonstige;
+    }
+    return { schriftlich, sonstige, zeugnis };
+  }
+
+  // Jahresnote aus den beiden Halbjahres-Zeugnisnoten: beide zählen 50 %, bei
+  // Gleichstand gibt das 2. Halbjahr den Ausschlag (49 % / 51 %).
+  // Fehlt eine der beiden Noten, gibt es keine Jahresnote.
+  function jahresnote(hj1, hj2) {
+    if (hj1 === null || hj1 === undefined || hj2 === null || hj2 === undefined) return null;
+    return zeugnisnote(hj1 * 0.49 + hj2 * 0.51);
+  }
+
   // ---- Notenberechnung -----------------------------------------------------
   // Liefert eine nachvollziehbare Struktur mit Zwischenergebnissen.
-  //   kategorien: Array {id, name, art, gewichtung}
+  //   kategorien: Array {id, name, art, gewichtung, anzeige}
   //   notenFuerSchueler: Array {kategorieId, wert, halbjahr}
   //   klasse: {anteilSchriftlich, anteilSonstige}
   //   halbjahr: optional 1 | 2 (nur dieses Halbjahr rechnen), null = ganzes Jahr.
   //   Noten ohne halbjahr-Feld (alte Datensätze) fließen immer ein.
+  //   Kategorien mit anzeige != "note" (z. B. Zählung fehlender Hausaufgaben)
+  //   bleiben in den Zwischenergebnissen sichtbar, zählen aber nicht in die Note.
   function berechneSchueler(kategorien, notenFuerSchueler, klasse, rundung, halbjahr) {
     const notenByKat = {};
     notenFuerSchueler.forEach((n) => {
@@ -63,13 +123,14 @@
       const schnitt = werte.length ? werte.reduce((a, b) => a + b, 0) / werte.length : null;
       return {
         id: kat.id, name: kat.name, art: kat.art, gewichtung: kat.gewichtung,
+        zaehltInNote: (kat.anzeige || "note") === "note",
         anzahl: werte.length, werte, schnitt
       };
     });
 
     // 2) Je Art-Gruppe: gewichteter Schnitt (Kategorien ohne Noten ignorieren)
     function gruppe(art) {
-      const kats = katErgebnisse.filter((k) => k.art === art && k.schnitt !== null && k.gewichtung > 0);
+      const kats = katErgebnisse.filter((k) => k.art === art && k.zaehltInNote && k.schnitt !== null && k.gewichtung > 0);
       const gewSumme = kats.reduce((a, k) => a + k.gewichtung, 0);
       const schnitt = gewSumme ? kats.reduce((a, k) => a + k.schnitt * k.gewichtung, 0) / gewSumme : null;
       return { art, kategorien: kats, gewSumme, schnitt };
@@ -120,42 +181,90 @@
   }
 
   // Aggregiert Ereignisse je Schüler innerhalb eines Zeitraums.
-  //   ereignisse: Array {schuelerId, typ, punkte, timestamp}
-  //   abwesendTage: optional Set "schuelerId|YYYY-MM-DD" – Ereignisse an Tagen,
-  //   an denen der Schüler abwesend gemeldet war, fließen nicht in die
-  //   Auswertung ein (der Tag zählt weder als aktiv noch bringt er Punkte).
-  function auswertungMitarbeit(ereignisse, settings, vonTs, bisTs, abwesendTage) {
-    const von = vonTs || 0, bis = bisTs || Store.now() + 1;
+  //   ereignisse: Array {schuelerId, stundeId, typ, punkte, timestamp}
+  //   opts: {
+  //     vonTs, bisTs:   Zeitraum (Default: alles bis jetzt)
+  //     abwesendTage:   Set "schuelerId|YYYY-MM-DD" – Ereignisse an Tagen mit
+  //                     gemeldeter Abwesenheit zählen nicht, und die Stunden
+  //                     dieses Tages fallen für den/die Schüler/in aus dem Nenner
+  //     stunden:        Array der gehaltenen Stunden {datum, startTs} – bereits
+  //                     nach Halbjahr gefiltert; sie bilden den Nenner
+  //     schuelerIds:    optional alle Schüler der Klasse, damit auch Schüler
+  //                     ohne jedes Ereignis einen Vorschlag bekommen
+  //     schwellen:      effektive Notenschwellen (global oder klassenweise)
+  //   }
+  // Der Nenner sind ALLE Stunden im Zeitraum, in denen der/die Schüler/in
+  // anwesend war – auch Stunden ohne jede Meldung (sie zählen 0 Punkte).
+  function auswertungMitarbeit(ereignisse, settings, opts) {
+    opts = opts || {};
+    const von = opts.vonTs || 0, bis = opts.bisTs || Store.now() + 1;
+    const abwesendTage = opts.abwesendTage;
+    const schwellen = opts.schwellen || settings.mitarbeitSchwellen || Store.DEFAULT_SETTINGS.mitarbeitSchwellen;
+    const stunden = (opts.stunden || []).filter((st) => st.startTs >= von && st.startTs <= bis);
+
     const proSchueler = {};
+    function eintrag(sid) {
+      if (!proSchueler[sid]) {
+        proSchueler[sid] = {
+          schuelerId: sid, anzahl: 0, punkte: 0, letzte: 0,
+          typen: {}, tage: {}, stundenIds: {}
+        };
+      }
+      return proSchueler[sid];
+    }
+    (opts.schuelerIds || []).forEach(eintrag);
+
     ereignisse.forEach((e) => {
       if (e.timestamp < von || e.timestamp > bis) return;
       const tag = tagVonTs(e.timestamp);
       if (abwesendTage && abwesendTage.has(e.schuelerId + "|" + tag)) return;
-      const s = proSchueler[e.schuelerId] || (proSchueler[e.schuelerId] = {
-        schuelerId: e.schuelerId, anzahl: 0, punkte: 0, letzte: 0,
-        typen: {}, tage: {}
-      });
+      const s = eintrag(e.schuelerId);
       s.anzahl += 1;
       s.punkte += (e.punkte != null ? e.punkte : (settings.mitarbeitPunkte[e.typ] || 0));
       s.letzte = Math.max(s.letzte, e.timestamp);
       s.typen[e.typ] = (s.typen[e.typ] || 0) + 1;
       s.tage[tag] = true;
+      s.stundenIds[e.stundeId || tag] = true;
     });
-    Object.values(proSchueler).forEach((s) => {
-      const aktiveTage = Object.keys(s.tage).length || 1;
-      s.aktiveTage = aktiveTage;
-      s.punkteProTag = s.punkte / aktiveTage;
-      s.notenvorschlag = punkteZuNote(s.punkteProTag, settings);
+
+    Object.keys(proSchueler).forEach((sid) => {
+      const s = proSchueler[sid];
+      let gezaehlt = 0;
+      stunden.forEach((st) => {
+        if (abwesendTage && abwesendTage.has(sid + "|" + st.datum)) return;
+        gezaehlt += 1;
+      });
+      s.stundenGezaehlt = gezaehlt;
+      s.stundenMitEreignis = Object.keys(s.stundenIds).length;
+      s.aktiveTage = Object.keys(s.tage).length;
+      // Ohne bekannte Stunden (z. B. gefilterter Zeitraum) ersatzweise die
+      // Stunden mit Ereignis, damit nie durch 0 geteilt wird.
+      s.nenner = gezaehlt || s.stundenMitEreignis || 1;
+      s.punkteProStunde = s.punkte / s.nenner;
+      // Ohne jede Grundlage (keine Stunde, kein Ereignis) gibt es keinen Vorschlag.
+      s.notenvorschlag = (gezaehlt || s.anzahl) ? punkteZuNote(s.punkteProStunde, schwellen) : null;
     });
     return proSchueler;
   }
 
-  function punkteZuNote(punkteProTag, settings) {
-    const schwellen = settings.mitarbeitSchwellen || Store.DEFAULT_SETTINGS.mitarbeitSchwellen;
-    for (const s of schwellen) {
-      if (punkteProTag >= s.abPunkte) return s.note;
+  function punkteZuNote(punkteProStunde, schwellen) {
+    const liste = schwellen || Store.DEFAULT_SETTINGS.mitarbeitSchwellen;
+    for (const s of liste) {
+      if (punkteProStunde >= s.abPunkte) return s.note;
     }
     return 6;
+  }
+
+  // Effektive Notenschwellen: eigene Schwellen der Klasse schlagen die
+  // globale Einstellung (Fächer ermöglichen unterschiedliche Mitarbeit).
+  function schwellenFuer(settings, klasse) {
+    if (klasse && Array.isArray(klasse.mitarbeitSchwellen) && klasse.mitarbeitSchwellen.length) {
+      return klasse.mitarbeitSchwellen;
+    }
+    if (settings && Array.isArray(settings.mitarbeitSchwellen) && settings.mitarbeitSchwellen.length) {
+      return settings.mitarbeitSchwellen;
+    }
+    return Store.DEFAULT_SETTINGS.mitarbeitSchwellen;
   }
 
   // Heatmap-Farbe für den Tracker.
@@ -248,7 +357,9 @@
   global.Calc = {
     parseNote, formatNote, clampNote, rundeGesamt,
     berechneSchueler, noteFarbe,
-    auswertungMitarbeit, punkteZuNote, heatFarbe,
+    zeugnisnote, formatZeugnisnote, zeugnisErgebnis, jahresnote,
+    auswertungMitarbeit, punkteZuNote, schwellenFuer, heatFarbe,
+    tagVonTs,
     heatPunkteAktuell, heatFarbeDurchPunkte,
     aktuelleStunde, trackerSession
   };
