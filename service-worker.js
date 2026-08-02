@@ -3,16 +3,26 @@
    Cache-first für die statischen Dateien. Nutzdaten liegen in IndexedDB
    und werden vom Service Worker nicht angefasst.
    ========================================================================= */
-const CACHE = "noten-fritze-v2";
+// Cache-Name = App-Version (js/version.js). Damit reicht das Erhöhen von
+// APP_VERSION, um installierten PWAs eine neue App-Shell auszuliefern.
+importScripts("./js/version.js");
+const CACHE = "noten-fritze-" + self.APP_VERSION;
 const ASSETS = [
   "./",
   "./index.html",
   "./css/styles.css",
+  "./js/version.js",
   "./js/db.js",
   "./js/store.js",
   "./js/calc.js",
   "./js/csv.js",
   "./js/ui.js",
+  "./js/views.core.js",
+  "./js/views.home-klasse.js",
+  "./js/views.tracker.js",
+  "./js/views.besprechung.js",
+  "./js/views.einstellungen.js",
+  "./js/views.dialoge.js",
   "./js/views.js",
   "./js/app.js",
   "./manifest.webmanifest",
