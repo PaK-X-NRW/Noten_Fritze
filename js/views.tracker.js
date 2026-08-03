@@ -3,7 +3,7 @@
    - Erfassung läuft immer in einer Unterrichtsstunde (Store.Stunden), die
      beim Start angelegt, fortgesetzt und beendet werden kann
    - Kacheln tragen nur die Ereignistypen mit aufKachel = true
-   - Abwesend / keine HA / Heatmap laufen als Modi über die Topbar
+   - Abwesend / Verweigerung / keine HA / Heatmap laufen als Modi über die Topbar
    - Heatmap verfällt nur innerhalb einer laufenden Stunde (dazwischen eingefroren)
    ========================================================================= */
 (function (global) {
@@ -11,9 +11,10 @@
 
   const { state, go, render } = global.Views;
 
-  // Die drei Topbar-Modi. Im Modus ist die ganze Kachel ein Tap-Ziel.
+  // Die vier Topbar-Modi. Im Modus ist die ganze Kachel ein Tap-Ziel.
   const MODI = {
     abwesend: { icon: "🤒", label: "Abwesend", hinweis: "Schüler/innen antippen, die heute fehlen. Sie werden ausgegraut und zählen nicht in die Auswertung." },
+    verweigerung: { icon: "🚫", label: "Verweigerung", hinweis: "Schüler/innen antippen, die die Mitarbeit verweigern. Die Stunde zählt als Note 6; Meldungen dieser Stunde entfallen, vergessene Hausaufgaben bleiben gezählt." },
     keineha:  { icon: "📕", label: "Keine HA", hinweis: "Schüler/innen antippen, die keine Hausaufgaben haben. Der Vermerk gilt für diese Stunde." },
     heat:     { icon: "⚙️", label: "Heatmap",  hinweis: "Schüler/in antippen, um den Heatmap-Wert direkt zu setzen." }
   };
@@ -33,7 +34,7 @@
     // Legende erklärt Farbe + Kurzlabel der Buttons auf den Kacheln
     const legende = Store.KACHEL_EVENT_TYPES.map((typ) =>
       '<span class="lg"><span class="dot" style="background:' + typ.farbe + '"></span>' +
-        UI.esc(typ.label) + ' <span class="muted">(' +
+        (typ.icon ? typ.icon + " " : "") + UI.esc(typ.label) + ' <span class="muted">(' +
         (state.settings.mitarbeitPunkte[typ.id] > 0 ? "+" : "") + state.settings.mitarbeitPunkte[typ.id] + ")</span></span>"
     ).join("");
 
@@ -61,7 +62,10 @@
         '<div class="grow"></div>' +
         '<div class="legend">viel <span class="bar"></span> wenig</div>' +
       "</div>" +
-      '<div class="tracker-scroll"><div class="seatgrid tracker-grid" id="tracker-grid" style="--cols:' + plan.cols + '">' + seats + "</div></div>" +
+      // Bei vielen Spalten schrumpfen die Kacheln, damit das Raster aufs Display passt
+      '<div class="tracker-scroll"><div class="seatgrid tracker-grid' +
+        (plan.cols >= 9 ? " mini" : plan.cols >= 7 ? " kompakt" : "") +
+        '" id="tracker-grid" style="--cols:' + plan.cols + '">' + seats + "</div></div>" +
       (Object.keys(t.students).length ? "" : '<div class="empty">Kein Sitzplan belegt. Lege im Tab „Sitzplan“ Plätze an.</div>');
 
     return { topbar, body, mount: mountTracker, fullWidth: true };
@@ -81,7 +85,8 @@
       return st;
     }
     if (state.tracker && state.tracker.klasseId === k.id && state.tracker.stunde) return state.tracker.stunde;
-    const st = Store.neueStunde(k.id, null, state.settings.aktuellesHalbjahr);
+    // Neue Stunden tragen das eingestellte Quartal, nicht das aus dem Datum abgeleitete.
+    const st = Store.neueStunde(k.id, { quartal: parseInt(state.settings.aktuellesQuartal, 10) || 1 });
     await Store.Stunden.save(st);
     return st;
   }
@@ -107,19 +112,20 @@
     schueler.forEach((s) => { students[s.id] = s; names[s.id] = UI.vollerName(s); });
 
     // Zähler beziehen sich auf diese Stunde, nicht mehr auf den ganzen Tag.
-    const counts = {}, typeCounts = {}, keineHA = {};
+    const counts = {}, typeCounts = {}, keineHA = {}, verweigerung = {};
     ereignisse.forEach((e) => {
       counts[e.schuelerId] = (counts[e.schuelerId] || 0) + 1;
       if (!typeCounts[e.schuelerId]) typeCounts[e.schuelerId] = {};
       typeCounts[e.schuelerId][e.typ] = (typeCounts[e.schuelerId][e.typ] || 0) + 1;
       if (e.typ === "keinehausaufgabe") keineHA[e.schuelerId] = e.id;
+      if (e.typ === "verweigerung") verweigerung[e.schuelerId] = e.id;
     });
 
     const abwesend = {};
     abwList.forEach((a) => { abwesend[a.schuelerId] = true; });
 
     state.tracker = {
-      klasseId: k.id, stunde, counts, typeCounts, keineHA, names, students,
+      klasseId: k.id, stunde, counts, typeCounts, keineHA, verweigerung, names, students,
       undoStack: [], heatTimer: null, abwesend
     };
 
@@ -247,6 +253,7 @@
   // Tap auf eine Kachel, während ein Modus aktiv ist.
   async function trackerModusTap(sid) {
     if (state.trackerModus === "abwesend") return trackerAbwesendToggle(sid);
+    if (state.trackerModus === "verweigerung") return trackerVerweigerungToggle(sid);
     if (state.trackerModus === "keineha") return trackerKeineHAToggle(sid);
     if (state.trackerModus === "heat") return trackerHeatEditDialog(sid);
   }
@@ -257,26 +264,29 @@
     const t = state.tracker;
     const abwesend = !!(t.abwesend && t.abwesend[s.id]);
     const keineHA = !!(t.keineHA && t.keineHA[s.id]);
+    const verweigert = !!(t.verweigerung && t.verweigerung[s.id]);
     const bg = Calc.heatFarbeDurchPunkte(heatAktuell(s).heatPoints);
     const total = t.counts[s.id] || 0;
     const tc = t.typeCounts[s.id] || {};
     const modus = state.trackerModus;
 
     // Pro Ereignistyp mit aufKachel = true ein eigener Button auf der Kachel.
-    // Bei Abwesenheit deaktiviert; im Modus lässt CSS die Taps auf die Kachel
-    // durch (disabled würde den Klick schlucken, statt ihn weiterzureichen).
+    // Bei Abwesenheit oder Verweigerung deaktiviert; im Modus lässt CSS die
+    // Taps auf die Kachel durch (disabled würde den Klick schlucken, statt
+    // ihn weiterzureichen).
     const buttons = Store.KACHEL_EVENT_TYPES.map((et) => {
       const c = tc[et.id] || 0;
       return '<button class="typebtn" data-action="tracker-tap" data-sid="' + s.id + '" data-type="' + et.id + '" style="--c:' + et.farbe + '"' +
-        (abwesend ? " disabled" : "") + ">" +
-        '<span class="tlabel">' + UI.esc(et.kurz) + "</span>" +
+        (abwesend || verweigert ? " disabled" : "") + ">" +
+        '<span class="tlabel">' + UI.esc(et.icon) + "</span>" +
         '<span class="tcount">' + (c ? c : "") + "</span>" +
       "</button>";
     }).join("");
 
     const vermerke =
       (abwesend ? ' <span class="muted">(abwesend)</span>' : "") +
-      (keineHA ? ' <span class="tag-ha">keine HA</span>' : "");
+      (keineHA ? ' <span class="tag-ha">keine HA</span>' : "") +
+      (verweigert ? ' <span class="tag-verweigerung">Verweigerung</span>' : "");
 
     return '<div class="seat tracker heat' + (abwesend ? " abwesend" : "") + (modus ? " modus" : "") + '"' +
       ' style="background:' + bg + '" data-sid="' + s.id + '" data-seat="' + seat.id + '"' +
@@ -374,13 +384,47 @@
       UI.toast(name + "Vermerk entfernt");
     } else {
       const e = Store.neuesEreignis(state.klasseId, sid, typ, state.settings.mitarbeitPunkte[typ], t.stunde.id);
-      e.halbjahr = parseInt(state.settings.aktuellesHalbjahr, 10) || 1;
+      e.quartal = parseInt(state.settings.aktuellesQuartal, 10) || 1;
+      e.halbjahr = Store.halbjahrAusQuartal(e.quartal);
       await Store.Ereignisse.save(e);
       t.keineHA[sid] = e.id;
       t.counts[sid] = (t.counts[sid] || 0) + 1;
       if (!t.typeCounts[sid]) t.typeCounts[sid] = {};
       t.typeCounts[sid][typ] = (t.typeCounts[sid][typ] || 0) + 1;
       UI.toast(name + "keine Hausaufgaben");
+      // Im Modus „note6“ zieht jede 3. vergessene HA des Quartals eine Note 6 nach sich.
+      const note6 = await Store.haNote6Pruefen(state.klasseId, sid, e.quartal);
+      if (note6) UI.toast("3× Hausaufgaben vergessen – Note 6 in Mündliche Mitarbeit eingetragen");
+    }
+    await refreshTrackerSeat(sid);
+  }
+
+  // „Leistungsverweigerung“ für diese Stunde vermerken bzw. wieder entfernen.
+  // Die Stunde zählt als Note 6; Meldungen der Stunde entfallen in der
+  // Auswertung, vergessene Hausaufgaben bleiben gezählt.
+  async function trackerVerweigerungToggle(sid) {
+    const t = state.tracker;
+    if (!t) return;
+    const typ = "verweigerung";
+    const name = t.names && t.names[sid] ? t.names[sid] + " · " : "";
+    const vorhanden = t.verweigerung && t.verweigerung[sid];
+    if (vorhanden) {
+      await Store.Ereignisse.remove(vorhanden);
+      delete t.verweigerung[sid];
+      t.counts[sid] = Math.max(0, (t.counts[sid] || 1) - 1);
+      if (t.typeCounts[sid]) t.typeCounts[sid][typ] = Math.max(0, (t.typeCounts[sid][typ] || 1) - 1);
+      UI.toast(name + "Vermerk entfernt");
+    } else {
+      const e = Store.neuesEreignis(state.klasseId, sid, typ, 0, t.stunde.id);
+      e.quartal = parseInt(state.settings.aktuellesQuartal, 10) || 1;
+      e.halbjahr = Store.halbjahrAusQuartal(e.quartal);
+      await Store.Ereignisse.save(e);
+      if (!t.verweigerung) t.verweigerung = {};
+      t.verweigerung[sid] = e.id;
+      t.counts[sid] = (t.counts[sid] || 0) + 1;
+      if (!t.typeCounts[sid]) t.typeCounts[sid] = {};
+      t.typeCounts[sid][typ] = (t.typeCounts[sid][typ] || 0) + 1;
+      UI.toast(name + "Leistungsverweigerung – Stunde zählt als 6");
     }
     await refreshTrackerSeat(sid);
   }
@@ -464,7 +508,9 @@
   // Neue Stunde anlegen (und eine noch offene vorher schließen).
   async function stundeStarten(session, offen) {
     if (offen) await Store.Stunden.beenden(offen.id);
-    const st = Store.neueStunde(state.klasseId, session, state.settings.aktuellesHalbjahr);
+    // Neue Stunden tragen das eingestellte Quartal, nicht das aus dem Datum abgeleitete.
+    session = Object.assign({}, session, { quartal: parseInt(state.settings.aktuellesQuartal, 10) || 1 });
+    const st = Store.neueStunde(state.klasseId, session);
     await Store.Stunden.save(st);
     state.pendingStunde = st;
     state.trackerModus = null;
@@ -494,7 +540,7 @@
 
   Object.assign(global.Views, {
     ViewTracker, trackerStartDialog, trackerHeatEditDialog, trackerAbwesendToggle,
-    trackerKeineHAToggle, trackerModusToggle, trackerModusEnde, trackerModusTap,
+    trackerKeineHAToggle, trackerVerweigerungToggle, trackerModusToggle, trackerModusEnde, trackerModusTap,
     trackerStundeBeenden, trackerVerlassen, trackerHeatAddieren,
     stopHeatTimer, renderSeatCounts, syncModusKlasse
   });

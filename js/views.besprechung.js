@@ -4,7 +4,7 @@
 (function (global) {
   "use strict";
 
-  const { state, hjFilter, hjTabsHTML } = global.Views;
+  const { state, quartalFilter, quartalTabsHTML } = global.Views;
 
   // =========================================================================
   //  BESPRECHUNGSMODUS – ein Schüler nach dem anderen
@@ -33,7 +33,7 @@
     const s = schueler[idx];
     if (!s) { state.selectedSchuelerId = null; return ViewBesprechung(); }
     const notenS = notenAll.filter((n) => n.schuelerId === s.id);
-    const res = Calc.berechneSchueler(kats, notenS, k, state.settings.rundung, hjFilter("notenHalbjahr"));
+    const res = Calc.berechneSchueler(kats, notenS, k, state.settings.rundung, quartalFilter("notenQuartal"));
 
     const body =
       '<div class="discussion">' +
@@ -43,7 +43,7 @@
           '<button class="iconbtn" data-action="besprechung-next"' + (idx >= schueler.length - 1 ? " disabled" : "") + ">›</button>" +
         "</div>" +
         '<div class="hstack" style="justify-content:center;margin-bottom:10px"><div class="tabs" style="margin:0">' +
-          hjTabsHTML("notenHalbjahr", "noten-hj") + "</div></div>" +
+          quartalTabsHTML("notenQuartal", "noten-hj") + "</div></div>" +
         '<div class="card">' +
           '<div class="big-grade" style="color:' + Calc.noteFarbe(res.gesamt) + '">' +
             (res.gesamt !== null ? Calc.formatNote(res.gesamt, state.settings.rundung === "ganze" ? 0 : 1) : "–") + "</div>" +

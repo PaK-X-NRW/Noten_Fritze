@@ -4,6 +4,7 @@
    Text, aber Noten als Zahl mit Punkt sind Numbers-tauglich. Wir liefern
    Noten mit Komma für die Anzeige-Spalten und zusätzlich robustes Quoting.
    UTF-8 mit BOM, damit Umlaute in Numbers/Excel korrekt erscheinen.
+   Alle Exporte laufen über speichern() (Export-Ordner → Teilen → Download).
    ========================================================================= */
 (function (global) {
   "use strict";
@@ -51,14 +52,6 @@
     return rows.filter((r) => r.some((f) => f.trim() !== ""));
   }
 
-  function downloadCSV(filename, rows) {
-    const blob = new Blob([toCSV(rows)], { type: "text/csv;charset=utf-8;" });
-    triggerDownload(filename, blob);
-  }
-  function downloadText(filename, text, mime) {
-    const blob = new Blob([text], { type: (mime || "text/plain") + ";charset=utf-8;" });
-    triggerDownload(filename, blob);
-  }
   function triggerDownload(filename, blob) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -67,23 +60,80 @@
     setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 500);
   }
 
+  // ---- Export-Ordner (File System Access API) ------------------------------
+  // Das Verzeichnis-Handle liegt als eigener Datensatz { key: "export",
+  // ordnerHandle } im Store "einstellungen" – NICHT im "app"-Settings-Objekt.
+  async function exportOrdner() {
+    try {
+      const rec = await DB.get("einstellungen", "export");
+      return rec && rec.ordnerHandle ? rec.ordnerHandle : null;
+    } catch (e) { return null; }
+  }
+  async function exportOrdnerSetzen(handle) {
+    await DB.put("einstellungen", { key: "export", ordnerHandle: handle });
+  }
+  async function exportOrdnerVergessen() {
+    await DB.del("einstellungen", "export");
+  }
+
+  // ---- Zentrales Speichern aller Exporte ------------------------------------
+  // Dreistufig. Hinweis: iPad-Safari hat keinen Ordner-Picker für Downloads –
+  // dort ist das Teilen-Blatt („In Dateien sichern") der Weg zur Ordnerwahl.
+  // Rückgabe: "ordner" | "teilen" | "abgebrochen" | "download".
+  async function speichern(dateiname, inhalt, mime) {
+    // 1) Gewählter Export-Ordner (Chrome/Edge Desktop)
+    try {
+      const ordner = await exportOrdner();
+      if (ordner) {
+        let perm = await ordner.queryPermission({ mode: "readwrite" });
+        if (perm === "prompt") perm = await ordner.requestPermission({ mode: "readwrite" });
+        if (perm === "granted") {
+          const fh = await ordner.getFileHandle(dateiname, { create: true });
+          const w = await fh.createWritable();
+          await w.write(new Blob([inhalt], { type: mime }));
+          await w.close();
+          return "ordner";
+        }
+      }
+    } catch (e) { /* still zur nächsten Stufe */ }
+
+    // 2) Web Share API (iPad-Safari)
+    try {
+      const file = new File([inhalt], dateiname, { type: mime });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file] });
+        return "teilen";
+      }
+    } catch (e) {
+      // Nutzer bricht das Teilen-Blatt ab -> kein Fallback-Download
+      if (e && e.name === "AbortError") return "abgebrochen";
+      /* sonst still zur nächsten Stufe */
+    }
+
+    // 3) Fallback: klassischer Download
+    triggerDownload(dateiname, new Blob([inhalt], { type: mime }));
+    return "download";
+  }
+
   function n(v) { return Calc.formatNote(v, 1); } // Note deutsch (Komma)
   function safe(s) { return (s || "").replace(/[\/\\:*?"<>|]/g, "-"); }
 
   // ---- Export: Schülerliste ------------------------------------------------
-  function exportSchueler(klasse, schuelerListe) {
+  async function exportSchueler(klasse, schuelerListe) {
     const rows = [["Vorname", "Nachname", "Bemerkung"]];
     schuelerListe.forEach((s) => rows.push([s.vorname, s.nachname, s.bemerkung]));
-    downloadCSV("schueler_" + safe(klasse.name) + ".csv", rows);
+    return await speichern("schueler_" + safe(klasse.name) + ".csv", toCSV(rows), "text/csv");
   }
 
   // ---- Export: Noten einer Klasse -----------------------------------------
-  // Breites Format: je Schüler eine Zeile, je Kategorie Ø + Gesamtnote.
+  // Breites Format: je Schüler eine Zeile, je Kategorie Ø + Quartals-Spalten
+  // der sonstigen Leistungen + Gesamtnote.
   // ereignisse werden für Kategorien mit anzeige="fehlendeHA" gebraucht
   // (dort steht die Anzahl vergessener Hausaufgaben statt eines Ø).
-  function exportNoten(klasse, schuelerListe, kategorien, notenAll, settings, ereignisse) {
+  async function exportNoten(klasse, schuelerListe, kategorien, notenAll, settings, ereignisse) {
     const kopf = ["Vorname", "Nachname"];
     kategorien.forEach((k) => kopf.push(k.name + (k.anzeige === "fehlendeHA" ? " (Anzahl)" : " (Ø)")));
+    kopf.push("Sonstige 1. Q", "Sonstige 2. Q", "Sonstige 3. Q", "Sonstige 4. Q");
     kopf.push("Schriftlich", "Sonstige", "Gesamtnote", "Zeugnisnote");
     const rows = [kopf];
 
@@ -91,7 +141,8 @@
     notenAll.forEach((no) => (notenBySchueler[no.schuelerId] = notenBySchueler[no.schuelerId] || []).push(no));
 
     schuelerListe.forEach((s) => {
-      const res = Calc.berechneSchueler(kategorien, notenBySchueler[s.id] || [], klasse, settings.rundung);
+      const noten = notenBySchueler[s.id] || [];
+      const res = Calc.berechneSchueler(kategorien, noten, klasse, settings.rundung);
       const z = Calc.zeugnisErgebnis(res);
       const zeile = [s.vorname, s.nachname];
       kategorien.forEach((k) => {
@@ -102,29 +153,34 @@
         const ke = res.kategorien.find((x) => x.id === k.id);
         zeile.push(ke && ke.schnitt !== null ? n(ke.schnitt) : "");
       });
+      // Sonstige-Zeugnisnote je Quartal (aus dem Quartals-Schnitt)
+      [1, 2, 3, 4].forEach((q) => {
+        const zq = Calc.zeugnisErgebnis(Calc.berechneSchueler(kategorien, noten, klasse, settings.rundung, q));
+        zeile.push(Calc.formatZeugnisnote(zq.sonstige));
+      });
       zeile.push(Calc.formatZeugnisnote(z.schriftlich), Calc.formatZeugnisnote(z.sonstige));
       zeile.push(res.gesamt !== null ? n(res.gesamt) : "");
       zeile.push(Calc.formatZeugnisnote(z.zeugnis));
       rows.push(zeile);
     });
-    downloadCSV("noten_" + safe(klasse.name) + ".csv", rows);
+    return await speichern("noten_" + safe(klasse.name) + ".csv", toCSV(rows), "text/csv");
   }
 
   // ---- Export: Einzelnoten (Langformat) ------------------------------------
-  function exportEinzelnoten(klasse, schuelerListe, kategorien, notenAll) {
+  async function exportEinzelnoten(klasse, schuelerListe, kategorien, notenAll) {
     const sMap = {}; schuelerListe.forEach((s) => (sMap[s.id] = s));
     const kMap = {}; kategorien.forEach((k) => (kMap[k.id] = k));
-    const rows = [["Vorname", "Nachname", "Kategorie", "Art", "Titel", "Note", "Datum", "Halbjahr"]];
+    const rows = [["Vorname", "Nachname", "Kategorie", "Art", "Titel", "Note", "Datum", "Quartal"]];
     notenAll.forEach((no) => {
       const s = sMap[no.schuelerId], k = kMap[no.kategorieId];
       if (!s || !k) return;
-      rows.push([s.vorname, s.nachname, k.name, k.art, no.titel, n(no.wert), no.datum, no.halbjahr || ""]);
+      rows.push([s.vorname, s.nachname, k.name, k.art, no.titel, n(no.wert), no.datum, no.quartal || no.halbjahr || ""]);
     });
-    downloadCSV("einzelnoten_" + safe(klasse.name) + ".csv", rows);
+    return await speichern("einzelnoten_" + safe(klasse.name) + ".csv", toCSV(rows), "text/csv");
   }
 
   // ---- Export: Ereignisse / Wortmeldungen ----------------------------------
-  function exportEreignisse(klasse, schuelerListe, ereignisse) {
+  async function exportEreignisse(klasse, schuelerListe, ereignisse) {
     const sMap = {}; schuelerListe.forEach((s) => (sMap[s.id] = s));
     const rows = [["Vorname", "Nachname", "Ereignistyp", "Punkte", "Zeitpunkt"]];
     ereignisse.slice().sort((a, b) => a.timestamp - b.timestamp).forEach((e) => {
@@ -132,7 +188,22 @@
       const typ = Store.EVENT_TYPE_MAP[e.typ];
       rows.push([s.vorname, s.nachname, typ ? typ.label : e.typ, e.punkte, new Date(e.timestamp).toLocaleString("de-DE")]);
     });
-    downloadCSV("mitarbeit_" + safe(klasse.name) + ".csv", rows);
+    return await speichern("mitarbeit_" + safe(klasse.name) + ".csv", toCSV(rows), "text/csv");
+  }
+
+  // ---- Export: Mitarbeitsnoten eines Quartals (beim Quartalsabschluss) ------
+  // eintraege: [{ schuelerId, wert }] – wert ist der rohe String aus dem
+  // Eingabefeld ("2+", "2,3" ...); ungültige/leere werden übersprungen.
+  async function exportQuartalNoten(klasse, schuelerListe, eintraege, quartal) {
+    const sMap = {}; schuelerListe.forEach((s) => (sMap[s.id] = s));
+    const rows = [["Vorname", "Nachname", "Note", "Quartal"]];
+    eintraege.forEach((e) => {
+      const s = sMap[e.schuelerId]; if (!s) return;
+      const wert = Calc.parseNote(e.wert);
+      if (wert === null) return;
+      rows.push([s.vorname, s.nachname, n(wert), quartal]);
+    });
+    return await speichern("mitarbeit_q" + quartal + "_" + safe(klasse.name) + ".csv", toCSV(rows), "text/csv");
   }
 
   // ---- Import: Schülerliste ------------------------------------------------
@@ -165,8 +236,9 @@
   }
 
   global.CSV = {
-    toCSV, parseCSV, downloadCSV, downloadText,
-    exportSchueler, exportNoten, exportEinzelnoten, exportEreignisse,
+    toCSV, parseCSV, safe, speichern,
+    exportOrdner, exportOrdnerSetzen, exportOrdnerVergessen,
+    exportSchueler, exportNoten, exportEinzelnoten, exportEreignisse, exportQuartalNoten,
     importSchueler
   };
 })(window);

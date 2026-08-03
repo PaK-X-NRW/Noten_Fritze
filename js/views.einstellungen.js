@@ -21,8 +21,8 @@
   }
 
   // ---- Notenschwellen (global und je Klasse gleiches Markup) ----------------
-  // Eine Zeile je Note 1–5: ab wie vielen Ø-Punkten pro gehaltener Stunde
-  // diese Note vorgeschlagen wird. Darunter bleibt 6.
+  // Eine Zeile je Note 1–5: ab wie vielen Punkten in einer einzelnen Stunde
+  // diese Stundennote vergeben wird. Darunter bleibt 6.
   function schwellenFelderHTML(schwellen) {
     const map = {};
     (schwellen || []).forEach((s) => { map[s.note] = s.abPunkte; });
@@ -32,10 +32,10 @@
         '<span class="muted">ab</span>' +
         '<input type="number" step="0.1" inputmode="decimal" style="width:110px" data-schwelle="' + note + '" value="' +
           (map[note] != null ? map[note] : "") + '">' +
-        '<span class="muted">Ø Pkt./Stunde</span>' +
+        '<span class="muted">Punkten in der Stunde</span>' +
       "</div>"
     ).join("");
-    return zeilen + '<div class="hint">Ø = erreichte Punkte ÷ gehaltene Stunden (Stunden ohne Meldung zählen mit). Wer unter der letzten Schwelle liegt, bekommt eine 6.</div>';
+    return zeilen + '<div class="hint">Die Punkte einer Stunde werden über diese Schwellen in eine Stundennote übersetzt; die Mitarbeitsnote ist der Ø aller Stundennoten. Wer unter der letzten Schwelle liegt, bekommt eine 6.</div>';
   }
 
   // Liest die Schwellen-Felder eines Containers aus und normalisiert sie.
@@ -54,6 +54,10 @@
   // =========================================================================
   async function ViewEinstellungen() {
     const s = state.settings;
+    // Gewählter Export-Ordner (File System Access API) – nur Name lesen,
+    // keine Berechtigungsabfrage beim Anzeigen.
+    const ordnerApi = !!window.showDirectoryPicker;
+    const ordnerHandle = ordnerApi ? await CSV.exportOrdner() : null;
     const punkte = Store.EVENT_TYPES.map((t) =>
       '<div class="form-row" style="align-items:center">' +
         '<div class="grow"><strong>' + UI.esc(t.label) + "</strong></div>" +
@@ -83,10 +87,12 @@
           { value: "keine", label: "Zwei Nachkommastellen (2,33)" },
           { value: "ganze", label: "Ganze Note (2)" }
         ]}) +
-        UI.field("Aktuelles Halbjahr", "aktuellesHalbjahr", s.aktuellesHalbjahr, { type: "select", options: [
-          { value: "1", label: "1. Halbjahr" },
-          { value: "2", label: "2. Halbjahr" }
-        ], hint: "Neue Noten und Mitarbeits-Ereignisse werden diesem Halbjahr zugeordnet." }) +
+        UI.field("Aktuelles Quartal", "aktuellesQuartal", s.aktuellesQuartal, { type: "select", options: [
+          { value: "1", label: "1. Quartal" },
+          { value: "2", label: "2. Quartal" },
+          { value: "3", label: "3. Quartal" },
+          { value: "4", label: "4. Quartal" }
+        ], hint: "Neue Noten, Stunden und Mitarbeits-Ereignisse werden diesem Quartal zugeordnet." }) +
       "</div>" +
       '<div class="card"><h2>Darstellung</h2>' +
         UI.field("Reihenfolge der Schüler/innen", "schuelerSortierung", s.schuelerSortierung, { type: "select", options: [
@@ -95,9 +101,13 @@
         ], hint: "Gilt für alle Listen: Noten, Tracker, Sitzplan, Besprechung und CSV-Exporte. Die manuelle Reihenfolge bleibt gespeichert und ist jederzeit wieder abrufbar." }) +
       "</div>" +
       '<div class="card"><h2>Mitarbeit – Punkte je Ereignistyp</h2>' + punkte +
+        UI.field("Vergessene Hausaufgaben werten", "haModus", s.haModus, { type: "select", options: [
+          { value: "punkte", label: "Punkteabzug in der Mitarbeit" },
+          { value: "note6", label: "Ab der 3. je eine Note 6 (Mündliche Mitarbeit)" }
+        ], hint: "Bei „Note 6“ geben vergessene Hausaufgaben keine Punkte; jede 3. je Quartal erzeugt automatisch eine Note 6 in der Kategorie „Mündliche Mitarbeit“." }) +
       "</div>" +
       '<div class="card"><h2>Mitarbeit – Notenschwellen</h2>' +
-        '<p class="muted">Vorschlag für die mündliche Mitarbeitsnote. Einzelne Klassen können eigene Schwellen bekommen (Klasse → Auswertung → Schwellen), z. B. weil eine Biologiestunde andere Mitarbeit ermöglicht als eine Deutschstunde.</p>' +
+        '<p class="muted">Übersetzt die Punkte einer einzelnen Stunde in eine Stundennote; der Vorschlag für die Mitarbeitsnote ist der Ø aller Stundennoten. Einzelne Klassen können eigene Schwellen bekommen (Klasse → Auswertung → Schwellen), z. B. weil eine Biologiestunde andere Mitarbeit ermöglicht als eine Deutschstunde.</p>' +
         '<div id="schwellen-global">' + schwellenFelderHTML(s.mitarbeitSchwellen) + "</div>" +
       "</div>" +
       '<div class="card"><h2>Heatmap</h2>' + heatpunkte +
@@ -111,6 +121,19 @@
       '<div class="card"><h2>Stundenplan</h2>' +
         '<p class="muted">Gilt für jeden Schultag gleich. Der Tracker erkennt damit die laufende Stunde und ihre Restzeit.</p>' +
         stundenplanHTML(s) +
+      "</div>" +
+      '<div class="card"><h2>Export-Ordner</h2>' +
+        '<p class="muted">Exporte (CSV/JSON) direkt in einen Ordner auf diesem Gerät speichern. ' +
+        'Funktioniert in Chrome/Edge; auf dem iPad läuft der Export stattdessen über das Teilen-Blatt („In Dateien sichern“).</p>' +
+        (!ordnerApi
+          ? '<p class="hint">Auf diesem Gerät/Browser nicht verfügbar – Exporte laufen über das Teilen-Blatt oder den Downloads-Ordner.</p>'
+          : '<p class="hint">' + (ordnerHandle
+              ? "Gewählter Ordner: <strong>" + UI.esc(ordnerHandle.name) + "</strong>"
+              : "Kein Ordner gewählt.") + "</p>" +
+            '<div class="btn-row">' +
+              '<button class="btn" data-action="export-ordner-waehlen">Ordner wählen</button>' +
+              (ordnerHandle ? '<button class="btn" data-action="export-ordner-vergessen">Entfernen</button>' : "") +
+            "</div>") +
       "</div>" +
       '<div class="card"><h2>Datensicherung</h2><p class="muted">Alle Daten bleiben lokal im Browser. Sicherung als JSON-Datei empfohlen.</p>' +
         '<div class="btn-row">' +
@@ -132,12 +155,17 @@
         s.schuelerSortierung = selSort.value === "manuell" ? "manuell" : "nachname";
         await Store.saveSettings(s); UI.toast("Gespeichert");
       });
-      const selHj = UI.$("#f-aktuellesHalbjahr");
-      if (selHj) selHj.addEventListener("change", async () => {
-        s.aktuellesHalbjahr = parseInt(selHj.value, 10) || 1;
+      const selQ = UI.$("#f-aktuellesQuartal");
+      if (selQ) selQ.addEventListener("change", async () => {
+        s.aktuellesQuartal = parseInt(selQ.value, 10) || 1;
         await Store.saveSettings(s);
-        state.notenHalbjahr = ""; state.auswertungHalbjahr = ""; // Filter-Defaults neu ziehen
-        UI.toast("Halbjahr gespeichert");
+        state.notenQuartal = ""; state.auswertungQuartal = ""; // Filter-Defaults neu ziehen
+        UI.toast("Quartal gespeichert");
+      });
+      const selHa = UI.$("#f-haModus");
+      if (selHa) selHa.addEventListener("change", async () => {
+        s.haModus = selHa.value === "note6" ? "note6" : "punkte";
+        await Store.saveSettings(s); UI.toast("Gespeichert");
       });
       UI.$all("[data-heat-punkt]").forEach((inp) => inp.addEventListener("change", async () => {
         const key = inp.getAttribute("data-heat-punkt");

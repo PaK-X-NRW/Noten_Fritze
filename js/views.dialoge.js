@@ -1,12 +1,12 @@
 /* =========================================================================
    views.dialoge.js – Modale Dialoge (Klasse, Schüler, Kategorie, Noten,
-   Sitzplatz, CSV-Import, Backup-Import)
+   Sitzplatz, CSV-Import, Backup-Import, Quartal-Abschluss, Klassen-Import)
    ========================================================================= */
 (function (global) {
   "use strict";
 
   const {
-    state, go, render, hjFilter, breakdownHTML,
+    state, go, render, quartalFilter, breakdownHTML,
     schwellenFelderHTML, schwellenAusFormular, auswertungKontext
   } = global.Views;
 
@@ -77,7 +77,7 @@
     const eigene = !!(Array.isArray(k.mitarbeitSchwellen) && k.mitarbeitSchwellen.length);
     const werte = eigene ? k.mitarbeitSchwellen : state.settings.mitarbeitSchwellen;
     const body =
-      '<p class="muted">Ab wie vielen Ø-Punkten pro gehaltener Stunde welche Mitarbeitsnote vorgeschlagen wird.</p>' +
+      '<p class="muted">Die Punkte einer einzelnen Stunde werden über diese Schwellen in eine Stundennote übersetzt; die Mitarbeitsnote ist der Ø aller Stundennoten.</p>' +
       '<div class="field"><label class="hstack"><input type="checkbox" id="schwellen-eigene" style="width:auto;min-height:auto"' +
         (eigene ? " checked" : "") + "> Eigene Schwellen für diese Klasse verwenden</label>" +
         '<div class="hint">Aus = globale Einstellung. Beim Einschalten werden die globalen Werte als Startpunkt übernommen.</div></div>' +
@@ -111,7 +111,7 @@
   }
 
   // ---- Herleitung des Mitarbeits-Vorschlags --------------------------------
-  // Macht sichtbar, wie aus Ereignissen und gehaltenen Stunden die Note wird.
+  // Macht sichtbar, wie aus den Stundennoten der Vorschlag (deren Ø) wird.
   async function mitarbeitHerleitungDialog(sid) {
     const k = await Store.Klassen.get(state.klasseId);
     const ktx = await auswertungKontext(k);
@@ -119,7 +119,23 @@
     const a = ktx.ausw[sid];
     if (!s || !a) return;
 
-    const zeilen = Store.EVENT_TYPES.filter((t) => a.typen[t.id]).map((t) => {
+    // Verteilung der Stundennoten; Verweigerungs-Stunden separat ausgewiesen
+    const zaehlung = {};
+    let verweigerungsStunden = 0;
+    (a.stundenNoten || []).forEach((sn) => {
+      if (sn.verweigerung) { verweigerungsStunden += 1; return; }
+      zaehlung[sn.note] = (zaehlung[sn.note] || 0) + 1;
+    });
+    const stundennotenZeilen = (
+      Object.keys(zaehlung).sort((x, y) => x - y).map((note) =>
+        '<div class="line"><span>Note ' + note + '</span><span class="r">' + zaehlung[note] + "×</span></div>"
+      ).join("") +
+      (verweigerungsStunden
+        ? '<div class="line"><span>Note 6 (Leistungsverweigerung)</span><span class="r">' + verweigerungsStunden + "×</span></div>"
+        : "")
+    ) || '<div class="line"><span class="muted">Keine Stunden im Zeitraum</span><span class="r">–</span></div>';
+
+    const ereignisZeilen = Store.EVENT_TYPES.filter((t) => a.typen[t.id]).map((t) => {
       const anzahl = a.typen[t.id];
       const wert = state.settings.mitarbeitPunkte[t.id] || 0;
       return '<div class="line"><span>' + UI.esc(t.label) + ' <span class="muted">(' + anzahl + " × " +
@@ -127,25 +143,21 @@
         '<span class="r">' + (anzahl * wert > 0 ? "+" : "") + (anzahl * wert) + "</span></div>";
     }).join("") || '<div class="line"><span class="muted">Keine Ereignisse im Zeitraum</span><span class="r">0</span></div>';
 
-    const schwelle = ktx.schwellen.filter((x) => a.punkteProStunde >= x.abPunkte)[0];
+    const haHinweis = state.settings.haModus === "note6"
+      ? "Vergessene Hausaufgaben geben keine Punkte; jede 3. erzeugt automatisch eine Note 6 in Mündliche Mitarbeit."
+      : "Vergessene Hausaufgaben zählen als Minuspunkte in ihrer Stunde.";
+
     const body =
       '<div class="breakdown">' +
-        '<div class="grp"><h3>Erfasste Ereignisse</h3>' + zeilen + "</div>" +
-        '<div class="grp"><h3>Rechnung</h3>' +
-          '<div class="line"><span>Punkte gesamt</span><span class="r">' + a.punkte + "</span></div>" +
-          '<div class="line"><span>Gehaltene Stunden (anwesend)</span><span class="r">' + a.nenner + "</span></div>" +
-          '<div class="line"><span class="muted">davon mit Meldung</span><span class="r muted">' + a.stundenMitEreignis + "</span></div>" +
-          '<div class="line"><span>Ø Punkte pro Stunde</span><span class="r">' + a.punkteProStunde.toFixed(2).replace(".", ",") + "</span></div>" +
+        '<div class="grp"><h3>Stundennoten</h3>' + stundennotenZeilen +
+          '<div class="line"><span>Gehaltene Stunden (anwesend)</span><span class="r">' + a.stundenGezaehlt + "</span></div>" +
+          '<div class="line"><span class="muted">davon mit Ereignis</span><span class="r muted">' + a.stundenMitEreignis + "</span></div>" +
         "</div>" +
-        '<div class="grp"><h3>Schwelle</h3>' +
-          '<div class="line"><span>' + (schwelle
-            ? "Note " + schwelle.note + " ab " + String(schwelle.abPunkte).replace(".", ",") + " Ø-Punkten"
-            : "unter der letzten Schwelle") + "</span>" +
-            '<span class="r">' + (ktx.eigeneSchwellen ? "eigene Schwellen" : "globale Schwellen") + "</span></div>" +
-        "</div>" +
-        '<div class="total"><span>Notenvorschlag</span><span>' + a.notenvorschlag + "</span></div>" +
+        '<div class="grp"><h3>Erfasste Ereignisse</h3>' + ereignisZeilen + "</div>" +
+        '<div class="total"><span>Ø der Stundennoten</span><span>' + Calc.formatNote(a.notenvorschlag, 1) + "</span></div>" +
       "</div>" +
-      '<p class="muted">Nur ein Vorschlag – Tage mit gemeldeter Abwesenheit sind herausgerechnet.</p>';
+      '<p class="muted">Nur ein Vorschlag – ' + haHinweis +
+        " Tage mit gemeldeter Abwesenheit sind herausgerechnet.</p>";
 
     UI.modal({ title: "Mitarbeit · " + UI.vollerName(s), bodyHTML: body, buttons: [{ label: "Schließen", className: "primary" }] });
   }
@@ -222,7 +234,7 @@
         '<div class="line" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line)">' +
           '<span class="note-badge" style="background:' + Calc.noteFarbe(n.wert) + '">' + Calc.formatNote(n.wert) + "</span>" +
           '<span class="grow">' + UI.esc(n.titel || "") + ' <span class="muted">' + UI.esc(n.datum) +
-            (n.halbjahr ? " · " + n.halbjahr + ". HJ" : "") + "</span></span>" +
+            (n.quartal ? " · " + n.quartal + ". Q" : (n.halbjahr ? " · " + n.halbjahr + ". HJ" : "")) + "</span></span>" +
           '<button class="iconbtn plain danger-text" data-del="' + n.id + '">🗑</button>' +
         "</div>"
       ).join("");
@@ -258,8 +270,9 @@
       const val = Calc.parseNote(inp.value);
       if (val === null) { UI.toast("Bitte gültige Note 1–6 eingeben"); inp.focus(); return; }
       const titel = box.querySelector("#new-title").value.trim();
+      const quartal = parseInt(state.settings.aktuellesQuartal, 10) || 1;
       const n = Store.neueNote({ klasseId: k.id, schuelerId: sid, kategorieId: cid, wert: val, titel,
-        halbjahr: parseInt(state.settings.aktuellesHalbjahr, 10) || 1 });
+        quartal, halbjahr: Store.halbjahrAusQuartal(quartal) });
       await Store.Noten.save(n);
       noten.push(n);
       inp.value = ""; box.querySelector("#new-title").value = "";
@@ -273,7 +286,7 @@
   async function studentDetailDialog(k, sid) {
     const s = await Store.Schueler.get(sid);
     const [kats, notenAll] = await Promise.all([Store.Kategorien.byKlasse(k.id), Store.Noten.byKlasse(k.id)]);
-    const res = Calc.berechneSchueler(kats, notenAll.filter((n) => n.schuelerId === sid), k, state.settings.rundung, hjFilter("notenHalbjahr"));
+    const res = Calc.berechneSchueler(kats, notenAll.filter((n) => n.schuelerId === sid), k, state.settings.rundung, quartalFilter("notenQuartal"));
     UI.modal({ title: UI.vollerName(s), bodyHTML: breakdownHTML(res), buttons: [{ label: "Schließen", className: "primary" }] });
   }
 
@@ -355,9 +368,180 @@
     ]});
   }
 
+  // ---- Quartal abschließen -------------------------------------------------
+  // Überträgt die Mitarbeits-Vorschläge des im Auswertungs-Tab gewählten
+  // Quartals als Noten in eine Ziel-Kategorie und löscht danach alle
+  // Mitarbeits-Ereignisse und Stunden dieses Quartals (Abwesenheiten bleiben).
+  async function quartalAbschliessenDialog() {
+    const q = quartalFilter("auswertungQuartal");
+    if (q === null) { UI.toast("Bitte oben ein Quartal wählen"); return; }
+    const k = await Store.Klassen.get(state.klasseId);
+    if (!k) return;
+    const [ktx, kategorien] = await Promise.all([auswertungKontext(k), Store.Kategorien.byKlasse(k.id)]);
+    const schuelerListe = ktx.schueler;
+
+    // Ziel-Kategorien: sonstige Leistungen mit Noten-Anzeige; "" = neu anlegen
+    const ziele = kategorien.filter((c) => c.art === "sonstige" && (c.anzeige || "note") === "note");
+    const vorgabe = ziele.find((c) => (c.name || "").trim().toLowerCase() === "mündliche mitarbeit");
+    const katSelect =
+      '<div class="field"><label for="qa-kategorie">Ziel-Kategorie für die übertragenen Noten</label>' +
+      '<select id="qa-kategorie">' +
+        '<option value="">„Mündliche Mitarbeit“ neu anlegen (Gewichtung 2)</option>' +
+        ziele.map((c) => '<option value="' + c.id + '"' + (vorgabe && c.id === vorgabe.id ? " selected" : "") + ">" +
+          UI.esc(c.name) + "</option>").join("") +
+      "</select>" +
+      (ziele.length ? "" : '<div class="hint">Es gibt noch keine sonstige Noten-Kategorie – „Mündliche Mitarbeit“ (Gewichtung 2) wird neu angelegt.</div>') +
+      "</div>";
+
+    const zeilen = schuelerListe.map((s) => {
+      const a = ktx.ausw[s.id];
+      const vorschlag = a ? a.notenvorschlag : null;
+      const hatV = vorschlag !== null && vorschlag !== undefined;
+      return "<tr>" +
+        "<td><strong>" + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
+        '<td class="num">' + (hatV
+          ? '<span class="note-badge" style="background:' + Calc.noteFarbe(vorschlag) + '">' + Calc.formatNote(vorschlag, 1) + "</span>"
+          : "–") + "</td>" +
+        '<td><input data-sid="' + s.id + '" inputmode="decimal" style="width:90px" value="' +
+          (hatV ? Calc.formatNote(vorschlag, 1) : "") + '" placeholder="–"></td>' +
+      "</tr>";
+    }).join("");
+
+    const body =
+      '<p class="muted">Mitarbeits-Vorschläge des ' + q + ". Quartals als Noten übertragen. " +
+        "Leer lassen = kein Übertrag für diese/n Schüler/in. Tendenzen wie 2+ oder 3- sind erlaubt.</p>" +
+      katSelect +
+      '<div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Vorschlag</th><th>Note</th></tr></thead>' +
+      "<tbody>" + zeilen + "</tbody></table></div>";
+
+    // Aktuell eingetragene Werte der Eingabefelder einsammeln
+    function eingetraegeneWerte(box) {
+      return UI.$all("input[data-sid]", box).map((inp) => ({
+        schuelerId: inp.getAttribute("data-sid"), wert: inp.value.trim()
+      })).filter((e) => e.wert !== "");
+    }
+
+    UI.modal({
+      title: q + ". Quartal abschließen · " + k.name,
+      bodyHTML: body,
+      buttons: [
+        { label: "Abbrechen" },
+        { label: "CSV: Noten", onClick: async (close, box) => {
+          const eintraege = eingetraegeneWerte(box);
+          if (!eintraege.length) { UI.toast("Keine Noten eingetragen"); return; }
+          CSV.exportQuartalNoten(k, schuelerListe, eintraege, q); // bleibt offen
+        }},
+        { label: "CSV: Ereignisse", onClick: async () => {
+          const alle = await Store.Ereignisse.byKlasse(k.id);
+          CSV.exportEreignisse(k, schuelerListe, alle.filter((e) => e.quartal === q)); // bleibt offen
+        }},
+        { label: "Übertragen & abschließen", className: "danger", onClick: async (close, box) => {
+          // Werte VOR dem Confirm-Dialog einsammeln und prüfen – UI.confirmDialog
+          // leert den modal-root komplett (auch dieses Modal).
+          const felder = eingetraegeneWerte(box);
+          let ungueltig = null;
+          const eintraege = [];
+          felder.forEach((f) => {
+            const wert = Calc.parseNote(f.wert);
+            if (wert === null) ungueltig = f.schuelerId;
+            else eintraege.push({ schuelerId: f.schuelerId, wert });
+          });
+          if (ungueltig) {
+            const s = schuelerListe.find((x) => x.id === ungueltig);
+            UI.toast("Ungültige Note bei " + (s ? UI.vollerName(s) : "einem Eintrag"));
+            return; // Abbruch ohne Änderung
+          }
+          const kategorieWahl = box.querySelector("#qa-kategorie").value;
+          const ok = await UI.confirmDialog("Quartal wirklich abschließen?",
+            "Die eingetragenen Noten werden übertragen. Danach werden alle Mitarbeits-Ereignisse und Stunden des " + q +
+            ". Quartals dieser Klasse endgültig gelöscht. Vorher ggf. CSV exportieren.",
+            { okLabel: "Übertragen & löschen" });
+          if (!ok) return;
+
+          // Ziel-Kategorie: gewählte oder neu angelegte „Mündliche Mitarbeit“
+          let kategorieId = kategorieWahl;
+          if (!kategorieId) {
+            const kat = Store.neueKategorie(k.id, {
+              name: "Mündliche Mitarbeit", art: "sonstige", gewichtung: 2,
+              anzeige: "note", sortIndex: kategorien.length
+            });
+            await Store.Kategorien.save(kat);
+            kategorieId = kat.id;
+          }
+          const datum = Store.datumLokal();
+          for (const e of eintraege) {
+            await Store.Noten.save(Store.neueNote({
+              klasseId: k.id, schuelerId: e.schuelerId, kategorieId, wert: e.wert,
+              titel: "Mündliche Mitarbeit " + q + ". Quartal",
+              quartal: q, halbjahr: Store.halbjahrAusQuartal(q), datum
+            }));
+          }
+          const [ereignisse, stunden] = await Promise.all([
+            Store.Ereignisse.byKlasse(k.id), Store.Stunden.byKlasse(k.id)
+          ]);
+          for (const ev of ereignisse.filter((x) => x.quartal === q)) await Store.Ereignisse.remove(ev.id);
+          for (const st of stunden.filter((x) => x.quartal === q)) await DB.del("stunden", st.id);
+          // Das Modal ist durch den Confirm-Dialog bereits geschlossen.
+          UI.toast(eintraege.length + " Noten übertragen – Quartal abgeschlossen");
+          render();
+        }}
+      ]
+    });
+  }
+
+  // ---- Klassen-Import (JSON-Export einer einzelnen Klasse) ------------------
+  function klassenImportDialog() {
+    const body =
+      '<p class="muted">JSON-Export einer einzelnen Klasse, z. B. von einer Kollegin/einem Kollegen.</p>' +
+      '<input type="file" id="ki-file" accept="application/json,.json">';
+    UI.modal({ title: "Klasse importieren", bodyHTML: body, buttons: [
+      { label: "Abbrechen" },
+      { label: "Importieren", className: "primary", onClick: async (close, box) => {
+        const file = box.querySelector("#ki-file").files[0];
+        if (!file) { UI.toast("Bitte Datei wählen"); return; }
+        let payload;
+        try { payload = JSON.parse(await file.text()); }
+        catch (e) { UI.toast("Fehler: " + e.message); return; }
+        const klasseId = payload && payload.data && payload.data.klasse && payload.data.klasse.id;
+        const vorhanden = klasseId ? await Store.Klassen.get(klasseId) : null;
+        if (!vorhanden) {
+          // ID unbekannt: "ersetzen" fällt im Store auf einen einfachen Import zurück
+          await klassenImportAusfuehren(payload, "ersetzen", close);
+          return;
+        }
+        // Zweiter Schritt: Ersetzen oder als Kopie importieren
+        UI.modal({
+          title: "Klasse existiert bereits",
+          bodyHTML: '<p class="muted">Eine Klasse „' + UI.esc(vorhanden.name) +
+            "“ mit derselben Kennung ist bereits vorhanden. „Ersetzen“ löscht die bestehende Klasse " +
+            "und alle ihre Daten unwiderruflich.</p>",
+          buttons: [
+            { label: "Abbrechen" },
+            { label: "Ersetzen", className: "danger", onClick: async (close2) => {
+              await klassenImportAusfuehren(payload, "ersetzen", close2);
+            }},
+            { label: "Als Kopie importieren", className: "primary", onClick: async (close2) => {
+              await klassenImportAusfuehren(payload, "kopie", close2);
+            }}
+          ]
+        });
+      }}
+    ]});
+  }
+
+  async function klassenImportAusfuehren(payload, modus, close) {
+    try {
+      const importierte = await Store.importKlasse(payload, { modus });
+      close();
+      await go("klasse", { klasseId: importierte.id, tab: "schueler" });
+      UI.toast("Klasse „" + importierte.name + "“ importiert");
+    } catch (e) { UI.toast("Fehler: " + e.message); }
+  }
+
   Object.assign(global.Views, {
     klasseDialog, splitsDialog, schuelerDialog, kategorieDialog, cellDialog,
     studentDetailDialog, seatAssignDialog, importStudentsDialog, backupImportDialog,
-    schwellenDialog, mitarbeitHerleitungDialog
+    schwellenDialog, mitarbeitHerleitungDialog,
+    quartalAbschliessenDialog, klassenImportDialog
   });
 })(window);

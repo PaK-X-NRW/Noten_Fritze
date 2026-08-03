@@ -1,7 +1,8 @@
 /* =========================================================================
    store.js – Domänenschicht über der DB
    Definiert das Datenmodell, sinnvolle Defaults, Einstellungen sowie
-   Repository-Funktionen je Entität. Erzeugt außerdem Demo-Daten.
+   Repository-Funktionen je Entität. Erzeugt außerdem Demo-Daten und enthält
+   den Klassen-Export/-Import sowie den HA-Modus (Note 6 bei 3× vergessen).
    ========================================================================= */
 (function (global) {
   "use strict";
@@ -15,13 +16,15 @@
 
   // ---- Ereignis-Typen (Mitarbeit) ------------------------------------------
   // Reihenfolge = Anzeige-Reihenfolge im Tracker.
-  // aufKachel: true  -> eigener Button auf der Schülerkachel
+  // aufKachel: true  -> eigener Button auf der Schülerkachel (mit icon)
   // aufKachel: false -> nur über einen Tracker-Modus in der Topbar erfassbar
   const EVENT_TYPES = [
-    { id: "einfach",   label: "Wortmeldung",       kurz: "Meldung",  farbe: "#2e7d32", defaultPunkte: 1,  heatDelta: 1, positiv: true,  aufKachel: true },
-    { id: "gut",       label: "Gute Meldung",      kurz: "gut",      farbe: "#1565c0", defaultPunkte: 2,  heatDelta: 2, positiv: true,  aufKachel: true },
-    { id: "sehrgut",   label: "Sehr gute Meldung", kurz: "sehr gut", farbe: "#6a1b9a", defaultPunkte: 3,  heatDelta: 3, positiv: true,  aufKachel: true },
-    { id: "stoerung",  label: "Störung",           kurz: "Störung",  farbe: "#c62828", defaultPunkte: -2, heatDelta: 0, positiv: false, aufKachel: true },
+    { id: "einfach",   label: "Wortmeldung",       kurz: "Meldung",  farbe: "#2e7d32", defaultPunkte: 1,  heatDelta: 1, positiv: true,  aufKachel: true, icon: "★" },
+    { id: "gut",       label: "Gute Meldung",      kurz: "gut",      farbe: "#1565c0", defaultPunkte: 2,  heatDelta: 2, positiv: true,  aufKachel: true, icon: "★★" },
+    { id: "sehrgut",   label: "Sehr gute Meldung", kurz: "sehr gut", farbe: "#6a1b9a", defaultPunkte: 3,  heatDelta: 3, positiv: true,  aufKachel: true, icon: "★★★" },
+    { id: "stoerung",  label: "Störung",           kurz: "Störung",  farbe: "#c62828", defaultPunkte: -2, heatDelta: 0, positiv: false, aufKachel: true, icon: "⚡" },
+    // Erfassung nur über Tracker-Modus: die Stunde zählt als Note 6 (Calc)
+    { id: "verweigerung", label: "Leistungsverweigerung", kurz: "Verweigerung", farbe: "#4a148c", defaultPunkte: 0, heatDelta: 0, positiv: false, aufKachel: false },
     { id: "keinehausaufgabe", label: "Fehlende HA", kurz: "keine HA", farbe: "#b9770e", defaultPunkte: -1, heatDelta: 0, positiv: false, aufKachel: false }
   ];
   const KACHEL_EVENT_TYPES = EVENT_TYPES.filter((t) => t.aufKachel);
@@ -58,11 +61,26 @@
     return { heatPoints, heatLastDecayAt: punktestand.heatLastDecayAt, decay, verfallMinuten, verfallPunkte };
   }
 
-  // ---- Halbjahr ------------------------------------------------------------
+  // ---- Quartal / Halbjahr ---------------------------------------------------
   // Lokales Datum als YYYY-MM-DD (für Tages-Zuordnungen wie Abwesenheiten).
   function datumLokal(d) {
     d = d || new Date();
     return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  }
+  // Leitet aus einem Datum (YYYY-MM-DD oder Date) das Quartal ab:
+  // Aug–Okt = 1 · Nov–Jan = 2 · Feb–Apr = 3 · Mai–Jul = 4 (deutsches Schuljahr).
+  function quartalAusDatum(datum) {
+    const s = (datum instanceof Date) ? datumLokal(datum) : String(datum || "");
+    const m = parseInt(s.slice(5, 7), 10);
+    if (!m) return 1; // Fallback
+    if (m >= 8 && m <= 10) return 1;
+    if (m >= 11 || m <= 1) return 2;
+    if (m >= 2 && m <= 4) return 3;
+    return 4;
+  }
+  // Halbjahr zu einem Quartal: Q1/Q2 = 1. Halbjahr, Q3/Q4 = 2. Halbjahr.
+  function halbjahrAusQuartal(q) {
+    return (parseInt(q, 10) || 1) <= 2 ? 1 : 2;
   }
   // Leitet aus einem Datum (YYYY-MM-DD) das Halbjahr ab:
   // Aug–Jan = 1. Halbjahr, Feb–Jul = 2. Halbjahr (deutsches Schuljahr).
@@ -120,8 +138,15 @@
 
   const DEFAULT_SETTINGS = {
     key: "app",
-    schemaVersion: 7,
-    // Aktuelles Halbjahr (1 | 2) – neue Noten/Ereignisse werden damit getaggt
+    schemaVersion: 8,
+    // Aktuelles Quartal (1–4) – neue Noten/Ereignisse/Stunden werden damit getaggt
+    aktuellesQuartal: 1,
+    // Vergessene Hausaufgaben werten:
+    // "punkte" = vergessene HA geben Minuspunkte in der Mitarbeit
+    // "note6"  = jede 3. vergessene HA je Quartal erzeugt automatisch eine
+    //            Note 6 in „Mündliche Mitarbeit", HA geben dann keine Punkte
+    haModus: "punkte",
+    // Legacy-Feld: nicht mehr im UI, wird aus dem Quartal abgeleitet
     aktuellesHalbjahr: 1,
     // Stundenplan: flache Liste von genau 10 { nr, start: "HH:MM", ende: "HH:MM" },
     // gilt für jeden Schultag gleich (kein Wochenplan mehr).
@@ -162,6 +187,7 @@
   // ---- Einstellungen -------------------------------------------------------
   async function getSettings() {
     let s = await DB.get("einstellungen", "app");
+    const quartalFehlt = !s || !s.aktuellesQuartal;
     if (!s) {
       s = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
       await DB.put("einstellungen", s);
@@ -183,6 +209,11 @@
     if (!s.mitarbeitSchwellen.length) {
       s.mitarbeitSchwellen = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.mitarbeitSchwellen));
     }
+    // Aktuelles Quartal: fehlt es oder ist es ungültig, aus dem heutigen
+    // Datum ableiten.
+    if (quartalFehlt || s.aktuellesQuartal < 1 || s.aktuellesQuartal > 4) {
+      s.aktuellesQuartal = quartalAusDatum(datumLokal());
+    }
     return s;
   }
   async function saveSettings(s) {
@@ -200,7 +231,7 @@
   // beim App-Start (app.js, vor dem ersten Render) ausgeführt.
   // Regel: Neue Felder bekommen immer Defaults (Factorys + getSettings-Merge),
   // damit auch nicht migrierte/alte Datensätze ohne das Feld funktionieren.
-  const SCHEMA_VERSION = 7;
+  const SCHEMA_VERSION = 8;
   const MIGRATION_STEPS = {
     // v1 -> v2: Noten und Ereignisse erhalten ein Halbjahr (1 | 2),
     // aus dem Datum abgeleitet (Aug–Jan = 1. HJ, Feb–Jul = 2. HJ).
@@ -280,6 +311,26 @@
     // sortIndex bleibt erhalten – Umschalten auf "manuell" stellt ihn wieder her.
     7: async () => {
       await saveSettings(await getSettings());
+    },
+    // v7 -> v8: Quartale (1–4) auf Noten, Ereignissen und Stunden (aus dem
+    // Datum abgeleitet); neues Setting aktuellesQuartal (aus dem heutigen
+    // Datum) und haModus ("punkte" = bisherige Punktewertung).
+    8: async () => {
+      const noten = await DB.getAll("noten");
+      noten.forEach((n) => { if (!n.quartal) n.quartal = quartalAusDatum(n.datum); });
+      await DB.bulkPut("noten", noten);
+      const ereignisse = await DB.getAll("ereignisse");
+      ereignisse.forEach((e) => {
+        if (!e.quartal) e.quartal = quartalAusDatum(datumLokal(new Date(e.timestamp)));
+      });
+      await DB.bulkPut("ereignisse", ereignisse);
+      const stunden = await DB.getAll("stunden");
+      stunden.forEach((st) => { if (!st.quartal) st.quartal = quartalAusDatum(st.datum); });
+      await DB.bulkPut("stunden", stunden);
+      const s = await getSettings();
+      s.aktuellesQuartal = quartalAusDatum(datumLokal());
+      s.haModus = "punkte";
+      await saveSettings(s);
     }
   };
   async function migrateSchema() {
@@ -439,7 +490,11 @@
 
   // ---- Noten (Einzelnoten) -------------------------------------------------
   function neueNote(data) {
-    const datum = new Date().toISOString().slice(0, 10);
+    data = data || {};
+    const datum = data.datum || new Date().toISOString().slice(0, 10);
+    // Quartal: vom Aufrufer übergeben oder aus dem Datum abgeleitet.
+    // Wird es übergeben, leitet sich das Halbjahr daraus ab, sonst aus dem Datum.
+    const quartal = data.quartal || quartalAusDatum(datum);
     return Object.assign({
       id: uid(),
       klasseId: null,
@@ -448,9 +503,10 @@
       wert: null,           // Zahl 1..6 (mit Nachkomma, z. B. 2.3)
       titel: "",
       datum,
-      halbjahr: halbjahrAusDatum(datum),   // 1 | 2; Aufrufer setzen i. d. R. settings.aktuellesHalbjahr
+      quartal,              // 1–4; Aufrufer setzen i. d. R. settings.aktuellesQuartal
+      halbjahr: data.quartal ? halbjahrAusQuartal(quartal) : halbjahrAusDatum(datum),
       createdAt: now()
-    }, data || {});
+    }, data);
   }
   const Noten = {
     byKlasse: (klasseId) => DB.getAllByIndex("noten", "klasseId", klasseId),
@@ -478,6 +534,7 @@
 
   // ---- Ereignisse (Mitarbeit) ----------------------------------------------
   function neuesEreignis(klasseId, schuelerId, typ, punkte, stundeId) {
+    const datum = new Date().toISOString().slice(0, 10);
     return {
       id: uid(),
       klasseId,
@@ -486,7 +543,8 @@
       typ,
       punkte,           // zum Zeitpunkt der Erfassung eingefrorene Punktzahl
       timestamp: now(),
-      halbjahr: halbjahrAusDatum(new Date().toISOString().slice(0, 10)),
+      quartal: quartalAusDatum(datum),    // 1–4; Aufrufer setzen i. d. R. settings.aktuellesQuartal
+      halbjahr: halbjahrAusDatum(datum),
       notiz: ""
     };
   }
@@ -507,6 +565,9 @@
     const t = now();
     const startTs = session && session.startTs ? session.startTs : t;
     const datum = datumLokal(new Date(startTs));
+    // Quartal: über session.quartal vorgegeben (Halbjahr dann daraus
+    // abgeleitet) oder aus dem Datum bestimmt.
+    const quartal = session && session.quartal ? session.quartal : quartalAusDatum(datum);
     return {
       id: uid(),
       klasseId,
@@ -516,7 +577,10 @@
       dauerMin: session && session.dauerMin ? session.dauerMin : null,
       stundeNr: session && session.stundeNr != null ? session.stundeNr : null,
       quelle: session && session.quelle ? session.quelle : "manuell",
-      halbjahr: parseInt(halbjahr, 10) || halbjahrAusDatum(datum),
+      quartal,
+      halbjahr: session && session.quartal
+        ? halbjahrAusQuartal(quartal)
+        : (parseInt(halbjahr, 10) || halbjahrAusDatum(datum)),
       status: "offen",          // "offen" (fortsetzbar) | "beendet"
       beendetAt: null,
       createdAt: t,
@@ -612,10 +676,145 @@
     if (d.settings) await saveSettings(d.settings);
   }
 
+  // ---- HA-Modus „note6": automatische Note 6 --------------------------------
+  // Zählt die vergessenen Hausaufgaben (keinehausaufgabe) eines Schülers in
+  // einer Klasse und einem Quartal. Bei jeder 3. (3., 6., 9. …) wird eine
+  // Note 6 in die Kategorie „Mündliche Mitarbeit" eingefügt (wird angelegt,
+  // falls nicht vorhanden). Nur aktiv, wenn settings.haModus === "note6".
+  // Rückgabe: true, wenn eine Note erzeugt wurde.
+  async function haNote6Pruefen(klasseId, schuelerId, quartal) {
+    const settings = await getSettings();
+    if (settings.haModus !== "note6") return false;
+    const ereignisse = await Ereignisse.bySchueler(schuelerId);
+    const anzahl = ereignisse.filter((e) =>
+      e.klasseId === klasseId && e.typ === "keinehausaufgabe" && e.quartal === quartal
+    ).length;
+    if (anzahl <= 0 || anzahl % 3 !== 0) return false;
+    const kategorien = await Kategorien.byKlasse(klasseId);
+    let kat = kategorien.find((c) =>
+      c.art === "sonstige" && (c.anzeige || "note") === "note" &&
+      String(c.name || "").toLowerCase() === "mündliche mitarbeit");
+    if (!kat) {
+      kat = neueKategorie(klasseId, {
+        name: "Mündliche Mitarbeit", art: "sonstige", gewichtung: 2,
+        sortIndex: kategorien.length
+      });
+      await Kategorien.save(kat);
+    }
+    await Noten.save(neueNote({
+      klasseId, schuelerId, kategorieId: kat.id, wert: 6,
+      titel: "3× Hausaufgaben vergessen (" + quartal + ". Quartal)",
+      quartal
+    }));
+    return true;
+  }
+
+  // ---- Klassen-Export/-Import (einzelne Klasse als JSON) -------------------
+  // Alle Datensätze einer Klasse (z. B. zur Übergabe an Kolleg/innen).
+  async function exportKlasse(klasseId) {
+    const [klasse, schueler, kategorien, noten, ereignisse, stunden, abwesenheiten, sitzplan] = await Promise.all([
+      Klassen.get(klasseId),
+      DB.getAllByIndex("schueler", "klasseId", klasseId),
+      DB.getAllByIndex("kategorien", "klasseId", klasseId),
+      DB.getAllByIndex("noten", "klasseId", klasseId),
+      DB.getAllByIndex("ereignisse", "klasseId", klasseId),
+      DB.getAllByIndex("stunden", "klasseId", klasseId),
+      DB.getAllByIndex("abwesenheiten", "klasseId", klasseId),
+      DB.get("sitzplaene", klasseId)
+    ]);
+    return {
+      app: "noten-fritze-klasse", appVersion: APP_VERSION,
+      exportedAt: new Date().toISOString(),
+      data: {
+        klasse, schueler, kategorien, noten, ereignisse, stunden, abwesenheiten,
+        sitzplan: sitzplan || null
+      }
+    };
+  }
+  // modus "ersetzen": vorhandene Klasse mit gleicher ID kaskadierend löschen,
+  //   dann die Datensätze unverändert einfügen (ID unbekannt -> einfach importieren).
+  // modus "kopie":   alle IDs neu vergeben und Referenzen ummappen,
+  //   Name wird um „ (Kopie)" ergänzt.
+  // Rückgabe: die importierte Klasse.
+  async function importKlasse(payload, { modus }) {
+    if (!payload || payload.app !== "noten-fritze-klasse" || !payload.data || !payload.data.klasse) {
+      throw new Error("Ungültiges Klassen-Export-Format.");
+    }
+    const d = payload.data;
+    let klasse = d.klasse;
+    let schueler = d.schueler || [];
+    let kategorien = d.kategorien || [];
+    let noten = d.noten || [];
+    let ereignisse = d.ereignisse || [];
+    let stunden = d.stunden || [];
+    let abwesenheiten = d.abwesenheiten || [];
+    let sitzplan = d.sitzplan || null;
+
+    if (modus === "kopie") {
+      const klasseIdNeu = uid();
+      const schuelerMap = {}, kategorienMap = {}, stundenMap = {};
+      schueler.forEach((s) => { schuelerMap[s.id] = uid(); });
+      kategorien.forEach((c) => { kategorienMap[c.id] = uid(); });
+      stunden.forEach((st) => { stundenMap[st.id] = uid(); });
+      klasse = Object.assign({}, klasse, { id: klasseIdNeu, name: (klasse.name || "") + " (Kopie)" });
+      schueler = schueler.map((s) => Object.assign({}, s, { id: schuelerMap[s.id], klasseId: klasseIdNeu }));
+      kategorien = kategorien.map((c) => Object.assign({}, c, { id: kategorienMap[c.id], klasseId: klasseIdNeu }));
+      noten = noten.map((n) => Object.assign({}, n, {
+        id: uid(), klasseId: klasseIdNeu,
+        schuelerId: schuelerMap[n.schuelerId] || n.schuelerId,
+        kategorieId: kategorienMap[n.kategorieId] || n.kategorieId
+      }));
+      ereignisse = ereignisse.map((e) => Object.assign({}, e, {
+        id: uid(), klasseId: klasseIdNeu,
+        schuelerId: schuelerMap[e.schuelerId] || e.schuelerId,
+        stundeId: stundenMap[e.stundeId] || e.stundeId
+      }));
+      stunden = stunden.map((st) => Object.assign({}, st, { id: stundenMap[st.id], klasseId: klasseIdNeu }));
+      abwesenheiten = abwesenheiten.map((a) => {
+        const sid = schuelerMap[a.schuelerId] || a.schuelerId;
+        return Object.assign({}, a, { id: sid + "_" + a.datum, klasseId: klasseIdNeu, schuelerId: sid });
+      });
+      if (sitzplan) {
+        sitzplan = Object.assign({}, sitzplan, {
+          klasseId: klasseIdNeu,
+          seats: (sitzplan.seats || []).map((seat) => Object.assign({}, seat, {
+            schuelerId: seat.schuelerId ? (schuelerMap[seat.schuelerId] || null) : null
+          }))
+        });
+      }
+    } else if (modus === "ersetzen") {
+      if (await Klassen.get(klasse.id)) await Klassen.remove(klasse.id); // Kaskade
+    }
+
+    const settings = await getSettings();
+    await Klassen.save(klasse);
+    await DB.bulkPut("schueler", schueler.map((s) => normalisiereSchuelerHeat(s, settings)));
+    await DB.bulkPut("kategorien", kategorien);
+    await DB.bulkPut("noten", noten);
+    await DB.bulkPut("ereignisse", ereignisse);
+    await DB.bulkPut("stunden", stunden);
+    await DB.bulkPut("abwesenheiten", abwesenheiten);
+    if (sitzplan) await DB.put("sitzplaene", sitzplan);
+    return klasse;
+  }
+
   // ---- Demo-Daten ----------------------------------------------------------
+  // „Stand Ende Schuljahr": Das Schuljahr 2025/26 ist gerade zu Ende (heute:
+  // Anfang August 2026). Das 1. Quartal ist bereits abgeschlossen – dafür
+  // gibt es keine Stunden/Ereignisse mehr, sondern übertragene ganze Noten in
+  // „Mündliche Mitarbeit". Q2–Q4 laufen mit Stunden und Ereignissen. Feste
+  // Leistungsprofile (stark/mittel/schwach) und ein Pseudozufall mit festem
+  // Startwert sorgen für plausible, reproduzierbare Teststände.
   async function seedDemoData() {
     const klassen = await Klassen.all();
     if (klassen.length > 0) return false; // Nur wenn leer
+
+    // Reproduzierbarer Pseudozufall (LCG mit festem Startwert)
+    let seed = 20260801;
+    function zufall() {
+      seed = (seed * 1103515245 + 12345) % 2147483648;
+      return seed / 2147483648;
+    }
 
     const k = neueKlasse({
       name: "8b", schuljahr: "2025/26", fach: "Mathematik", typ: "hauptfach",
@@ -627,10 +826,27 @@
     const namen = [
       ["Anna", "Bauer"], ["Ben", "Fischer"], ["Clara", "Weber"], ["David", "Wagner"],
       ["Emma", "Becker"], ["Finn", "Schulz"], ["Greta", "Hoffmann"], ["Hannes", "Koch"],
-      ["Ida", "Richter"], ["Jonas", "Klein"], ["Klara", "Wolf"], ["Leon", "Neumann"]
+      ["Ida", "Richter"], ["Jonas", "Klein"], ["Klara", "Wolf"], ["Leon", "Neumann"],
+      ["Maja", "Brandt"], ["Noah", "Schäfer"]
     ];
+    // Feste Leistungsprofile, zyklisch je Index zugeteilt
+    const PROFILE = ["stark", "mittel", "schwach"];
+    const profilVon = (i) => PROFILE[i % PROFILE.length];
     const schuelerListe = namen.map((n, i) => neuerSchueler(k.id, { vorname: n[0], nachname: n[1], sortIndex: i }));
     await DB.bulkPut("schueler", schuelerListe);
+
+    // Notenwert um die Profil-Basis (stark ~1,8 / mittel ~2,8 / schwach ~4,0)
+    function profilNote(profil) {
+      const basis = profil === "stark" ? 1.8 : profil === "mittel" ? 2.8 : 4.0;
+      const wert = basis + (zufall() - 0.5) * 1.6;
+      return Math.max(1, Math.min(6, Math.round(wert * 10) / 10));
+    }
+    // Übertragene Mündlich-Note fürs abgeschlossene 1. Quartal (ganze Note):
+    // stark 1–2, mittel 2–3, schwach 4–5
+    function q1Note(profil) {
+      const von = profil === "stark" ? 1 : profil === "mittel" ? 2 : 4;
+      return von + Math.round(zufall());
+    }
 
     const kats = [
       neueKategorie(k.id, { name: "Klassenarbeit", art: "schriftlich", gewichtung: 2, sortIndex: 0 }),
@@ -641,67 +857,149 @@
     ];
     await DB.bulkPut("kategorien", kats);
 
-    // Ein paar zufällige, plausible Noten (nur für benotete Kategorien)
-    const noten = [];
-    schuelerListe.forEach((s) => {
-      kats.filter((kat) => kat.anzeige === "note").forEach((kat) => {
-        const anzahl = kat.art === "schriftlich" ? 2 : 3;
-        for (let i = 0; i < anzahl; i++) {
-          const basis = 1.5 + Math.random() * 3.5; // 1,5 .. 5,0
-          noten.push(neueNote({
-            klasseId: k.id, schuelerId: s.id, kategorieId: kat.id,
-            wert: Math.round(basis * 10) / 10,
-            titel: kat.name + " " + (i + 1)
-          }));
-        }
-      });
-    });
-    await DB.bulkPut("noten", noten);
-
-    // Sitzplan füllen
-    const plan = neuerSitzplan(k.id, 4, 6);
-    schuelerListe.forEach((s, i) => { if (plan.seats[i]) plan.seats[i].schuelerId = s.id; });
-    await Sitzplan.save(plan);
-
-    // Sechs bereits gehaltene Demo-Stunden (je 45 Min ab 09:00) …
     const settings = await getSettings();
+
+    // Stunden des Schuljahrs 2025/26: jeden Dienstag und Donnerstag vom
+    // 12.08.2025 bis 09.07.2026, je 45 Min ab 09:00, alle beendet. Schulwochen
+    // sind grob zusammengefasst (keine Ferienlogik). Fürs 1. Quartal gibt es
+    // keine Stunden – es ist bereits abgeschlossen und übertragen.
     const stunden = [];
-    for (let tag = 5; tag >= 0; tag--) {
-      const d = new Date();
-      d.setDate(d.getDate() - tag);
-      d.setHours(9, 0, 0, 0);
+    const ende = new Date(2026, 6, 9);
+    for (let d = new Date(2025, 7, 12); d <= ende; d.setDate(d.getDate() + 1)) {
+      const wt = d.getDay();
+      if (wt !== 2 && wt !== 4) continue; // nur Dienstag + Donnerstag
+      const datum = datumLokal(d);
+      if (quartalAusDatum(datum) === 1) continue; // Q1 abgeschlossen: keine Stunden
+      const startD = new Date(d);
+      startD.setHours(9, 0, 0, 0);
       const st = neueStunde(k.id, {
-        startTs: d.getTime(), endeTs: d.getTime() + 45 * 60000, dauerMin: 45,
-        quelle: "fallback", stundeNr: 2
-      }, settings.aktuellesHalbjahr);
+        startTs: startD.getTime(), endeTs: startD.getTime() + 45 * 60000,
+        dauerMin: 45, quelle: "fallback", stundeNr: 2
+      });
       st.status = "beendet";
       st.beendetAt = st.endeTs;
       stunden.push(st);
     }
     await DB.bulkPut("stunden", stunden);
+    const quartalStunden = {};
+    stunden.forEach((st) => {
+      (quartalStunden[st.quartal] = quartalStunden[st.quartal] || []).push(st);
+    });
 
-    // … mit ein paar Mitarbeitsereignissen (nicht jede/r meldet sich in jeder Stunde)
+    // Vereinzelte Abwesenheiten (einzelne Tage bei vier Schülern)
+    const abwesenheiten = [];
+    const abwesendSet = {};
+    [[3, 5], [6, 20], [9, 40], [12, 60]].forEach((paar) => {
+      const s = schuelerListe[paar[0]], st = stunden[paar[1]];
+      if (!s || !st) return;
+      abwesenheiten.push({
+        id: s.id + "_" + st.datum, klasseId: k.id,
+        schuelerId: s.id, datum: st.datum, createdAt: now()
+      });
+      abwesendSet[s.id + "|" + st.datum] = true;
+    });
+    await DB.bulkPut("abwesenheiten", abwesenheiten);
+
+    // Mitarbeitsereignisse: pro Schüler und Stunde 0–3 Ereignisse, die
+    // Typ-Verteilung hängt vom Leistungsprofil ab (stark häufiger positiv,
+    // schwach öfter Störung/vergessene HA). Timestamps innerhalb der Stunde.
+    function ereignisTyp(profil) {
+      const r = zufall();
+      if (profil === "stark") {
+        if (r < 0.5) return "einfach";
+        if (r < 0.8) return "gut";
+        if (r < 0.95) return "sehrgut";
+        return "stoerung";
+      }
+      if (profil === "mittel") {
+        if (r < 0.55) return "einfach";
+        if (r < 0.8) return "gut";
+        if (r < 0.88) return "sehrgut";
+        if (r < 0.96) return "stoerung";
+        return "keinehausaufgabe";
+      }
+      if (r < 0.4) return "einfach";
+      if (r < 0.6) return "gut";
+      if (r < 0.8) return "stoerung";
+      return "keinehausaufgabe";
+    }
     const ereignisse = [];
     schuelerListe.forEach((s, idx) => {
+      const profil = profilVon(idx);
       stunden.forEach((st) => {
-        const anzahl = Math.floor(Math.random() * 3);
+        if (abwesendSet[s.id + "|" + st.datum]) return;
+        const anzahl = Math.floor(zufall() * 4); // 0–3
         for (let i = 0; i < anzahl; i++) {
-          const typ = EVENT_TYPES[Math.floor(Math.random() * 3)].id; // meist positiv
+          const typ = ereignisTyp(profil);
           const e = neuesEreignis(k.id, s.id, typ, settings.mitarbeitPunkte[typ], st.id);
-          e.timestamp = st.startTs + Math.floor(Math.random() * 40) * 60000 + idx * 1000;
-          e.halbjahr = halbjahrAusDatum(st.datum);
+          e.timestamp = st.startTs + Math.floor(zufall() * 40) * 60000 + idx * 1000;
+          e.quartal = st.quartal;
+          e.halbjahr = st.halbjahr;
           ereignisse.push(e);
-        }
-        // gelegentlich vergessene Hausaufgaben
-        if (Math.random() < 0.12) {
-          const ha = neuesEreignis(k.id, s.id, "keinehausaufgabe", settings.mitarbeitPunkte.keinehausaufgabe, st.id);
-          ha.timestamp = st.startTs + 60000 + idx * 1000;
-          ha.halbjahr = halbjahrAusDatum(st.datum);
-          ereignisse.push(ha);
         }
       });
     });
+
+    // Drei Schüler (schwache Profile) bekommen garantiert in jedem laufenden
+    // Quartal mind. 3 vergessene HA – damit lässt sich der HA-Modus „note6"
+    // (jede 3. vergessene HA = Note 6) testen.
+    [2, 5, 8].forEach((sIdx) => {
+      const s = schuelerListe[sIdx];
+      [2, 3, 4].forEach((q) => {
+        (quartalStunden[q] || []).slice(0, 3).forEach((st, i) => {
+          const e = neuesEreignis(k.id, s.id, "keinehausaufgabe", settings.mitarbeitPunkte.keinehausaufgabe, st.id);
+          e.timestamp = st.startTs + (i + 2) * 60000 + sIdx * 1000;
+          e.quartal = st.quartal;
+          e.halbjahr = st.halbjahr;
+          ereignisse.push(e);
+        });
+      });
+    });
+
+    // Zwei Leistungsverweigerungen bei zwei Schülern in verschiedenen Quartalen
+    [[1, 2], [7, 3]].forEach((paar) => {
+      const st = (quartalStunden[paar[1]] || [])[10];
+      if (!st) return;
+      const e = neuesEreignis(k.id, schuelerListe[paar[0]].id, "verweigerung", 0, st.id);
+      e.timestamp = st.startTs + 20 * 60000 + paar[0] * 1000;
+      e.quartal = st.quartal;
+      e.halbjahr = st.halbjahr;
+      ereignisse.push(e);
+    });
     await DB.bulkPut("ereignisse", ereignisse);
+
+    // Schriftliche Noten über das ganze Schuljahr verteilt (profilbasiert)
+    const noten = [];
+    const kaDaten = ["2025-09-15", "2025-12-08", "2026-03-09", "2026-06-15"];
+    const testDaten = ["2025-10-13", "2026-01-26", "2026-04-20", "2026-06-29"];
+    schuelerListe.forEach((s, idx) => {
+      const profil = profilVon(idx);
+      kaDaten.forEach((datum, i) => {
+        noten.push(neueNote({
+          klasseId: k.id, schuelerId: s.id, kategorieId: kats[0].id,
+          wert: profilNote(profil), titel: "Klassenarbeit " + (i + 1), datum
+        }));
+      });
+      testDaten.forEach((datum, i) => {
+        noten.push(neueNote({
+          klasseId: k.id, schuelerId: s.id, kategorieId: kats[1].id,
+          wert: profilNote(profil), titel: "Test " + (i + 1), datum
+        }));
+      });
+      // 1. Quartal ist abgeschlossen: die mündliche Note wurde bereits als
+      // ganze Note in „Mündliche Mitarbeit" übertragen (Datum im Oktober 2025).
+      noten.push(neueNote({
+        klasseId: k.id, schuelerId: s.id, kategorieId: kats[2].id,
+        wert: q1Note(profil), titel: "Mündliche Mitarbeit 1. Quartal",
+        datum: "2025-10-" + ("0" + (13 + (idx % 10))).slice(-2), quartal: 1
+      }));
+    });
+    await DB.bulkPut("noten", noten);
+
+    // Sitzplan füllen (3 Reihen × 5 Plätze, der letzte Platz bleibt frei)
+    const plan = neuerSitzplan(k.id, 3, 5);
+    schuelerListe.forEach((s, i) => { if (plan.seats[i]) plan.seats[i].schuelerId = s.id; });
+    await Sitzplan.save(plan);
 
     return true;
   }
@@ -709,7 +1007,7 @@
   global.Store = {
     uid, now,
     EVENT_TYPES, EVENT_TYPE_MAP, KACHEL_EVENT_TYPES, DEFAULT_SETTINGS,
-    SCHEMA_VERSION, migrateSchema, halbjahrAusDatum,
+    SCHEMA_VERSION, migrateSchema, halbjahrAusDatum, quartalAusDatum, halbjahrAusQuartal,
     getSettings, saveSettings, schwellenNormalisieren,
     Klassen, neueKlasse,
     Schueler, neuerSchueler,
@@ -721,6 +1019,7 @@
     Abwesenheiten, datumLokal,
     addHeatPoints, currentHeatPoints, normalisiereSchuelerHeat,
     defaultStundenplan,
-    exportAll, importAll, seedDemoData
+    exportAll, importAll, exportKlasse, importKlasse, haNote6Pruefen,
+    seedDemoData
   };
 })(window);

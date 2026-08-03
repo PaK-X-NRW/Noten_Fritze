@@ -2,6 +2,9 @@
    views.core.js – Views-Kern: State, Navigation und Render-Schleife
    Legt window.Views an. Die View-Module (views.*.js) hängen ihre Funktionen
    per Object.assign daran; render() löst sie daher zur Laufzeit darüber auf.
+   Außerdem hier: die Quartal-Navigation (quartalFilter / quartalTabsHTML) –
+   Zeiträume sind 1.–4. Quartal plus „Jahr“ (die Halbjahre stecken in der
+   Jahr-Ansicht, siehe Calc.quartaleVonFilter).
    ========================================================================= */
 (function (global) {
   "use strict";
@@ -11,12 +14,12 @@
     klasseId: null,
     tab: "schueler",       // schueler | noten | kategorien | sitzplan | auswertung
     auswertungRange: "alle",
-    notenHalbjahr: "",      // "1" | "2" | "jahr" ("" = Default aus Einstellungen)
+    notenQuartal: "",       // "1" | "2" | "3" | "4" | "jahr" ("" = Default aus Einstellungen)
     // Spaltenreihenfolge der Notenansicht, per Ziehen am Kopf gesetzt:
-    // { key: "<klasseId>|<1|2|jahr>", ids: [...] }. Bewusst nur im State –
+    // { key: "<klasseId>|<1|2|3|4|jahr>", ids: [...] }. Bewusst nur im State –
     // beim Neuladen gilt wieder die Default-Reihenfolge.
     notenSpalten: null,
-    auswertungHalbjahr: "", // dto. für die Mitarbeits-Auswertung
+    auswertungQuartal: "",  // dto. für die Mitarbeits-Auswertung
     // Besprechung
     selectedSchuelerId: null,
     // Tracker (flüchtig)
@@ -26,17 +29,19 @@
     settings: null
   };
 
-  // Liest den Halbjahr-Filter ("1" | "2" | "jahr"); Default = Einstellung.
-  // Rückgabe: 1 | 2 | null (null = ganzes Jahr).
-  function hjFilter(key) {
-    if (!state[key]) state[key] = String((state.settings && state.settings.aktuellesHalbjahr) || 1);
+  // Liest den Quartal-Filter ("1".."4" | "jahr"); Default = Einstellung
+  // (aktuellesQuartal). Rückgabe: 1 | 2 | 3 | 4 | null (null = ganzes Jahr).
+  function quartalFilter(key) {
+    if (!state[key]) state[key] = String((state.settings && state.settings.aktuellesQuartal) || 1);
     return state[key] === "jahr" ? null : parseInt(state[key], 10);
   }
 
-  // Filter-Tabs „1. HJ · 2. HJ · Jahr“ (gemeinsames Markup für Noten/Auswertung)
-  function hjTabsHTML(key, action) {
-    const aktuell = state[key] || String((state.settings && state.settings.aktuellesHalbjahr) || 1);
-    return [["1", "1. HJ"], ["2", "2. HJ"], ["jahr", "Jahr"]].map(([id, l]) =>
+  // Filter-Tabs „1. Q · 2. Q · 3. Q · 4. Q · Jahr“ (gemeinsames Markup für
+  // Noten/Auswertung). Das data-hj-Attribut bleibt, damit die vorhandenen
+  // Actions "noten-hj"/"ausw-hj" unverändert funktionieren.
+  function quartalTabsHTML(key, action) {
+    const aktuell = state[key] || String((state.settings && state.settings.aktuellesQuartal) || 1);
+    return [["1", "1. Q"], ["2", "2. Q"], ["3", "3. Q"], ["4", "4. Q"], ["jahr", "Jahr"]].map(([id, l]) =>
       '<button class="tab ' + (aktuell === id ? "active" : "") + '" data-action="' + action + '" data-hj="' + id + '">' + l + "</button>"
     ).join("");
   }
@@ -67,5 +72,10 @@
     if (out.mount) out.mount();
   }
 
-  const api = global.Views = { state, go, render, hjFilter, hjTabsHTML };
+  const api = global.Views = {
+    state, go, render, quartalFilter, quartalTabsHTML,
+    // Legacy-Aliase, werden in Paket 4 entfernt (views.dialoge.js
+    // destrukturiert noch die alten Namen)
+    hjFilter: quartalFilter, hjTabsHTML: quartalTabsHTML
+  };
 })(window);

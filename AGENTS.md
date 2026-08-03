@@ -97,7 +97,8 @@ IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
   2. **Datenform** (neue/geänderte Felder): `SCHEMA_VERSION` in `store.js`
      erhöhen und einen Schritt in `MIGRATION_STEPS` (Schlüssel = Ziel-Version)
      ergänzen. `migrateSchema()` läuft beim App-Start kaskadiert
-     (v1→v2→v3 …). Neue Felder bekommen zusätzlich immer Defaults
+     (v1→v2→v3 …; aktueller Stand **8** – `quartal` auf noten/ereignisse/stunden,
+     `aktuellesQuartal` + `haModus` in den Settings). Neue Felder bekommen zusätzlich immer Defaults
      (Factorys + `getSettings`-Merge), damit alte Datensätze nicht crashen.
 - IDs via `Store`-internem `uid()` (crypto.randomUUID mit Fallback).
 - Tages-Zuordnungen (Abwesenheiten, aktive Tage) nutzen das **lokale** Datum
@@ -106,12 +107,12 @@ IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
 ## 5. Service Worker – Cache-Falle
 
 `service-worker.js` cached die App-Shell **cache-first** unter dem Namen
-`noten-fritze-<APP_VERSION>` (z. B. `noten-fritze-1.3.7`). Der Name wird aus
+`noten-fritze-<APP_VERSION>` (z. B. `noten-fritze-1.5.0`). Der Name wird aus
 `js/version.js` gebildet, das der Service Worker per `importScripts` lädt.
 
 ⚠️ **Bei jeder Änderung an einer gecachten Datei** (`index.html`, `css/`, `js/`,
 Manifest, Icons) muss `APP_VERSION` in `js/version.js` erhöht werden – im
-Zweifel die PATCH-Stelle (`1.3.7` → `1.3.8`). Sonst bekommen installierte PWAs
+Zweifel die PATCH-Stelle (`1.5.0` → `1.5.1`). Sonst bekommen installierte PWAs
 die Änderung nie zu sehen; das ist die häufigste Ursache für „mein Fix kommt
 nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
 
@@ -139,7 +140,9 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
   `state.notenSpalten` (`{ key, ids }`) – bewusst nicht in IndexedDB, damit beim Neuladen
   der Default gilt. Passt die Spaltenmenge nicht zur gemerkten Liste, greift der Default.
   Das Ziehen selbst ist Pointer-Events-Code (`spaltenZiehen`), weil iPad-Safari kein
-  HTML5-Drag&Drop kennt; sortiert wird erst beim Loslassen.
+  HTML5-Drag&Drop kennt; sortiert wird erst beim Loslassen. Für iPad: `touch-action:
+  none` auf `th.zieh`, `preventDefault()` im `pointerdown` und Move/Up-Listener auf
+  `document`, damit iOS den Drag nicht per `pointercancel` abwürgt.
 - **Reihenfolge der Schüler/innen:** `settings.schuelerSortierung`
   (`"nachname"` = Default, alphabetisch nach Nachname/Vorname mit deutscher Kollation |
   `"manuell"` = `sortIndex`). Sortiert wird **ausschließlich zentral** in
@@ -150,12 +153,26 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
   (`EVENT_TYPES`)** definiert – Reihenfolge dort = Anzeigereihenfolge. Keine
   hartcodierten Typen-Listen in Views duplizieren. `aufKachel` entscheidet, ob ein
   Typ einen Button auf der Tracker-Kachel bekommt (`Store.KACHEL_EVENT_TYPES`) oder
-  nur über einen Modus erfassbar ist (aktuell „Fehlende HA“).
+  nur über einen Modus erfassbar ist („Fehlende HA“, „Leistungsverweigerung“).
+  Kachel-Typen tragen zusätzlich ein `icon` (★/★★/★★★/⚡), das die Buttons als
+  Piktogramm zeigt.
 - Heatmap (0–100 Punkte) ist **bewusst unabhängig** von den Mitarbeitspunkten –
   diese Trennung nicht verwässern.
-- **Halbjahr:** Noten, Ereignisse und Stunden tragen `halbjahr` (1|2), beim Anlegen
-  aus `settings.aktuellesHalbjahr`. `Calc.berechneSchueler` und die Auswertungen
-  filtern optional danach; Datensätze ohne das Feld fließen immer ein.
+- **Quartale:** Noten, Ereignisse und Stunden tragen `quartal` (1–4: Aug–Okt,
+  Nov–Jan, Feb–Apr, Mai–Jul), beim Anlegen aus `settings.aktuellesQuartal`.
+  Helfer: `Store.quartalAusDatum` / `Store.halbjahrAusQuartal`. Das Feld
+  `halbjahr` bleibt als abgeleitetes Legacy-Feld auf den Datensätzen, wird aber
+  nicht mehr gelesen. `Calc.berechneSchueler` filtert mit `1–4 | "hj1" | "hj2" |
+  null` (Jahr); Datensätze ohne `quartal` fließen immer ein. Die Navigation
+  heißt überall „1. Q · 2. Q · 3. Q · 4. Q · Jahr" (`state.notenQuartal` /
+  `state.auswertungQuartal`, `quartalFilter` / `quartalTabsHTML` in views.core.js).
+- **Sonstige Leistungen quartalsweise:** Bei Halbjahr-/Jahr-Filter rechnet
+  `Calc.berechneSchueler` die sonstige Gruppe als Mittel der
+  Quartals-Durchschnitte (Q1+Q2 je 50 % fürs 1. HJ; fehlende Quartale werden
+  robust übersprungen, vorhandene zählen 100 %). Die Quartals-Ergebnisse liegen
+  in `res.sonstige.quartale` – die Jahr-Ansicht der Notenübersicht zeigt daraus
+  die Spalten „Sonst. 1. Q–4. Q" (`jahresSpalten`). Schriftlich läuft
+  unverändert über den ganzen Zeitraum.
 - **Stunden (Store `stunden`) sind die Erfassungseinheit des Trackers:** Beim Start
   wird eine Stunde angelegt (`Store.neueStunde` aus `Calc.trackerSession`,
   Einzel-/Doppelstunde) oder die offene Stunde von heute fortgesetzt
@@ -167,19 +184,56 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
   (Bezugszeit `min(jetzt, stunde.endeTs)`). Beim Öffnen/Fortsetzen wird
   `heatLastDecayAt` auf jetzt gesetzt (kein Nachhol-Verfall aus der Pause), beim
   Beenden/Verlassen der aktuelle Wert festgeschrieben.
-- **Tracker-Modi:** Abwesend / Keine HA / Heatmap liegen in der Topbar
-  (`state.trackerModus`); ein aktiver Modus setzt eine `modus-*`-Klasse am `<body>`
-  (Farbschema) und macht die ganze Kachel zum Tap-Ziel. `ViewTracker` baut
+- **Tracker-Modi:** Abwesend / Verweigerung (🚫) / Keine HA / Heatmap liegen in der
+  Topbar (`state.trackerModus`); ein aktiver Modus setzt eine `modus-*`-Klasse am
+  `<body>` (Farbschema) und macht die ganze Kachel zum Tap-Ziel. `ViewTracker` baut
   `state.tracker` nur neu auf, wenn Klasse oder Stunde wechseln – sonst gingen beim
-  Moduswechsel (`render()`) Zähler und Undo-Stack verloren.
+  Moduswechsel (`render()`) Zähler und Undo-Stack verloren. Bei breiten Sitzplänen
+  staffeln die Grid-Klassen `kompakt` (≥7 Spalten) / `mini` (≥9 Spalten) die
+  Kachelgröße (styles.css).
 - **Abwesenheiten** (Store `abwesenheiten`, Toggle pro Schüler/Tag): eingefrorene
   Heatmap, deaktivierte Ereignis-Buttons, und die Stunden dieses Tages fallen in
-  `Calc.auswertungMitarbeit` aus dem Nenner (bringen also weder Punkte noch zählen sie).
-- **Mitarbeitsnote:** `Calc.auswertungMitarbeit(ereignisse, settings, opts)` teilt die
-  Punkte durch die **Anzahl gehaltener Stunden mit Anwesenheit** – Stunden ohne
-  Meldung zählen als 0 Punkte. Die Schwellen liefert `Calc.schwellenFuer(settings,
+  `Calc.auswertungMitarbeit` aus den gezählten Stunden (bringen also weder Punkte
+  noch eine Stundennote).
+- **Mitarbeitsnote (Stundennoten-Modell):** `Calc.auswertungMitarbeit(ereignisse,
+  settings, opts)` vergibt je **gehaltener Stunde mit Anwesenheit** eine
+  Stundennote aus den Stundenpunkten via Schwellen (`Calc.punkteZuNote`);
+  Stunden ohne Meldung zählen als 0 Punkte. Der Notenvorschlag ist der Ø der
+  Stundennoten (1 NK). Die Schwellen bedeuten also „Punkte in einer Stunde →
+  Stundennote" (nicht mehr „Ø-Punkte"). Rückgabe u. a. `stundenNoten`
+  (chronologisch, `{stundeId, datum, note, punkte, verweigerung}`) und
+  `verweigerungen`. Die Schwellen liefert `Calc.schwellenFuer(settings,
   klasse)`: `klasse.mitarbeitSchwellen` (klassenweise, optional) schlägt
   `settings.mitarbeitSchwellen`. Beide sind im UI editierbar.
+- **Leistungsverweigerung:** Ereignistyp `verweigerung` (`aufKachel: false`),
+  Erfassung über den Tracker-Modus 🚫 (Toggle mit Badge auf der Kachel,
+  Typ-Buttons deaktiviert). Eine Stunde mit Verweigerung zählt als Stundennote
+  6 und die Meldungspunkte der Stunde entfallen; die HA-Zählung
+  (`keinehausaufgabe`) bleibt davon unberührt.
+- **HA-Modus:** `settings.haModus` (`"punkte"` = Punkteabzug in der Mitarbeit,
+  bisheriges Verhalten | `"note6"` = vergessene HA geben keine Punkte;
+  `Store.haNote6Pruefen` erzeugt bei jeder 3. je Quartal automatisch eine Note
+  6 in „Mündliche Mitarbeit", Aufruf im Tracker-Modus „Keine HA"). Select in
+  den Einstellungen.
+- **Quartal abschließen:** Button im Mitarbeit-Tab (nur bei konkretem Quartal),
+  Dialog `quartalAbschliessenDialog` mit pro Schüler editierbaren
+  Notenvorschlägen und Ziel-Kategorie (Default „Mündliche Mitarbeit"). Vor dem
+  Löschen CSV-Export der Noten (`CSV.exportQuartalNoten`) und Ereignisse
+  (`CSV.exportEreignisse`); der Übertrag legt die Noten mit Quartal an und
+  löscht Ereignisse + Stunden des Quartals (Abwesenheiten bleiben).
+- **Exporte:** Alle Exporte laufen über `CSV.speichern(dateiname, inhalt, mime)` –
+  dreistufig: 1) Export-Ordner via File System Access API (Handle in IndexedDB unter
+  einstellungen/key `"export"`, Card „Export-Ordner“ in den Einstellungen),
+  2) Web Share API mit Dateien (iPad-Safari hat keinen Ordner-Picker → Teilen-Blatt
+  „In Dateien sichern“), 3) klassischer Download als Fallback.
+- **Klassen-Export/-Import:** `Store.exportKlasse` / `Store.importKlasse` (JSON einer
+  einzelnen Klasse inkl. Schüler, Kategorien, Noten, Ereignisse, Stunden,
+  Abwesenheiten, Sitzplan). Import bei bestehender Klassen-ID im Modus „ersetzen“
+  (kaskadierend löschen, dann importieren) oder „kopie“ (alle IDs neu vergeben,
+  Referenzen inkl. `sitzplan.seats[].schuelerId` ummappen). Buttons „Exportieren“
+  in der Klassen-Topbar, „Klasse importieren“ auf Home (`klassenImportDialog`).
+- **Klasse löschen:** 🗑-Button direkt auf der Home-Kachel (`delete-class`,
+  Bestätigungsdialog, Kaskade via `Store.Klassen.remove`).
 
 ## 7. Testen & Verifizieren
 
@@ -211,3 +265,12 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
 - **`render()` nach Mutation vergessen** → UI zeigt alten Stand.
 - Änderungen an `calc.js` können weitreichende Folgen haben (Gesamtnote!) –
   Berechnung im Schüler-Detail / Besprechungsmodus gegenprüfen.
+- **Quartal-Tagging vergessen:** Neue Datensätze (Noten, Ereignisse, Stunden)
+  müssen `quartal` bekommen – über die Factorys (`neueNote`, `neuesEreignis`,
+  `neueStunde`) bzw. aus `settings.aktuellesQuartal`. Ohne `quartal` landen sie
+  in jeder Quartals-Filterung (Kompatibilitäts-Regel) und verfälschen alle
+  Quartale. `halbjahr` wird nur noch abgeleitet mitgeschrieben.
+- **Schwellen-Bedeutung geändert:** `mitarbeitSchwellen` gelten seit dem
+  Stundennoten-Modell **pro Stunde** (Punkte in einer Stunde → Stundennote),
+  nicht mehr auf den Punkte-Ø. Alte Schwellenwerte wirken daher anders –
+  Texte/Dialoge entsprechend lesen.

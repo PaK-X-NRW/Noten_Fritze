@@ -10,7 +10,7 @@
   const {
     klasseDialog, splitsDialog, schuelerDialog, kategorieDialog, cellDialog,
     studentDetailDialog, seatAssignDialog, importStudentsDialog, backupImportDialog,
-    schwellenDialog, mitarbeitHerleitungDialog,
+    schwellenDialog, mitarbeitHerleitungDialog, quartalAbschliessenDialog, klassenImportDialog,
     trackerStartDialog, trackerModusToggle, trackerModusEnde, trackerModusTap,
     trackerStundeBeenden, trackerVerlassen, trackerHeatAddieren, renderSeatCounts
   } = global.Views;
@@ -47,7 +47,8 @@
     "import-students": async () => importStudentsDialog(await Store.Klassen.get(state.klasseId)),
     "export-students": async () => {
       const k = await Store.Klassen.get(state.klasseId);
-      CSV.exportSchueler(k, await Store.Schueler.byKlasse(k.id)); UI.toast("CSV exportiert");
+      const status = await CSV.exportSchueler(k, await Store.Schueler.byKlasse(k.id));
+      exportToast(status, "CSV");
     },
 
     "add-category": async () => kategorieDialog(await Store.Klassen.get(state.klasseId)),
@@ -68,17 +69,17 @@
         Store.Schueler.byKlasse(k.id), Store.Kategorien.byKlasse(k.id),
         Store.Noten.byKlasse(k.id), Store.Ereignisse.byKlasse(k.id)
       ]);
-      CSV.exportNoten(k, s, kt, n, state.settings, ev); UI.toast("Noten-CSV exportiert");
+      exportToast(await CSV.exportNoten(k, s, kt, n, state.settings, ev), "Noten-CSV");
     },
     "export-einzelnoten": async () => {
       const k = await Store.Klassen.get(state.klasseId);
       const [s, kt, n] = await Promise.all([Store.Schueler.byKlasse(k.id), Store.Kategorien.byKlasse(k.id), Store.Noten.byKlasse(k.id)]);
-      CSV.exportEinzelnoten(k, s, kt, n); UI.toast("Einzelnoten-CSV exportiert");
+      exportToast(await CSV.exportEinzelnoten(k, s, kt, n), "Einzelnoten-CSV");
     },
     "export-events": async () => {
       const k = await Store.Klassen.get(state.klasseId);
       const [s, e] = await Promise.all([Store.Schueler.byKlasse(k.id), Store.Ereignisse.byKlasse(k.id)]);
-      CSV.exportEreignisse(k, s, e); UI.toast("Mitarbeit-CSV exportiert");
+      exportToast(await CSV.exportEreignisse(k, s, e), "Mitarbeit-CSV");
     },
 
     // Sitzplan
@@ -132,17 +133,59 @@
     "ausw-range": (el) => { state.auswertungRange = el.getAttribute("data-range"); render(); },
     "edit-schwellen": async () => schwellenDialog(await Store.Klassen.get(state.klasseId)),
     "ausw-herleitung": async (el) => mitarbeitHerleitungDialog(el.getAttribute("data-sid")),
-    "noten-hj": (el) => { state.notenHalbjahr = el.getAttribute("data-hj"); render(); },
+    "noten-hj": (el) => { state.notenQuartal = el.getAttribute("data-hj"); render(); },
     "noten-spalten-reset": () => { state.notenSpalten = null; render(); },
-    "ausw-hj": (el) => { state.auswertungHalbjahr = el.getAttribute("data-hj"); render(); },
+    "ausw-hj": (el) => { state.auswertungQuartal = el.getAttribute("data-hj"); render(); },
 
     // Einstellungen / Backup
     "backup-export": async () => {
       const data = await Store.exportAll();
-      CSV.downloadText("noten-fritze-backup-" + new Date().toISOString().slice(0, 10) + ".json", JSON.stringify(data, null, 2), "application/json");
-      UI.toast("Backup exportiert");
+      const status = await CSV.speichern(
+        "noten-fritze-backup-" + new Date().toISOString().slice(0, 10) + ".json",
+        JSON.stringify(data, null, 2), "application/json");
+      exportToast(status, "Backup");
     },
     "backup-import": () => backupImportDialog(),
+
+    // Klasse exportieren / importieren / löschen
+    "export-klasse": async (el) => {
+      const id = state.klasseId || el.getAttribute("data-id");
+      const data = await Store.exportKlasse(id);
+      const status = await CSV.speichern(
+        "klasse_" + CSV.safe(data.data.klasse.name) + ".json",
+        JSON.stringify(data, null, 2), "application/json");
+      exportToast(status, "Klasse");
+    },
+    "import-klasse": () => klassenImportDialog(),
+    "delete-class": async (el) => {
+      const k = await Store.Klassen.get(el.getAttribute("data-id"));
+      if (!k) return;
+      const ok = await UI.confirmDialog("Klasse löschen?",
+        "„" + k.name + "“ und alle zugehörigen Schüler, Noten, Ereignisse, Stunden, Abwesenheiten und der Sitzplan werden gelöscht.");
+      if (!ok) return;
+      await Store.Klassen.remove(k.id);
+      UI.toast("Klasse gelöscht");
+      if (state.klasseId === k.id) go("home"); else render();
+    },
+
+    // Mitarbeit: Quartal abschließen (Dialog in views.dialoge.js)
+    "quartal-abschliessen": () => quartalAbschliessenDialog(),
+
+    // Export-Ordner (File System Access API, Chrome/Edge)
+    "export-ordner-waehlen": async () => {
+      if (!window.showDirectoryPicker) { UI.toast("Dieser Browser kann keinen Ordner wählen"); return; }
+      try {
+        const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+        await CSV.exportOrdnerSetzen(handle);
+        render();
+        UI.toast("Export-Ordner gespeichert");
+      } catch (e) { /* AbortError: Nutzer hat abgebrochen -> nichts tun */ }
+    },
+    "export-ordner-vergessen": async () => {
+      await CSV.exportOrdnerVergessen();
+      render();
+      UI.toast("Export-Ordner entfernt");
+    },
     "reset-demo": async () => {
       if (await UI.confirmDialog("Demo-Daten laden?", "Nur möglich, wenn keine Klassen existieren, sonst bleiben deine Daten unberührt.", { okLabel: "Laden", danger: false })) {
         const ok = await Store.seedDemoData();
@@ -156,6 +199,13 @@
       }
     }
   };
+
+  // Toast je nach Ergebnis von CSV.speichern ("abgebrochen" = kein Toast)
+  function exportToast(status, label) {
+    if (status === "ordner") UI.toast(label + " im Export-Ordner gespeichert");
+    else if (status === "teilen") UI.toast(label + " geteilt");
+    else if (status === "download") UI.toast(label + " exportiert");
+  }
 
   // seat-assign braucht die aktuelle Klasse
   async function seatAssignDialog2(seatId) {
@@ -188,7 +238,8 @@
     const t = state.tracker;
     const e = Store.neuesEreignis(state.klasseId, sid, typ, punkte, t && t.stunde ? t.stunde.id : null);
     e.heatDelta = heatDelta;
-    e.halbjahr = parseInt(state.settings.aktuellesHalbjahr, 10) || 1;
+    e.quartal = parseInt(state.settings.aktuellesQuartal, 10) || 1;
+    e.halbjahr = Store.halbjahrAusQuartal(e.quartal);
     await Store.Ereignisse.save(e);
 
     if (heatDelta > 0) await trackerHeatAddieren(sid, heatDelta);

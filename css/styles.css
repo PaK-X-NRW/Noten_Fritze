@@ -158,6 +158,9 @@ body {
 .class-card .name { font-size: 20px; font-weight: 700; }
 .class-card .foot { display: flex; justify-content: space-between; align-items: center; color: var(--text-muted); font-size: 13px; }
 .class-card .stale-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+/* Löschen-Button oben rechts auf der Karte (Delegation greift ihn vor dem
+   Karten-Klick über closest). */
+.class-card .card-del { position: absolute; top: 8px; right: 8px; width: 40px; height: 40px; font-size: 18px; }
 
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -223,9 +226,10 @@ tbody td.grp-zeugnis.summe-stark { background: var(--grp-zeugnis-stark); }
 .noten-wrap > .noten-tab { flex: 0 0 auto; width: auto; min-width: 100%; }
 .noten-wrap > .noten-rand { flex: 0 0 auto; width: var(--rand, 0px); }
 
-/* Spalten per Ziehen am Kopf umsortieren. `pan-y` überlässt dem Browser nur
-   das vertikale Scrollen – waagerechte Gesten am Kopf gehören dem Ziehen. */
-.noten-tab th.zieh { cursor: grab; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+/* Spalten per Ziehen am Kopf umsortieren. `touch-action: none` gibt alle Gesten
+   ab dem Kopf komplett an das JS (iOS übernimmt sonst per pointercancel/Scroll);
+   vertikales Scrollen bleibt über den Tabellenkörper möglich. */
+.noten-tab th.zieh { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .noten-tab.spalten-ziehen { user-select: none; -webkit-user-select: none; }
 .noten-tab.spalten-ziehen th.zieh { cursor: grabbing; }
 .noten-tab th.zieht { opacity: .45; }
@@ -415,8 +419,14 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   background: var(--warn); color: #fff; font-size: 11px; font-weight: 800;
   vertical-align: middle;
 }
+/* Vermerk „Verweigerung“ neben dem Namen (Stunde zählt als Note 6) */
+.tag-verweigerung {
+  display: inline-block; padding: 1px 8px; border-radius: 999px;
+  background: #4a148c; color: #fff; font-size: 11px; font-weight: 800;
+  vertical-align: middle;
+}
 
-/* ---------- Tracker-Modi (Abwesend / keine HA / Heatmap) ---------- */
+/* ---------- Tracker-Modi (Abwesend / Verweigerung / keine HA / Heatmap) ---------- */
 /* Ein aktiver Modus färbt Topbar und Seite um, damit der Wechsel des
    Tippverhaltens sofort erkennbar ist. Die ganze Kachel wird zum Tap-Ziel. */
 .modusbar { display: flex; gap: 8px; }
@@ -439,11 +449,12 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .modus-banner .hint { color: var(--text); opacity: .8; }
 
 body.modus-abwesend { --modus-color: #c0392b; --modus-soft: #fbe9e7; }
+body.modus-verweigerung { --modus-color: #4a148c; --modus-soft: #f3e5f5; }
 body.modus-keineha  { --modus-color: #b9770e; --modus-soft: #fdf1de; }
 body.modus-heat     { --modus-color: #1565c0; --modus-soft: #e3edfa; }
-body.modus-abwesend, body.modus-keineha, body.modus-heat { background: var(--modus-soft); }
-body.modus-abwesend .content, body.modus-keineha .content, body.modus-heat .content { background: var(--modus-soft); }
-body.modus-abwesend .topbar, body.modus-keineha .topbar, body.modus-heat .topbar {
+body.modus-abwesend, body.modus-verweigerung, body.modus-keineha, body.modus-heat { background: var(--modus-soft); }
+body.modus-abwesend .content, body.modus-verweigerung .content, body.modus-keineha .content, body.modus-heat .content { background: var(--modus-soft); }
+body.modus-abwesend .topbar, body.modus-verweigerung .topbar, body.modus-keineha .topbar, body.modus-heat .topbar {
   background: var(--modus-soft);
   border-bottom: 3px solid var(--modus-color);
 }
@@ -451,6 +462,23 @@ body.modus-abwesend .topbar, body.modus-keineha .topbar, body.modus-heat .topbar
 .seat.tracker.modus { cursor: pointer; outline: 2px dashed var(--modus-color); outline-offset: -4px; }
 /* Im Modus zählt der Tap auf die ganze Kachel – die Typ-Buttons reichen ihn durch */
 .seat.tracker.modus .typebtn { opacity: .3; pointer-events: none; }
+
+/* Kompakte Kacheln für große Sitzpläne: ab 7 Spalten „kompakt“, ab 9 „mini“,
+   damit z. B. ein 4×9-Raster auf ein iPad-Querformat passt. */
+.tracker-grid.kompakt { gap: 8px; }
+.tracker-grid.mini { gap: 6px; }
+.tracker-grid.kompakt .seat.tracker { min-height: 96px; padding: 8px; gap: 6px; }
+.tracker-grid.mini .seat.tracker { min-height: 72px; padding: 6px; gap: 4px; }
+.tracker-grid.kompakt .seat .seat-head .nm { font-size: 13px; }
+.tracker-grid.mini .seat .seat-head .nm { font-size: 12px; }
+.tracker-grid.kompakt .typebtns { gap: 4px; }
+.tracker-grid.mini .typebtns { gap: 3px; }
+.tracker-grid.kompakt .typebtn { min-height: 34px; font-size: 13px; line-height: 1; border-radius: 8px; }
+.tracker-grid.mini .typebtn { min-height: 28px; font-size: 12px; line-height: 1; border-radius: 6px; }
+.tracker-grid.kompakt .typebtn .tcount { min-width: 16px; height: 16px; font-size: 9px; padding: 0 4px; top: -6px; right: -6px; }
+.tracker-grid.mini .typebtn .tcount { min-width: 14px; height: 14px; font-size: 9px; padding: 0 3px; top: -5px; right: -5px; }
+/* In „mini“ entfällt der Σ-Badge, er kostet zu viel Platz */
+.tracker-grid.mini .tcount-total { display: none; }
 
 /* ---------- Besprechungsmodus ---------- */
 .discussion { max-width: 680px; margin: 0 auto; }

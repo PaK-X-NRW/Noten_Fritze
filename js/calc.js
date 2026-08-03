@@ -1,8 +1,11 @@
 /* =========================================================================
    calc.js – Rechenlogik
-   - Notenberechnung (Kategorie -> Art-Gruppe -> Gesamtnote), transparent
+   - Notenberechnung (Kategorie -> Art-Gruppe -> Gesamtnote), transparent;
+     Zeitraum-Filter: Quartal (1–4) | "hj1" | "hj2" | null (Jahr), die Gruppe
+     „sonstige" wird bei Halbjahr/Jahr quartalsweise gemittelt
    - Notenparser/-formatierung (deutsche Tendenzen 2+, 2, 2-)
-   - Mitarbeits-Auswertung inkl. Notenvorschlag
+   - Mitarbeits-Auswertung nach dem Stundennoten-Modell (Notenvorschlag = Ø
+     der Stundennoten, Verweigerung = glatte 6)
    - Heatmap-Farbe (grün = aktiv, rot = lange nicht beteiligt)
    ========================================================================= */
 (function (global) {
@@ -101,23 +104,39 @@
   }
 
   // ---- Notenberechnung -----------------------------------------------------
+  // Quartale eines Zeitraum-Filters:
+  //   1|2|3|4 -> genau dieses Quartal · "hj1" -> Quartale 1+2 ·
+  //   "hj2" -> Quartale 3+4 · null/undefined/"jahr" -> ganzes Jahr (1–4)
+  function quartaleVonFilter(filter) {
+    if (filter === 1 || filter === 2 || filter === 3 || filter === 4) return [filter];
+    if (filter === "hj1") return [1, 2];
+    if (filter === "hj2") return [3, 4];
+    return [1, 2, 3, 4];
+  }
+
   // Liefert eine nachvollziehbare Struktur mit Zwischenergebnissen.
   //   kategorien: Array {id, name, art, gewichtung, anzeige}
-  //   notenFuerSchueler: Array {kategorieId, wert, halbjahr}
+  //   notenFuerSchueler: Array {kategorieId, wert, quartal}
   //   klasse: {anteilSchriftlich, anteilSonstige}
-  //   halbjahr: optional 1 | 2 (nur dieses Halbjahr rechnen), null = ganzes Jahr.
-  //   Noten ohne halbjahr-Feld (alte Datensätze) fließen immer ein.
+  //   filter: 1|2|3|4 (nur dieses Quartal) | "hj1" | "hj2" | null (ganzes Jahr).
+  //   Noten ohne quartal-Feld (alte Datensätze) fließen immer ein.
+  //   Schriftlich wird über den ganzen gefilterten Zeitraum gerechnet; die
+  //   Gruppe „sonstige" bei Halbjahr/Jahr quartalsweise: je Quartal der
+  //   gewichtete Kategorien-Ø, der Gruppen-Schnitt ist der Mittelwert der
+  //   vorhandenen Quartals-Ø (zwei Quartale -> je 50 %, nur eines -> 100 %).
   //   Kategorien mit anzeige != "note" (z. B. Zählung fehlender Hausaufgaben)
   //   bleiben in den Zwischenergebnissen sichtbar, zählen aber nicht in die Note.
-  function berechneSchueler(kategorien, notenFuerSchueler, klasse, rundung, halbjahr) {
+  function berechneSchueler(kategorien, notenFuerSchueler, klasse, rundung, filter) {
+    const filterQuartale = quartaleVonFilter(filter);
+    const einzelquartal = (filter === 1 || filter === 2 || filter === 3 || filter === 4);
     const notenByKat = {};
     notenFuerSchueler.forEach((n) => {
       if (n.wert === null || n.wert === undefined || isNaN(n.wert)) return;
-      if (halbjahr && n.halbjahr && n.halbjahr !== halbjahr) return;
+      if (n.quartal && filterQuartale.indexOf(n.quartal) === -1) return;
       (notenByKat[n.kategorieId] = notenByKat[n.kategorieId] || []).push(n.wert);
     });
 
-    // 1) Durchschnitt je Kategorie
+    // 1) Durchschnitt je Kategorie (über den ganzen gefilterten Zeitraum)
     const katErgebnisse = kategorien.map((kat) => {
       const werte = notenByKat[kat.id] || [];
       const schnitt = werte.length ? werte.reduce((a, b) => a + b, 0) / werte.length : null;
@@ -128,15 +147,51 @@
       };
     });
 
-    // 2) Je Art-Gruppe: gewichteter Schnitt (Kategorien ohne Noten ignorieren)
-    function gruppe(art) {
-      const kats = katErgebnisse.filter((k) => k.art === art && k.zaehltInNote && k.schnitt !== null && k.gewichtung > 0);
+    // 2) Je Art-Gruppe: gewichteter Schnitt (Kategorien ohne Noten ignorieren).
+    //    Optional aus einer anderen Werte-Map (für die Quartalsrechnung).
+    function gruppe(art, byKat) {
+      const map = byKat || notenByKat;
+      const kats = katErgebnisse
+        .filter((k) => k.art === art && k.zaehltInNote && k.gewichtung > 0)
+        .map((k) => {
+          const werte = map[k.id] || [];
+          const schnitt = werte.length ? werte.reduce((a, b) => a + b, 0) / werte.length : null;
+          return Object.assign({}, k, { anzahl: werte.length, werte, schnitt });
+        })
+        .filter((k) => k.schnitt !== null);
       const gewSumme = kats.reduce((a, k) => a + k.gewichtung, 0);
       const schnitt = gewSumme ? kats.reduce((a, k) => a + k.schnitt * k.gewichtung, 0) / gewSumme : null;
       return { art, kategorien: kats, gewSumme, schnitt };
     }
     const schriftlich = gruppe("schriftlich");
-    const sonstige = gruppe("sonstige");
+    let sonstige;
+    if (einzelquartal) {
+      // Einzelnes Quartal: direkte Berechnung über die Noten des Quartals
+      sonstige = gruppe("sonstige");
+    } else {
+      // Halbjahr/Jahr: sonstige quartalsweise (s. Kopfkommentar)
+      const quartalErgebnisse = [];
+      filterQuartale.forEach((q) => {
+        const byKatQ = {};
+        notenFuerSchueler.forEach((n) => {
+          if (n.wert === null || n.wert === undefined || isNaN(n.wert)) return;
+          if (n.quartal && n.quartal !== q) return;
+          (byKatQ[n.kategorieId] = byKatQ[n.kategorieId] || []).push(n.wert);
+        });
+        const g = gruppe("sonstige", byKatQ);
+        if (g.schnitt !== null) quartalErgebnisse.push({ quartal: q, schnitt: g.schnitt });
+      });
+      const gAlle = gruppe("sonstige");
+      sonstige = {
+        art: "sonstige",
+        kategorien: gAlle.kategorien,
+        gewSumme: gAlle.gewSumme,
+        schnitt: quartalErgebnisse.length
+          ? quartalErgebnisse.reduce((a, x) => a + x.schnitt, 0) / quartalErgebnisse.length
+          : null,
+        quartale: quartalErgebnisse
+      };
+    }
 
     // 3) Gesamt aus beiden Gruppen. Robust: fehlt eine Gruppe, zählt die andere 100 %.
     let aS = (klasse.anteilSchriftlich != null ? klasse.anteilSchriftlich : 50);
@@ -180,60 +235,115 @@
     return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
   }
 
-  // Aggregiert Ereignisse je Schüler innerhalb eines Zeitraums.
+  // Aggregiert Ereignisse je Schüler innerhalb eines Zeitraums und rechnet
+  // nach dem STUNDENNOTEN-MODELL: Jede gezählte Stunde (im Zeitraum, keine
+  // gemeldete Abwesenheit des Schülers an dem Tag) bekommt eine Stundennote
+  // aus der Summe ihrer Event-Punkte via Schwellen; eine Stunde ohne
+  // Ereignis zählt mit 0 Punkten. Ein „verweigerung"-Ereignis setzt die
+  // Stundennote glatt auf 6 (Meldungspunkte dieser Stunde entfallen).
+  // Der Notenvorschlag ist der Ø aller Stundennoten (1 NK).
+  // Im haModus "note6" fließen „keinehausaufgabe"-Punkte NICHT in die
+  // Stundennoten ein (sie erzeugen stattdessen jede 3. eine Note 6, s.
+  // Store.haNote6Pruefen); im Aggregat-Feld `punkte` bleiben sie enthalten –
+  // `punkte` ist die reine Info-Summe aller gezählten Event-Punkte (ohne
+  // Verwerfung durch Verweigerung oder haModus).
   //   ereignisse: Array {schuelerId, stundeId, typ, punkte, timestamp}
   //   opts: {
   //     vonTs, bisTs:   Zeitraum (Default: alles bis jetzt)
   //     abwesendTage:   Set "schuelerId|YYYY-MM-DD" – Ereignisse an Tagen mit
   //                     gemeldeter Abwesenheit zählen nicht, und die Stunden
   //                     dieses Tages fallen für den/die Schüler/in aus dem Nenner
-  //     stunden:        Array der gehaltenen Stunden {datum, startTs} – bereits
-  //                     nach Halbjahr gefiltert; sie bilden den Nenner
+  //     stunden:        Array der gehaltenen Stunden {id, datum, startTs} –
+  //                     bereits nach Zeitraum gefiltert; sie bilden die Stundennoten
   //     schuelerIds:    optional alle Schüler der Klasse, damit auch Schüler
   //                     ohne jedes Ereignis einen Vorschlag bekommen
   //     schwellen:      effektive Notenschwellen (global oder klassenweise)
   //   }
-  // Der Nenner sind ALLE Stunden im Zeitraum, in denen der/die Schüler/in
-  // anwesend war – auch Stunden ohne jede Meldung (sie zählen 0 Punkte).
+  // Rückgabe je Schüler u. a.: anzahl, punkte, typen, letzte, tage,
+  // stundenIds, stundenGezaehlt, stundenMitEreignis, aktiveTage, nenner,
+  // punkteProStunde (Info, treibt den Vorschlag nicht mehr), verweigerungen,
+  // stundenNoten (chronologisch, {stundeId, datum, note, punkte, verweigerung}),
+  // notenvorschlag (Ø der Stundennoten, 1 NK; null ohne jede Grundlage).
   function auswertungMitarbeit(ereignisse, settings, opts) {
     opts = opts || {};
     const von = opts.vonTs || 0, bis = opts.bisTs || Store.now() + 1;
     const abwesendTage = opts.abwesendTage;
     const schwellen = opts.schwellen || settings.mitarbeitSchwellen || Store.DEFAULT_SETTINGS.mitarbeitSchwellen;
-    const stunden = (opts.stunden || []).filter((st) => st.startTs >= von && st.startTs <= bis);
+    const stunden = (opts.stunden || [])
+      .filter((st) => st.startTs >= von && st.startTs <= bis)
+      .sort((a, b) => a.startTs - b.startTs);
+    const haZaehltPunkte = settings.haModus !== "note6";
 
     const proSchueler = {};
     function eintrag(sid) {
       if (!proSchueler[sid]) {
         proSchueler[sid] = {
           schuelerId: sid, anzahl: 0, punkte: 0, letzte: 0,
-          typen: {}, tage: {}, stundenIds: {}
+          typen: {}, tage: {}, stundenIds: {}, verweigerungen: 0
         };
       }
       return proSchueler[sid];
     }
     (opts.schuelerIds || []).forEach(eintrag);
 
+    // Ereignisse aggregieren und zusätzlich je Schüler/Stunde gruppieren
+    const eventsProStunde = {}; // sid -> stundeKey -> { punkte, verweigerung }
     ereignisse.forEach((e) => {
       if (e.timestamp < von || e.timestamp > bis) return;
       const tag = tagVonTs(e.timestamp);
       if (abwesendTage && abwesendTage.has(e.schuelerId + "|" + tag)) return;
       const s = eintrag(e.schuelerId);
+      const punkte = (e.punkte != null ? e.punkte : (settings.mitarbeitPunkte[e.typ] || 0));
       s.anzahl += 1;
-      s.punkte += (e.punkte != null ? e.punkte : (settings.mitarbeitPunkte[e.typ] || 0));
+      s.punkte += punkte;
+      if (e.typ === "verweigerung") s.verweigerungen += 1;
       s.letzte = Math.max(s.letzte, e.timestamp);
       s.typen[e.typ] = (s.typen[e.typ] || 0) + 1;
       s.tage[tag] = true;
       s.stundenIds[e.stundeId || tag] = true;
+      const key = e.stundeId || ("tag:" + tag);
+      const gruppen = (eventsProStunde[e.schuelerId] = eventsProStunde[e.schuelerId] || {});
+      const g = (gruppen[key] = gruppen[key] || { punkte: 0, verweigerung: false });
+      if (e.typ === "verweigerung") {
+        g.verweigerung = true;
+      } else if (e.typ === "keinehausaufgabe" && !haZaehltPunkte) {
+        // haModus "note6": vergessene HA geben keine Mitarbeits-Punkte
+      } else {
+        g.punkte += punkte;
+      }
     });
 
     Object.keys(proSchueler).forEach((sid) => {
       const s = proSchueler[sid];
+      const stundenNoten = [];
       let gezaehlt = 0;
       stunden.forEach((st) => {
         if (abwesendTage && abwesendTage.has(sid + "|" + st.datum)) return;
         gezaehlt += 1;
+        const g = (eventsProStunde[sid] || {})[st.id] || null;
+        const punkte = g ? g.punkte : 0;
+        const verw = g ? g.verweigerung : false;
+        stundenNoten.push({
+          stundeId: st.id, datum: st.datum,
+          note: verw ? 6 : punkteZuNote(punkte, schwellen),
+          punkte, verweigerung: verw
+        });
       });
+      if (gezaehlt === 0 && s.anzahl > 0) {
+        // Keine Stunden bekannt (z. B. gefilterter Zeitraum): ersatzweise je
+        // Ereignis-Gruppe (Stunde bzw. Tag) eine Stundennote bilden.
+        const gruppen = eventsProStunde[sid] || {};
+        Object.keys(gruppen).forEach((key) => {
+          const g = gruppen[key];
+          const istTag = key.indexOf("tag:") === 0;
+          stundenNoten.push({
+            stundeId: istTag ? null : key,
+            datum: istTag ? key.slice(4) : null,
+            note: g.verweigerung ? 6 : punkteZuNote(g.punkte, schwellen),
+            punkte: g.punkte, verweigerung: g.verweigerung
+          });
+        });
+      }
       s.stundenGezaehlt = gezaehlt;
       s.stundenMitEreignis = Object.keys(s.stundenIds).length;
       s.aktiveTage = Object.keys(s.tage).length;
@@ -241,8 +351,12 @@
       // Stunden mit Ereignis, damit nie durch 0 geteilt wird.
       s.nenner = gezaehlt || s.stundenMitEreignis || 1;
       s.punkteProStunde = s.punkte / s.nenner;
-      // Ohne jede Grundlage (keine Stunde, kein Ereignis) gibt es keinen Vorschlag.
-      s.notenvorschlag = (gezaehlt || s.anzahl) ? punkteZuNote(s.punkteProStunde, schwellen) : null;
+      s.stundenNoten = stundenNoten;
+      // Notenvorschlag = Ø der Stundennoten (1 NK). Ohne jede Grundlage
+      // (keine Stunde, kein Ereignis) gibt es keinen Vorschlag.
+      s.notenvorschlag = stundenNoten.length
+        ? Math.round(stundenNoten.reduce((a, x) => a + x.note, 0) / stundenNoten.length * 10) / 10
+        : null;
     });
     return proSchueler;
   }
@@ -356,7 +470,7 @@
 
   global.Calc = {
     parseNote, formatNote, clampNote, rundeGesamt,
-    berechneSchueler, noteFarbe,
+    berechneSchueler, quartaleVonFilter, noteFarbe,
     zeugnisnote, formatZeugnisnote, zeugnisErgebnis, jahresnote,
     auswertungMitarbeit, punkteZuNote, schwellenFuer, heatFarbe,
     tagVonTs,

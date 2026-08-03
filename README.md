@@ -74,25 +74,28 @@ schueler       { id, klasseId, vorname, nachname, bemerkung, sortIndex, ... }
 kategorien     { id, klasseId, name, art('schriftlich'|'sonstige'),
                  gewichtung, anzeige('note'|'fehlendeHA'), sortIndex }
 noten          { id, klasseId, schuelerId, kategorieId, wert(1..6),
-                 titel, datum(YYYY-MM-DD), halbjahr(1|2), createdAt }
+                 titel, datum(YYYY-MM-DD), quartal(1..4), halbjahr(1|2, abgeleitet),
+                 createdAt }
 sitzplaene     { klasseId, rows, cols, seats:[{id,row,col,schuelerId}] }
 ereignisse     { id, klasseId, schuelerId, stundeId, typ, punkte, timestamp,
-                 halbjahr(1|2), notiz }
+                 quartal(1..4), halbjahr(1|2, abgeleitet), notiz }
 stunden        { id, klasseId, datum(YYYY-MM-DD), startTs, endeTs, dauerMin, stundeNr,
-                 quelle('plan'|'fallback'|'manuell'|'migriert'), halbjahr(1|2),
+                 quelle('plan'|'fallback'|'manuell'|'migriert'), quartal(1..4),
+                 halbjahr(1|2, abgeleitet),
                  status('offen'|'beendet'), beendetAt, createdAt, updatedAt }
 abwesenheiten  { id(schuelerId_datum), klasseId, schuelerId, datum(YYYY-MM-DD), createdAt }
-einstellungen  { key:'app', schemaVersion, aktuellesHalbjahr(1|2), stundenplan,
-                 rundung, schuelerSortierung('nachname'|'manuell'),
+einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punkte'|'note6'),
+                 stundenplan, rundung, schuelerSortierung('nachname'|'manuell'),
                  mitarbeitPunkte, mitarbeitSchwellen,
                  heatPunkteEinfach, heatPunkteGut, heatPunkteSehrGut,
                  heatStartWert, heatVerfallPunkte, heatVerfallMinuten, anteile }
+                 (key:'export' = Handle des Export-Ordners, File System Access API)
 ```
 
 - **Integrität:** Löschen einer Klasse/eines Schülers löscht kaskadierend alle
   abhängigen Datensätze (Noten, Ereignisse, Stunden, Abwesenheiten, Sitzplatz-Zuweisung).
 - **App-Version:** `APP_VERSION` in `js/version.js` (Schema `MAJOR.MINOR.PATCH`,
-  aktuell **1.3.7**) ist die sichtbare Programmversion: angezeigt unter
+  aktuell **1.5.0**) ist die sichtbare Programmversion: angezeigt unter
   Einstellungen → Über, Name des Service-Worker-Caches, Feld `appVersion` im
   JSON-Backup. Sie wird von Hand gepflegt und ist unabhängig von den beiden
   internen Zählern unten.
@@ -139,10 +142,16 @@ Ergebnis exakt auf einer Grenze, entscheiden die ungerundeten Werte. Die **Jahre
 bildet sich aus den beiden Halbjahres-Zeugnisnoten zu je 50 %, bei Gleichstand gibt das
 2. Halbjahr den Ausschlag; solange nur ein Halbjahr Noten hat, bleibt sie leer.
 
-**Halbjahre:** Jede Note (und jedes Mitarbeits-Ereignis) gehört zum 1. oder
-2. Halbjahr – beim Anlegen aus der Einstellung „Aktuelles Halbjahr“ übernommen.
-Noten-Tab, Besprechungsmodus und Mitarbeits-Auswertung können je Halbjahr oder
-fürs ganze Jahr rechnen (Filter „1. HJ · 2. HJ · Jahr“).
+**Quartale:** Jede Note (und jedes Mitarbeits-Ereignis, jede Stunde) gehört zu einem
+der vier Quartale (1. Q: Aug–Okt, 2. Q: Nov–Jan, 3. Q: Feb–Apr, 4. Q: Mai–Jul) –
+beim Anlegen aus der Einstellung „Aktuelles Quartal“ übernommen. Noten-Tab,
+Besprechungsmodus und Mitarbeits-Auswertung können je Quartal oder fürs ganze Jahr
+rechnen (Filter „1. Q · 2. Q · 3. Q · 4. Q · Jahr“). Bei Halbjahres- und
+Jahres-Sicht werden die **sonstigen Leistungen quartalsweise** gemittelt (1. HJ =
+Ø aus 1. Q und 2. Q zu je 50 %, fehlende Quartale zählen dann zu 100 %); die
+schriftlichen Leistungen laufen unverändert über den ganzen Zeitraum. Die
+Jahres-Ansicht der Notenübersicht zeigt die Quartals-Ergebnisse als eigene Spalten
+„Sonstige 1. Q–4. Q“.
 
 ## 5. Mitarbeits-Tracker & Punktesystem
 
@@ -155,6 +164,7 @@ fürs ganze Jahr rechnen (Filter „1. HJ · 2. HJ · Jahr“).
   | Sehr gute Meldung   |  +3    |
   | Störung             |  −2    |
   | Fehlende HA         |  −1    |
+  | Leistungsverweigerung | – (Stundennote 6, s. unten) |
 
 - **Unterrichtsstunde als Einheit:** Der Tracker erfasst immer *in* einer Stunde.
   Beim Start wird eine Stunde angelegt (Datum, Klasse, Start/Ende, Stundennummer);
@@ -162,14 +172,19 @@ fürs ganze Jahr rechnen (Filter „1. HJ · 2. HJ · Jahr“).
   für die offene Stunde des heutigen Tages an. „Stunde beenden“ schließt sie
   endgültig ab. Alle Ereignisse hängen über `stundeId` an ihrer Stunde.
 - **Erfassung:** Jede Schüler-Kachel trägt die 4 Ereignis-Buttons (Wortmeldung,
-  Gute/Sehr gute Meldung, Störung) direkt in sich – farbcodiert, mit Zähler je Typ
-  **für die laufende Stunde**. Ein Tap erzeugt sofort das Ereignis. **Undo** über
-  Toast oder Button.
-- **Modi in der Topbar:** Abwesend (🤒), Keine HA (📕) und Heatmap (⚙️) sind keine
-  Kachel-Buttons mehr, sondern Modi. Ein aktiver Modus **färbt Topbar und Seite um**
-  und blendet ein Hinweisbanner ein; danach ist die ganze Kachel das Tap-Ziel:
-  Abwesenheit umschalten, „keine HA“ für diese Stunde vermerken (erneutes Tippen
-  entfernt den Vermerk) oder den Heatmap-Wert per Slider setzen. Beendet wird ein
+  Gute/Sehr gute Meldung, Störung) direkt in sich – als Piktogramme
+  (★ / ★★ / ★★★ / ⚡), farbcodiert, mit Zähler je Typ **für die laufende Stunde**;
+  eine Legende oben erklärt Icon + Bedeutung + Punkte. Ein Tap erzeugt sofort das
+  Ereignis. **Undo** über Toast oder Button. Bei breiten Sitzplänen schalten die
+  Kacheln automatisch auf kompaktere Darstellung (ab 7 bzw. 9 Spalten), damit
+  alles auf den Schirm passt.
+- **Modi in der Topbar:** Abwesend (🤒), Leistungsverweigerung (🚫), Keine HA (📕)
+  und Heatmap (⚙️) sind keine Kachel-Buttons mehr, sondern Modi. Ein aktiver Modus
+  **färbt Topbar und Seite um** und blendet ein Hinweisbanner ein; danach ist die
+  ganze Kachel das Tap-Ziel: Abwesenheit umschalten, Verweigerung für diese Stunde
+  vermerken (Badge auf der Kachel, Ereignis-Buttons deaktiviert), „keine HA“ für
+  diese Stunde vermerken (erneutes Tippen entfernt den Vermerk) oder den
+  Heatmap-Wert per Slider setzen. Beendet wird ein
   Modus über „Fertig“, den Topbar-Button oder `Esc`.
 - **Stundenplan & Stundendauer:** In den Einstellungen liegt ein Stundenplan aus
   10 Stunden (Start/Ende je Stunde), der für jeden Schultag gleich gilt. Beim
@@ -189,16 +204,29 @@ fürs ganze Jahr rechnen (Filter „1. HJ · 2. HJ · Jahr“).
   ist der Wert eingefroren und läuft in der nächsten Stunde einfach weiter.
   Der Wertebereich liegt immer bei 0 bis 100. Negative Meldungen wie Störung oder
   fehlende HA beeinflussen die Heatmap nicht.
-- **Epochalnote (Vorschlag):** Summe der Punkte / **Anzahl gehaltener Stunden, in
-  denen der/die Schüler/in anwesend war** = Ø-Punkte pro Stunde, gemappt über
-  konfigurierbare Schwellen auf eine Note 1–6. Stunden ohne jede Meldung zählen
-  dabei mit (0 Punkte) – Schweigen wird also sichtbar. Bewusst als **Vorschlag**
-  markiert (Auswertungs-Tab, pro Zeitraum: Gesamt / 30 Tage / 7 Tage, je Halbjahr
-  filterbar); ein Tap auf den Vorschlag zeigt die komplette Rechnung.
-- **Notenschwellen:** global in den Einstellungen editierbar (Note 1–5 ab X
-  Ø-Punkten, darunter 6) und **pro Klasse überschreibbar** (Klasse → Auswertung →
-  „Schwellen“), weil z. B. eine Biologiestunde andere Mitarbeit ermöglicht als eine
-  Deutschstunde.
+- **Mitarbeitsnote / Epochalnote (Vorschlag, Stundennoten-Modell):** Jede
+  **gehaltene Stunde, in der der/die Schüler/in anwesend war**, bekommt aus ihren
+  Punkten eine eigene Stundennote 1–6 (über konfigurierbare Schwellen). Stunden
+  ohne jede Meldung zählen mit 0 Punkten – Schweigen wird also sichtbar. Der
+  Vorschlag ist der **Ø der Stundennoten** (eine Nachkommastelle). Eine Stunde mit
+  Leistungsverweigerung zählt als glatte 6, die Meldungspunkte dieser Stunde
+  entfallen. Bewusst als **Vorschlag** markiert (Mitarbeit-Tab, pro Zeitraum:
+  Gesamt / 30 Tage / 7 Tage, je Quartal oder fürs Jahr filterbar); ein Tap auf den
+  Vorschlag zeigt die Verteilung der Stundennoten und die komplette Herleitung.
+- **Notenschwellen:** global in den Einstellungen editierbar (Note 1–5 ab X Punkten
+  **in einer Stunde**, darunter 6) und **pro Klasse überschreibbar** (Klasse →
+  Mitarbeit → „Schwellen“), weil z. B. eine Biologiestunde andere Mitarbeit
+  ermöglicht als eine Deutschstunde.
+- **Vergessene Hausaufgaben (HA-Modus):** In den Einstellungen wählbar –
+  „Punkteabzug in der Mitarbeit“ (−1 Punkt, Voreinstellung) oder „Ab der 3. je eine
+  Note 6“: Dann geben vergessene HA keine Punkte, und bei jeder 3. vergessenen HA
+  eines Quartals legt die App automatisch eine Note 6 in der Kategorie „Mündliche
+  Mitarbeit“ an (wird bei Bedarf erzeugt).
+- **Quartal abschließen:** Im Mitarbeit-Tab (bei gewähltem Quartal) überträgt ein
+  Dialog die Notenvorschläge als richtige Noten – pro Schüler/in editierbar, in eine
+  wählbare Ziel-Kategorie (Voreinstellung „Mündliche Mitarbeit“). Vorher lassen sich
+  die Noten und die Roh-Ereignisse als CSV sichern; danach werden die Ereignisse und
+  Stunden des Quartals gelöscht und die Zählung startet bei 0.
 
 ## 6. CSV-Schema
 
@@ -206,24 +234,37 @@ Format: UTF-8 **mit BOM** (Umlaute in Numbers/Excel korrekt), Trennzeichen `,`,
 robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisch.
 
 - **Schülerliste** (`schueler_<Klasse>.csv`): `Vorname, Nachname, Bemerkung`
-- **Noten (breit)** (`noten_<Klasse>.csv`): `Vorname, Nachname, <Kategorie> (Ø)…, Schriftlich, Sonstige, Gesamtnote, Zeugnisnote`
-- **Einzelnoten (lang)** (`einzelnoten_<Klasse>.csv`): `Vorname, Nachname, Kategorie, Art, Titel, Note, Datum, Halbjahr`
+- **Noten (breit)** (`noten_<Klasse>.csv`): `Vorname, Nachname, <Kategorie> (Ø)…, Sonstige 1. Q…4. Q, Schriftlich, Sonstige, Gesamtnote, Zeugnisnote`
+- **Einzelnoten (lang)** (`einzelnoten_<Klasse>.csv`): `Vorname, Nachname, Kategorie, Art, Titel, Note, Datum, Quartal`
 - **Mitarbeit** (`mitarbeit_<Klasse>.csv`): `Vorname, Nachname, Ereignistyp, Punkte, Zeitpunkt`
+- **Quartalsabschluss** (`mitarbeit_q<N>_<Klasse>.csv`): `Vorname, Nachname, Note, Quartal` – die übertragenen Mitarbeitsnoten beim „Quartal abschließen“.
+- **Export-Ziel:** Alle Exporte laufen über denselben Speicherweg: 1) einmal
+  gewählter **Export-Ordner** (Einstellungen → „Export-Ordner“, Chrome/Edge am
+  Desktop) – danach landen alle Dateien direkt dort; 2) auf dem iPad das
+  **Teilen-Blatt** („In Dateien sichern“ erlaubt dort die Ordnerwahl – iPad-Safari
+  hat keinen eigenen Ordner-Picker); 3) sonst klassischer Download.
 - **Import:** Schülerlisten per CSV-Datei **oder** eingefügter Namensliste
   („Nachname, Vorname“ bzw. „Vorname Nachname“).
+- **Klassen-Export/-Import:** Eine einzelne Klasse komplett als JSON exportieren
+  (Button „Exportieren“ in der Klassen-Ansicht, z. B. zur Übergabe an Kolleg/innen)
+  und auf dem Startbildschirm wieder importieren („Klasse importieren“) – bei
+  bereits vorhandener Klasse wahlweise **ersetzen** oder **als Kopie** anlegen.
 - **Voll-Backup:** JSON über alle Stores (Einstellungen inkl.), Import mit optionalem
   „vorher alles löschen“.
 
 ## 7. UI-Struktur & Screens
 
 - **Home** – Klassenübersicht als Karten, sortiert nach zuletzt geöffnet; lange nicht
-  geöffnete Klassen mit rotem Punkt + Hinweis. „＋ Klasse“, Einstellungen.
+  geöffnete Klassen mit rotem Punkt + Hinweis. „＋ Klasse“, „Klasse importieren“,
+  Einstellungen. Jede Karte trägt oben rechts einen 🗑-Button zum direkten Löschen
+  der Klasse (mit Bestätigung, inkl. aller Noten/Ereignisse/Stunden).
 - **Klasse** – Tabs: *Schüler/innen · Noten · Kategorien · Sitzplan · Mitarbeit*.
-  Oben schnell erreichbar: **Tracker**, **Besprechung**, Bearbeiten.
+  Oben schnell erreichbar: **Tracker**, **Besprechung**, **Exportieren** (Klasse als
+  JSON), Bearbeiten.
   Die Reihenfolge der Schüler/innen ist in den Einstellungen umschaltbar
   (alphabetisch nach Nachname – Voreinstellung – oder manuell per ▲/▼); sie gilt
   für alle Ansichten und Exporte.
-- **Noten** – Halbjahr-Ansicht: Matrix Schüler × Kategorie (schriftliche zuerst) mit
+- **Noten** – Quartal-Ansicht: Matrix Schüler × Kategorie (schriftliche zuerst) mit
   farbigen Ø-Badges, dahinter je eine gerundete Sammelspalte **Schriftlich** und
   **Sonstige** sowie **Gesamt** und **Zeugnis**. Die drei Spaltengruppen (schriftlich ·
   sonstige · Zeugnis) sind farbig hinterlegt, die Namensspalte bleibt beim
@@ -232,34 +273,43 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   Scroll-Spielraum, um auch die letzten Spalten direkt neben die Namen zu holen.
   Die Reihenfolge gilt nur für die laufende Sitzung – nach dem Neuladen steht wieder
   der Default. Zelle antippen → Einzelnoten erfassen;
-  Namen antippen → Berechnung. Jahres-Ansicht: keine Einzelleistungen, sondern beide
-  Halbjahre nebeneinander (schriftlich · sonstige · Zeugnis je HJ) plus Jahres-Zeugnisnote.
+  Namen antippen → Berechnung. Jahres-Ansicht: keine Einzelleistungen, sondern zuerst
+  die Quartals-Spalten **Sonstige 1. Q–4. Q**, danach beide Halbjahre nebeneinander
+  (schriftlich · sonstige · Zeugnis je HJ) plus Jahres-Zeugnisnote.
   Kategorien mit Anzeige „vergessene Hausaufgaben“ zeigen dort statt einer Note die Anzahl
   aus dem Tracker und zählen nicht in die Gesamtnote.
 - **Sitzplan** – Raster (Reihen/Spalten frei), Plätze antippen zum Zuweisen,
   „Automatisch belegen“, Abwesenheits-Toggle (🤒) je Platz.
 - **Tracker** – Start-Dialog (Stunde fortsetzen / Einzel- / Doppelstunde), Restzeit
-  und Modi (Abwesend · Keine HA · Heatmap) in der Topbar, Kacheln je Schüler/in mit
-  4 direkten Ereignis-Buttons (Wortmeldung, Gute/Sehr gute Meldung, Störung),
-  Zähler je Typ für die Stunde, Undo, Heatmap-Hintergrund + Legende.
+  und Modi (Abwesend · Verweigerung · Keine HA · Heatmap) in der Topbar, Kacheln je
+  Schüler/in mit 4 direkten Ereignis-Buttons als Piktogramme (★/★★/★★★/⚡ =
+  Wortmeldung, Gute/Sehr gute Meldung, Störung), Zähler je Typ für die Stunde,
+  Undo, Heatmap-Hintergrund + Legende, kompakte Kacheln bei breiten Plänen.
 - **Besprechungsmodus** – ein/e Schüler/in einzeln, groß; nur deren Daten sichtbar
-  (Datenschutz bei der Notenbesprechung), Vor/Zurück, Halbjahr-Filter.
-- **Einstellungen** – Rundung, aktuelles Halbjahr, Reihenfolge der Schüler/innen,
+  (Datenschutz bei der Notenbesprechung), Vor/Zurück, Quartal-Filter.
+- **Einstellungen** – Rundung, aktuelles Quartal, Reihenfolge der Schüler/innen,
+  Wertung vergessener Hausaufgaben (HA-Modus),
   Stundenplan (10 Stunden,
   täglich gleich), Mitarbeitspunkte, Notenschwellen, Heatmap-Punktverfall,
-  Backup/Restore, Demo-Daten, alles löschen.
+  Export-Ordner, Backup/Restore, Demo-Daten, alles löschen.
 
 ## 8. MVP-Funktionsumfang
 
 **Enthalten (funktionsfähig):**
 Klassen/Schüler/Kategorien CRUD · Einzelnoten & gewichtete Gesamtnote ·
-Halbjahre (1./2. HJ) für Noten & Mitarbeit · Sitzplan-Editor ·
+Quartale (1.–4. Q + Jahr) für Noten & Mitarbeit, sonstige Leistungen quartalsweise
+gemittelt · Sitzplan-Editor ·
 Tracker mit Stunden (anlegen/fortsetzen/beenden), Stundenplan/Restzeit
-(Einzel-/Doppelstunde), Tap/Undo/Heatmap, Modi für Abwesend/Keine HA/Heatmap ·
-Abwesenheiten (tageweise, beeinflusst Heatmap & Epochalnote) ·
-stundenbasierte Mitarbeits-Auswertung + Notenvorschlag mit sichtbarer Herleitung ·
+(Einzel-/Doppelstunde), Piktogramm-Buttons, Tap/Undo/Heatmap, kompakte Kacheln,
+Modi für Abwesend/Leistungsverweigerung/Keine HA/Heatmap ·
+Abwesenheiten (tageweise, beeinflusst Heatmap & Mitarbeitsnote) ·
+Mitarbeits-Auswertung nach dem Stundennoten-Modell + Notenvorschlag mit sichtbarer
+Herleitung · Quartal abschließen (Übertrag als Noten, CSV-Sicherung) ·
+HA-Modus wählbar (Punkteabzug oder Note 6 ab der 3.) ·
 Notenschwellen global und je Klasse editierbar · Besprechungsmodus ·
-CSV-Export (4 Arten) · CSV-Import Schüler · JSON-Voll-Backup · PWA/Offline · Demo-Daten.
+CSV-Export (5 Arten) mit Export-Ordner/Teilen-Blatt · CSV-Import Schüler ·
+Klassen-Export/-Import (ersetzen/als Kopie) · Klasse löschen direkt auf der
+Home-Kachel · JSON-Voll-Backup · PWA/Offline · Demo-Daten.
 
 **Bewusst später (klar als Ausbau markiert):**
 Drag&Drop-Sortierung (aktuell ▲▼-Buttons) · Noten-CSV-**Import** (nur Export + Schüler-Import) ·
