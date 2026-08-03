@@ -12,11 +12,22 @@
   "use strict";
 
   // ---- Noten parsen/formatieren --------------------------------------------
-  // Erlaubt: "2", "2,3", "2.3", "2+", "2-", "1+". Ergebnis: Zahl 1..6 oder null.
-  function parseNote(input) {
+  // Klassen ab Klassenstufe 11 (MSS) werden in Punkten (0-15, höher = besser)
+  // statt in Schulnoten (1-6, niedriger = besser) bewertet (Calc.istMSS).
+  function istMSS(klasse) {
+    return !!(klasse && klasse.klassenstufe != null && klasse.klassenstufe >= 11);
+  }
+
+  // Erlaubt (mss=false): "2", "2,3", "2.3", "2+", "2-", "1+". Ergebnis: Zahl 1..6 oder null.
+  // Erlaubt (mss=true): ganze Zahl 0..15 (keine Tendenzen, keine Nachkommastellen).
+  function parseNote(input, mss) {
     if (input === null || input === undefined) return null;
     let s = String(input).trim().replace(",", ".");
     if (s === "") return null;
+    if (mss) {
+      if (!/^\d+$/.test(s)) return null;
+      return clampNote(parseInt(s, 10), true);
+    }
     let m = s.match(/^([1-6])\s*([+-])?$/);
     if (m) {
       let val = parseInt(m[1], 10);
@@ -28,7 +39,9 @@
     if (isNaN(f)) return null;
     return clampNote(Math.round(f * 100) / 100);
   }
-  function clampNote(n) { return Math.max(1, Math.min(6, n)); }
+  function clampNote(n, mss) {
+    return mss ? Math.max(0, Math.min(15, n)) : Math.max(1, Math.min(6, n));
+  }
 
   // Anzeige als deutsche Zahl mit Komma; Nachkommastellen je nach Rundung.
   function formatNote(n, decimals) {
@@ -53,9 +66,12 @@
   const EPS = 1e-9;
   const ZEUGNIS_GRENZEN = [1.5, 2.5, 3.5, 4.15, 4.5, 5.5];
 
-  function zeugnisnote(wert) {
+  // mss=true: MSS-Punkte (0-15) werden schlicht auf ganze Punkte gerundet,
+  // ohne Grenzen/Tendenz – die Skala hat keine "4-"-Entsprechung.
+  function zeugnisnote(wert, mss) {
     if (wert === null || wert === undefined || isNaN(wert)) return null;
-    const w = clampNote(Number(wert));
+    const w = clampNote(Number(wert), mss);
+    if (mss) return Math.round(w);
     if (w <= 1.5 + EPS) return 1;
     if (w <= 2.5 + EPS) return 2;
     if (w <= 3.5 + EPS) return 3;
@@ -65,8 +81,9 @@
     return 6;
   }
 
-  function formatZeugnisnote(n) {
+  function formatZeugnisnote(n, mss) {
     if (n === null || n === undefined || isNaN(n)) return "–";
+    if (mss) return String(Math.round(n));
     if (Math.abs(n - 4.3) < 0.01) return "4-";
     return String(Math.round(n));
   }
@@ -80,13 +97,15 @@
   // Gerechnet wird mit den GERUNDETEN Teilnoten (so wie sie in der Übersicht
   // stehen); landet das Ergebnis genau auf einer Grenze, entscheiden die
   // ungerundeten Werte (gesamtRoh).
-  function zeugnisErgebnis(res) {
-    const schriftlich = zeugnisnote(res.schriftlich.schnitt);
-    const sonstige = zeugnisnote(res.sonstige.schnitt);
+  function zeugnisErgebnis(res, mss) {
+    const schriftlich = zeugnisnote(res.schriftlich.schnitt, mss);
+    const sonstige = zeugnisnote(res.sonstige.schnitt, mss);
     let zeugnis = null;
     if (schriftlich !== null && sonstige !== null) {
       const kandidat = schriftlich * res.effAnteilS + sonstige * res.effAnteilO;
-      zeugnis = istGrenzwert(kandidat) ? zeugnisnote(res.gesamtRoh) : zeugnisnote(kandidat);
+      // Bei Punkten ist Runden immer eindeutig, der Grenzwert-Fallback gilt
+      // nur für die 1-6-Skala mit ihrer "4-"-Sonderregel.
+      zeugnis = (!mss && istGrenzwert(kandidat)) ? zeugnisnote(res.gesamtRoh, mss) : zeugnisnote(kandidat, mss);
     } else if (schriftlich !== null) {
       zeugnis = schriftlich;
     } else if (sonstige !== null) {
@@ -98,9 +117,9 @@
   // Jahresnote aus den beiden Halbjahres-Zeugnisnoten: beide zählen 50 %, bei
   // Gleichstand gibt das 2. Halbjahr den Ausschlag (49 % / 51 %).
   // Fehlt eine der beiden Noten, gibt es keine Jahresnote.
-  function jahresnote(hj1, hj2) {
+  function jahresnote(hj1, hj2, mss) {
     if (hj1 === null || hj1 === undefined || hj2 === null || hj2 === undefined) return null;
-    return zeugnisnote(hj1 * 0.49 + hj2 * 0.51);
+    return zeugnisnote(hj1 * 0.49 + hj2 * 0.51, mss);
   }
 
   // ---- Notenberechnung -----------------------------------------------------
@@ -219,11 +238,12 @@
     };
   }
 
-  // Farbe für eine Note (1 gut = grün, 6 = rot). Für Badges.
-  function noteFarbe(n) {
+  // Farbe für eine Note. Für Badges. mss=false: 1 gut = grün, 6 = rot.
+  // mss=true (MSS-Punkte): 15 gut = grün, 0 = rot (umgekehrte Richtung).
+  function noteFarbe(n, mss) {
     if (n === null || n === undefined || isNaN(n)) return "#9aa5a1";
-    const t = Math.max(0, Math.min(1, (n - 1) / 5)); // 0..1
-    const hue = 125 - t * 125; // 125° grün -> 0° rot
+    const t = mss ? Math.max(0, Math.min(1, n / 15)) : Math.max(0, Math.min(1, (n - 1) / 5)); // 0..1
+    const hue = mss ? t * 125 : 125 - t * 125; // 125° grün -> 0° rot
     return "hsl(" + hue.toFixed(0) + ", 62%, 42%)";
   }
 
@@ -469,6 +489,7 @@
   }
 
   global.Calc = {
+    istMSS,
     parseNote, formatNote, clampNote, rundeGesamt,
     berechneSchueler, quartaleVonFilter, noteFarbe,
     zeugnisnote, formatZeugnisnote, zeugnisErgebnis, jahresnote,

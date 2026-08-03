@@ -131,10 +131,11 @@
   // ereignisse werden für Kategorien mit anzeige="fehlendeHA" gebraucht
   // (dort steht die Anzahl vergessener Hausaufgaben statt eines Ø).
   async function exportNoten(klasse, schuelerListe, kategorien, notenAll, settings, ereignisse) {
+    const mss = Calc.istMSS(klasse);
     const kopf = ["Vorname", "Nachname"];
     kategorien.forEach((k) => kopf.push(k.name + (k.anzeige === "fehlendeHA" ? " (Anzahl)" : " (Ø)")));
     kopf.push("Sonstige 1. Q", "Sonstige 2. Q", "Sonstige 3. Q", "Sonstige 4. Q");
-    kopf.push("Schriftlich", "Sonstige", "Gesamtnote", "Zeugnisnote");
+    kopf.push("Schriftlich", "Sonstige", "Gesamtnote", mss ? "Zeugnispunkte" : "Zeugnisnote");
     const rows = [kopf];
 
     const notenBySchueler = {};
@@ -143,7 +144,7 @@
     schuelerListe.forEach((s) => {
       const noten = notenBySchueler[s.id] || [];
       const res = Calc.berechneSchueler(kategorien, noten, klasse, settings.rundung);
-      const z = Calc.zeugnisErgebnis(res);
+      const z = Calc.zeugnisErgebnis(res, mss);
       const zeile = [s.vorname, s.nachname];
       kategorien.forEach((k) => {
         if (k.anzeige === "fehlendeHA") {
@@ -155,12 +156,12 @@
       });
       // Sonstige-Zeugnisnote je Quartal (aus dem Quartals-Schnitt)
       [1, 2, 3, 4].forEach((q) => {
-        const zq = Calc.zeugnisErgebnis(Calc.berechneSchueler(kategorien, noten, klasse, settings.rundung, q));
-        zeile.push(Calc.formatZeugnisnote(zq.sonstige));
+        const zq = Calc.zeugnisErgebnis(Calc.berechneSchueler(kategorien, noten, klasse, settings.rundung, q), mss);
+        zeile.push(Calc.formatZeugnisnote(zq.sonstige, mss));
       });
-      zeile.push(Calc.formatZeugnisnote(z.schriftlich), Calc.formatZeugnisnote(z.sonstige));
+      zeile.push(Calc.formatZeugnisnote(z.schriftlich, mss), Calc.formatZeugnisnote(z.sonstige, mss));
       zeile.push(res.gesamt !== null ? n(res.gesamt) : "");
-      zeile.push(Calc.formatZeugnisnote(z.zeugnis));
+      zeile.push(Calc.formatZeugnisnote(z.zeugnis, mss));
       rows.push(zeile);
     });
     return await speichern("noten_" + safe(klasse.name) + ".csv", toCSV(rows), "text/csv");
@@ -168,9 +169,10 @@
 
   // ---- Export: Einzelnoten (Langformat) ------------------------------------
   async function exportEinzelnoten(klasse, schuelerListe, kategorien, notenAll) {
+    const mss = Calc.istMSS(klasse);
     const sMap = {}; schuelerListe.forEach((s) => (sMap[s.id] = s));
     const kMap = {}; kategorien.forEach((k) => (kMap[k.id] = k));
-    const rows = [["Vorname", "Nachname", "Kategorie", "Art", "Titel", "Note", "Datum", "Quartal"]];
+    const rows = [["Vorname", "Nachname", "Kategorie", "Art", "Titel", mss ? "Punkte" : "Note", "Datum", "Quartal"]];
     notenAll.forEach((no) => {
       const s = sMap[no.schuelerId], k = kMap[no.kategorieId];
       if (!s || !k) return;
@@ -195,11 +197,12 @@
   // eintraege: [{ schuelerId, wert }] – wert ist der rohe String aus dem
   // Eingabefeld ("2+", "2,3" ...); ungültige/leere werden übersprungen.
   async function exportQuartalNoten(klasse, schuelerListe, eintraege, quartal) {
+    const mss = Calc.istMSS(klasse);
     const sMap = {}; schuelerListe.forEach((s) => (sMap[s.id] = s));
-    const rows = [["Vorname", "Nachname", "Note", "Quartal"]];
+    const rows = [["Vorname", "Nachname", mss ? "Punkte" : "Note", "Quartal"]];
     eintraege.forEach((e) => {
       const s = sMap[e.schuelerId]; if (!s) return;
-      const wert = Calc.parseNote(e.wert);
+      const wert = Calc.parseNote(e.wert, mss);
       if (wert === null) return;
       rows.push([s.vorname, s.nachname, n(wert), quartal]);
     });

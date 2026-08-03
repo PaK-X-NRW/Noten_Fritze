@@ -28,6 +28,10 @@
         { value: "hauptfach", label: "Hauptfach (Standard 50/50)" },
         { value: "nebenfach", label: "Nebenfach (Standard 40/60)" }
       ], hint: "Bestimmt die Voreinstellung der Anteile schriftlich/sonstige." }) +
+      UI.field("Klassenstufe", "klassenstufe", data.klassenstufe == null ? "" : data.klassenstufe, { type: "select", options: [
+        { value: "", label: "– (Sekundarstufe I)" }
+      ].concat([5, 6, 7, 8, 9, 10, 11, 12, 13].map((n) => ({ value: n, label: String(n) }))),
+        hint: "Ab Klassenstufe 11 werden Noten als MSS-Punkte (0–15) statt Schulnoten erfasst." }) +
       UI.field("Notizen", "notizen", data.notizen, { type: "textarea", placeholder: "optional" });
     UI.modal({
       title: isNew ? "Neue Klasse" : "Klasse bearbeiten",
@@ -38,13 +42,22 @@
           const v = UI.formValues(box);
           if (!v.name.trim()) { UI.toast("Bitte Klassennamen eingeben"); return; }
           const typWechsel = data.typ !== v.typ;
-          Object.assign(data, { name: v.name.trim(), schuljahr: v.schuljahr.trim(), fach: v.fach.trim(), typ: v.typ, notizen: v.notizen });
+          const mssVorher = Calc.istMSS(data);
+          const klassenstufeNeu = v.klassenstufe ? parseInt(v.klassenstufe, 10) : null;
+          Object.assign(data, {
+            name: v.name.trim(), schuljahr: v.schuljahr.trim(), fach: v.fach.trim(), typ: v.typ,
+            klassenstufe: klassenstufeNeu, notizen: v.notizen
+          });
           if (isNew || typWechsel) {
             const a = state.settings.anteile[v.typ];
             data.anteilSchriftlich = a.schriftlich; data.anteilSonstige = a.sonstige;
           }
           await Store.Klassen.save(data);
           close();
+          if (!isNew && mssVorher !== Calc.istMSS(data)) {
+            UI.toast("Achtung: Vorhandene Noten bleiben unverändert und werden nun als " +
+              (Calc.istMSS(data) ? "MSS-Punkte" : "Schulnoten") + " interpretiert.");
+          }
           if (isNew) { await go("klasse", { klasseId: data.id, tab: "schueler" }); }
           else render();
         }}
@@ -222,6 +235,7 @@
 
   // ---- Zelle: Einzelnoten erfassen ----------------------------------------
   async function cellDialog(k, sid, cid) {
+    const mss = Calc.istMSS(k);
     const s = await Store.Schueler.get(sid);
     const c = await Store.Kategorien.get(cid);
     const alle = await Store.Noten.byKlasse(k.id);
@@ -232,7 +246,7 @@
       if (!noten.length) return '<p class="muted">Noch keine Noten.</p>';
       return noten.map((n) =>
         '<div class="line" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line)">' +
-          '<span class="note-badge" style="background:' + Calc.noteFarbe(n.wert) + '">' + Calc.formatNote(n.wert) + "</span>" +
+          '<span class="note-badge" style="background:' + Calc.noteFarbe(n.wert, mss) + '">' + Calc.formatNote(n.wert) + "</span>" +
           '<span class="grow">' + UI.esc(n.titel || "") + ' <span class="muted">' + UI.esc(n.datum) +
             (n.quartal ? " · " + n.quartal + ". Q" : (n.halbjahr ? " · " + n.halbjahr + ". HJ" : "")) + "</span></span>" +
           '<button class="iconbtn plain danger-text" data-del="' + n.id + '">🗑</button>' +
@@ -245,7 +259,8 @@
       '<div id="note-list">' + listHTML() + "</div>" +
       '<div class="spacer"></div>' +
       '<div class="form-row" style="align-items:flex-end">' +
-        '<div class="field grow" style="margin:0"><label>Neue Note</label><input id="new-note" inputmode="decimal" placeholder="z. B. 2 oder 2,3 oder 2+"></div>' +
+        '<div class="field grow" style="margin:0"><label>Neue ' + (mss ? "Punktzahl" : "Note") + '</label><input id="new-note" inputmode="' +
+          (mss ? "numeric" : "decimal") + '" placeholder="' + (mss ? "0 bis 15" : "z. B. 2 oder 2,3 oder 2+") + '"></div>' +
         '<div class="field" style="margin:0;flex:1"><label>Titel (optional)</label><input id="new-title" placeholder="' + UI.esc(c.name) + '"></div>' +
       "</div>" +
       '<button class="btn primary" id="add-note" style="width:100%">Note hinzufügen</button>';
@@ -267,8 +282,8 @@
     }
     async function addNote() {
       const inp = box.querySelector("#new-note");
-      const val = Calc.parseNote(inp.value);
-      if (val === null) { UI.toast("Bitte gültige Note 1–6 eingeben"); inp.focus(); return; }
+      const val = Calc.parseNote(inp.value, mss);
+      if (val === null) { UI.toast(mss ? "Bitte gültige Punktzahl 0–15 eingeben" : "Bitte gültige Note 1–6 eingeben"); inp.focus(); return; }
       const titel = box.querySelector("#new-title").value.trim();
       const quartal = parseInt(state.settings.aktuellesQuartal, 10) || 1;
       const n = Store.neueNote({ klasseId: k.id, schuelerId: sid, kategorieId: cid, wert: val, titel,
@@ -287,7 +302,7 @@
     const s = await Store.Schueler.get(sid);
     const [kats, notenAll] = await Promise.all([Store.Kategorien.byKlasse(k.id), Store.Noten.byKlasse(k.id)]);
     const res = Calc.berechneSchueler(kats, notenAll.filter((n) => n.schuelerId === sid), k, state.settings.rundung, quartalFilter("notenQuartal"));
-    UI.modal({ title: UI.vollerName(s), bodyHTML: breakdownHTML(res), buttons: [{ label: "Schließen", className: "primary" }] });
+    UI.modal({ title: UI.vollerName(s), bodyHTML: breakdownHTML(res, Calc.istMSS(k)), buttons: [{ label: "Schließen", className: "primary" }] });
   }
 
   // ---- Sitzplatz zuweisen --------------------------------------------------
@@ -377,6 +392,7 @@
     if (q === null) { UI.toast("Bitte oben ein Quartal wählen"); return; }
     const k = await Store.Klassen.get(state.klasseId);
     if (!k) return;
+    const mss = Calc.istMSS(k);
     const [ktx, kategorien] = await Promise.all([auswertungKontext(k), Store.Kategorien.byKlasse(k.id)]);
     const schuelerListe = ktx.schueler;
 
@@ -402,16 +418,19 @@
         '<td class="num">' + (hatV
           ? '<span class="note-badge" style="background:' + Calc.noteFarbe(vorschlag) + '">' + Calc.formatNote(vorschlag, 1) + "</span>"
           : "–") + "</td>" +
-        '<td><input data-sid="' + s.id + '" inputmode="decimal" style="width:90px" value="' +
-          (hatV ? Calc.formatNote(vorschlag, 1) : "") + '" placeholder="–"></td>' +
+        '<td><input data-sid="' + s.id + '" inputmode="' + (mss ? "numeric" : "decimal") + '" style="width:90px" value="' +
+          (mss ? "" : (hatV ? Calc.formatNote(vorschlag, 1) : "")) + '" placeholder="' + (mss ? "0–15" : "–") + '"></td>' +
       "</tr>";
     }).join("");
 
     const body =
-      '<p class="muted">Mitarbeits-Vorschläge des ' + q + ". Quartals als Noten übertragen. " +
-        "Leer lassen = kein Übertrag für diese/n Schüler/in. Tendenzen wie 2+ oder 3- sind erlaubt.</p>" +
+      '<p class="muted">' + (mss
+        ? "MSS-Punkte (0–15) für das " + q + ". Quartal eintragen. Die Stundennoten-Ø dient nur zur Orientierung."
+        : "Mitarbeits-Vorschläge des " + q + ". Quartals als Noten übertragen. Tendenzen wie 2+ oder 3- sind erlaubt.") +
+        " Leer lassen = kein Übertrag für diese/n Schüler/in.</p>" +
       katSelect +
-      '<div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Vorschlag</th><th>Note</th></tr></thead>' +
+      '<div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">' + (mss ? "Stundennoten-Ø" : "Vorschlag") + '</th><th>' +
+        (mss ? "Punkte" : "Note") + "</th></tr></thead>" +
       "<tbody>" + zeilen + "</tbody></table></div>";
 
     // Aktuell eingetragene Werte der Eingabefelder einsammeln
@@ -442,7 +461,7 @@
           let ungueltig = null;
           const eintraege = [];
           felder.forEach((f) => {
-            const wert = Calc.parseNote(f.wert);
+            const wert = Calc.parseNote(f.wert, mss);
             if (wert === null) ungueltig = f.schuelerId;
             else eintraege.push({ schuelerId: f.schuelerId, wert });
           });

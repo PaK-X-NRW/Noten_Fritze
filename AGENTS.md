@@ -234,6 +234,21 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
   in der Klassen-Topbar, „Klasse importieren“ auf Home (`klassenImportDialog`).
 - **Klasse löschen:** 🗑-Button direkt auf der Home-Kachel (`delete-class`,
   Bestätigungsdialog, Kaskade via `Store.Klassen.remove`).
+- **MSS-Punkte (Klassenstufe ab 11):** `klasse.klassenstufe` (5–13, `null` =
+  Sek. I, im Klassen-Dialog wählbar) entscheidet über `Calc.istMSS(klasse)`,
+  ob eine Klasse Schulnoten (1–6, niedriger = besser) oder MSS-Punkte
+  (0–15, ganzzahlig, höher = besser) verwendet. Die betroffenen `Calc`-
+  Funktionen (`parseNote`, `clampNote`, `noteFarbe`, `zeugnisnote`,
+  `formatZeugnisnote`, `zeugnisErgebnis`, `jahresnote`) nehmen dafür einen
+  optionalen `mss`-Parameter (Default `false`); Aufrufer reichen ihn aus dem
+  `klasse`-Objekt durch. `formatNote`/`berechneSchueler`/`rundeGesamt` bleiben
+  skalenunabhängig (reine Mittelwertbildung). Der Mitarbeits-Tracker
+  (Stundennoten-Modell, Notenschwellen) bleibt bewusst unverändert auf der
+  1–6-Skala – er ist eine interne Vorschlags-Heuristik, keine gespeicherte
+  Note. Beim „Quartal abschließen" trägt die Lehrkraft den MSS-Punktwert für
+  Kursklassen deshalb selbst ein (kein Prefill aus dem 1–6-Vorschlag, der
+  bleibt nur als Orientierungswert sichtbar) – es gibt keine offizielle,
+  automatische Umrechnungstabelle zwischen den Skalen im Code.
 
 ## 7. Testen & Verifizieren
 

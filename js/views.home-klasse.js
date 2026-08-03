@@ -182,9 +182,9 @@
 
   // ---- Tab: Noten ----------------------------------------------------------
   // Badge für eine Note auf der Zeugnisskala (ganze Note bzw. 4-).
-  function zeugnisBadge(note) {
+  function zeugnisBadge(note, mss) {
     if (note === null || note === undefined) return '<span class="muted">–</span>';
-    return '<span class="note-badge" style="background:' + Calc.noteFarbe(note) + '">' + Calc.formatZeugnisnote(note) + "</span>";
+    return '<span class="note-badge" style="background:' + Calc.noteFarbe(note, mss) + '">' + Calc.formatZeugnisnote(note, mss) + "</span>";
   }
 
   async function TabNoten(k) {
@@ -196,6 +196,8 @@
     ]);
     if (!schueler.length) return '<div class="empty"><div class="big">📋</div><p>Erst Schüler/innen anlegen.</p></div>';
     if (!katsRoh.length) return '<div class="empty"><div class="big">🏷️</div><p>Erst Kategorien anlegen.</p><button class="btn primary" data-action="class-tab" data-tab="kategorien">Zu den Kategorien</button></div>';
+
+    const mss = Calc.istMSS(k);
 
     // Spalten gruppiert: erst die schriftlichen, dann die sonstigen Kategorien –
     // so stehen die Sammelspalten direkt hinter ihrer Gruppe.
@@ -210,7 +212,7 @@
     const eigeneReihenfolge = !!(state.notenSpalten && state.notenSpalten.key === key);
 
     const spalten = spaltenOrdnen(
-      q === null ? jahresSpalten() : halbjahrSpalten(schriftlicheKats, sonstigeKats), key
+      q === null ? jahresSpalten(mss) : halbjahrSpalten(schriftlicheKats, sonstigeKats, mss), key
     );
 
     const body = schueler.map((s) => {
@@ -218,17 +220,17 @@
       if (q === null) {
         // Jahr: die vier Quartale (nur Sonstige), dazu beide Halbjahre
         const qZeugnis = [1, 2, 3, 4].map((nq) =>
-          Calc.zeugnisErgebnis(Calc.berechneSchueler(kats, noten, k, state.settings.rundung, nq)));
-        const hj1 = Calc.zeugnisErgebnis(Calc.berechneSchueler(kats, noten, k, state.settings.rundung, "hj1"));
-        const hj2 = Calc.zeugnisErgebnis(Calc.berechneSchueler(kats, noten, k, state.settings.rundung, "hj2"));
-        return notenZeile(spalten, s, { q: qZeugnis, hj1, hj2, jahr: Calc.jahresnote(hj1.zeugnis, hj2.zeugnis) });
+          Calc.zeugnisErgebnis(Calc.berechneSchueler(kats, noten, k, state.settings.rundung, nq), mss));
+        const hj1 = Calc.zeugnisErgebnis(Calc.berechneSchueler(kats, noten, k, state.settings.rundung, "hj1"), mss);
+        const hj2 = Calc.zeugnisErgebnis(Calc.berechneSchueler(kats, noten, k, state.settings.rundung, "hj2"), mss);
+        return notenZeile(spalten, s, { q: qZeugnis, hj1, hj2, jahr: Calc.jahresnote(hj1.zeugnis, hj2.zeugnis, mss) });
       }
       const res = Calc.berechneSchueler(kats, noten, k, state.settings.rundung, q);
       const gBadge = res.gesamt !== null
-        ? '<span class="note-badge" style="background:' + Calc.noteFarbe(res.gesamt) + '">' +
+        ? '<span class="note-badge" style="background:' + Calc.noteFarbe(res.gesamt, mss) + '">' +
           Calc.formatNote(res.gesamt, state.settings.rundung === "ganze" ? 0 : (state.settings.rundung === "keine" ? 2 : 1)) + "</span>"
         : '<span class="muted">–</span>';
-      return notenZeile(spalten, s, { s, res, gBadge, ereignisse, quartal: q, zeugnis: Calc.zeugnisErgebnis(res) });
+      return notenZeile(spalten, s, { s, res, gBadge, ereignisse, quartal: q, zeugnis: Calc.zeugnisErgebnis(res, mss) });
     }).join("");
 
     const hinweis = q === null
@@ -264,7 +266,7 @@
     return '<td class="' + spaltenKlassen(sp, extra) + '"' + (attr || "") + ">" + inhalt + "</td>";
   }
 
-  function katSpalte(c) {
+  function katSpalte(c, mss) {
     const zusatz = c.anzeige === "fehlendeHA"
       ? "vergessene HA"
       : (c.art === "schriftlich" ? "schriftl." : "sonst.") + " · Gew " + c.gewichtung;
@@ -281,7 +283,7 @@
         }
         const ke = ctx.res.kategorien.find((x) => x.id === c.id);
         const badge = ke && ke.schnitt !== null
-          ? '<span class="note-badge" style="background:' + Calc.noteFarbe(ke.schnitt) + '">' + Calc.formatNote(ke.schnitt) + "</span>"
+          ? '<span class="note-badge" style="background:' + Calc.noteFarbe(ke.schnitt, mss) + '">' + Calc.formatNote(ke.schnitt) + "</span>"
           : '<span class="muted">–</span>';
         const anz = ke && ke.anzahl ? '<span class="muted"> n=' + ke.anzahl + "</span>" : "";
         return spaltenZelle(sp, badge + anz, "pointer row-hover",
@@ -291,37 +293,37 @@
   }
 
   // Quartal-Ansicht: Kategorien, dahinter je Gruppe eine Sammelspalte.
-  function halbjahrSpalten(schriftlicheKats, sonstigeKats) {
+  function halbjahrSpalten(schriftlicheKats, sonstigeKats, mss) {
     return [].concat(
-      schriftlicheKats.map(katSpalte),
+      schriftlicheKats.map((c) => katSpalte(c, mss)),
       [{ id: "sum:schriftlich", grp: "grp-schriftlich", trenner: true, stark: true, kopf: "Schriftlich",
-         zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.zeugnis.schriftlich)) }],
-      sonstigeKats.map(katSpalte),
+         zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.zeugnis.schriftlich, mss)) }],
+      sonstigeKats.map((c) => katSpalte(c, mss)),
       [{ id: "sum:sonstige", grp: "grp-sonstige", trenner: true, stark: true, kopf: "Sonstige",
-         zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.zeugnis.sonstige)) },
+         zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.zeugnis.sonstige, mss)) },
        { id: "sum:gesamt", grp: "grp-zeugnis", trenner: true, kopf: "Gesamt",
          zelle: (sp, ctx) => spaltenZelle(sp, ctx.gBadge) },
        { id: "sum:zeugnis", grp: "grp-zeugnis", stark: true, kopf: "Zeugnis",
-         zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.zeugnis.zeugnis)) }]
+         zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.zeugnis.zeugnis, mss)) }]
     );
   }
 
   // Jahresübersicht: keine Einzelleistungen, sondern erst die sonstigen
   // Leistungen der vier Quartale, dann beide Halbjahre und das Jahr.
-  function jahresSpalten() {
+  function jahresSpalten(mss) {
     const qSpalte = (nq) => ({
       id: "jahr:q" + nq + ":sonstige",
       grp: "grp-sonstige",
       trenner: nq === 1,
       kopf: "Sonst. " + nq + ". Q",
-      zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.q[nq - 1].sonstige))
+      zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.q[nq - 1].sonstige, mss))
     });
     const hjSpalte = (nr, feld, grp, label, trenner) => ({
       id: "jahr:" + nr + ":" + feld,
       grp: grp,
       trenner: !!trenner,
       kopf: nr + ". HJ " + label,
-      zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx["hj" + nr][feld]))
+      zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx["hj" + nr][feld], mss))
     });
     return [
       qSpalte(1), qSpalte(2), qSpalte(3), qSpalte(4),
@@ -332,7 +334,7 @@
       hjSpalte(2, "sonstige", "grp-sonstige", "sonstige"),
       hjSpalte(2, "zeugnis", "grp-zeugnis", "Zeugnis"),
       { id: "jahr:gesamt", grp: "grp-zeugnis", trenner: true, stark: true, kopf: "Jahr",
-        zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.jahr)) }
+        zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.jahr, mss)) }
     ];
   }
 

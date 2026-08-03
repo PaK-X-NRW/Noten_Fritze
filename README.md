@@ -66,14 +66,16 @@ Sie können die App als PWA installieren („Zum Home-Bildschirm hinzufügen") u
 
 ```
 klassen        { id, name, schuljahr, fach, typ('hauptfach'|'nebenfach'),
-                 anteilSchriftlich, anteilSonstige, mitarbeitSchwellen(null=global),
+                 klassenstufe(5..13, null=Sek.I), anteilSchriftlich, anteilSonstige,
+                 mitarbeitSchwellen(null=global),
                  notizen, createdAt, updatedAt, lastOpenedAt }
 schueler       { id, klasseId, vorname, nachname, bemerkung, sortIndex, ... }
                  (sortIndex = manuelle Reihenfolge; angezeigt wird je nach
                   settings.schuelerSortierung alphabetisch oder manuell)
 kategorien     { id, klasseId, name, art('schriftlich'|'sonstige'),
                  gewichtung, anzeige('note'|'fehlendeHA'), sortIndex }
-noten          { id, klasseId, schuelerId, kategorieId, wert(1..6),
+noten          { id, klasseId, schuelerId, kategorieId, wert(1..6, oder 0..15
+                 MSS-Punkte bei Klassenstufe >= 11, s. Calc.istMSS),
                  titel, datum(YYYY-MM-DD), quartal(1..4), halbjahr(1|2, abgeleitet),
                  createdAt }
 sitzplaene     { klasseId, rows, cols, seats:[{id,row,col,schuelerId}] }
@@ -95,7 +97,7 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
 - **Integrität:** Löschen einer Klasse/eines Schülers löscht kaskadierend alle
   abhängigen Datensätze (Noten, Ereignisse, Stunden, Abwesenheiten, Sitzplatz-Zuweisung).
 - **App-Version:** `APP_VERSION` in `js/version.js` (Schema `MAJOR.MINOR.PATCH`,
-  aktuell **1.5.0**) ist die sichtbare Programmversion: angezeigt unter
+  aktuell **1.6.0**) ist die sichtbare Programmversion: angezeigt unter
   Einstellungen → Über, Name des Service-Worker-Caches, Feld `appVersion` im
   JSON-Backup. Sie wird von Hand gepflegt und ist unabhängig von den beiden
   internen Zählern unten.
@@ -141,6 +143,23 @@ entsteht aus den beiden bereits gerundeten Teilnoten (schriftlich/sonstige); lan
 Ergebnis exakt auf einer Grenze, entscheiden die ungerundeten Werte. Die **Jahresnote**
 bildet sich aus den beiden Halbjahres-Zeugnisnoten zu je 50 %, bei Gleichstand gibt das
 2. Halbjahr den Ausschlag; solange nur ein Halbjahr Noten hat, bleibt sie leer.
+
+### MSS-Punkte (Klassenstufe ab 11)
+
+Klassen lassen sich im Klassen-Dialog auf eine **Klassenstufe** (5–13) festlegen.
+Ab Klassenstufe 11 (gymnasiale Oberstufe / MSS) rechnet und zeigt die App
+konsequent in **MSS-Punkten** (0–15, ganzzahlig, höher = besser) statt in
+Schulnoten (1–6, niedriger = besser) – Noteneingabe, Farb-Badges, Gesamt- und
+Zeugnispunkte sowie die CSV-Exporte. `Calc.istMSS(klasse)` entscheidet die
+Skala; ohne Klassenstufe (bzw. < 11) bleibt alles beim gewohnten 1–6-Verhalten
+inkl. der 4- -Tendenz.
+
+Bewusst **ausgenommen** bleibt der Mitarbeits-Tracker: Das Stundennoten-Modell
+und die Notenschwellen (Abschnitt 5) rechnen intern weiterhin auf der
+1–6-Skala, da sie nur eine Vorschlags-Heuristik sind. Beim „Quartal
+abschließen" trägt die Lehrkraft den tatsächlichen MSS-Punktwert für
+Kursklassen deshalb selbst ein; der 1–6-Ø der Stundennoten dient dort nur noch
+als Orientierung, ohne automatische Umrechnung.
 
 **Quartale:** Jede Note (und jedes Mitarbeits-Ereignis, jede Stunde) gehört zu einem
 der vier Quartale (1. Q: Aug–Okt, 2. Q: Nov–Jan, 3. Q: Feb–Apr, 4. Q: Mai–Jul) –
@@ -238,6 +257,9 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
 - **Einzelnoten (lang)** (`einzelnoten_<Klasse>.csv`): `Vorname, Nachname, Kategorie, Art, Titel, Note, Datum, Quartal`
 - **Mitarbeit** (`mitarbeit_<Klasse>.csv`): `Vorname, Nachname, Ereignistyp, Punkte, Zeitpunkt`
 - **Quartalsabschluss** (`mitarbeit_q<N>_<Klasse>.csv`): `Vorname, Nachname, Note, Quartal` – die übertragenen Mitarbeitsnoten beim „Quartal abschließen“.
+- **MSS-Klassen** (Klassenstufe ≥ 11): Die Spalten „Note“/„Zeugnisnote“ heißen in
+  den obigen Exporten „Punkte“/„Zeugnispunkte“ und enthalten 0–15-Punktwerte
+  statt Schulnoten (s. Abschnitt 4, „MSS-Punkte“).
 - **Export-Ziel:** Alle Exporte laufen über denselben Speicherweg: 1) einmal
   gewählter **Export-Ordner** (Einstellungen → „Export-Ordner“, Chrome/Edge am
   Desktop) – danach landen alle Dateien direkt dort; 2) auf dem iPad das
@@ -260,7 +282,8 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   der Klasse (mit Bestätigung, inkl. aller Noten/Ereignisse/Stunden).
 - **Klasse** – Tabs: *Schüler/innen · Noten · Kategorien · Sitzplan · Mitarbeit*.
   Oben schnell erreichbar: **Tracker**, **Besprechung**, **Exportieren** (Klasse als
-  JSON), Bearbeiten.
+  JSON), Bearbeiten. Im Bearbeiten-Dialog legt die **Klassenstufe** (5–13) fest,
+  ob ab Stufe 11 mit MSS-Punkten (0–15) statt Schulnoten gerechnet wird.
   Die Reihenfolge der Schüler/innen ist in den Einstellungen umschaltbar
   (alphabetisch nach Nachname – Voreinstellung – oder manuell per ▲/▼); sie gilt
   für alle Ansichten und Exporte.
@@ -307,6 +330,7 @@ Mitarbeits-Auswertung nach dem Stundennoten-Modell + Notenvorschlag mit sichtbar
 Herleitung · Quartal abschließen (Übertrag als Noten, CSV-Sicherung) ·
 HA-Modus wählbar (Punkteabzug oder Note 6 ab der 3.) ·
 Notenschwellen global und je Klasse editierbar · Besprechungsmodus ·
+MSS-Punkte-Skala (0–15) für Klassenstufe ab 11, umschaltbar je Klasse ·
 CSV-Export (5 Arten) mit Export-Ordner/Teilen-Blatt · CSV-Import Schüler ·
 Klassen-Export/-Import (ersetzen/als Kopie) · Klasse löschen direkt auf der
 Home-Kachel · JSON-Voll-Backup · PWA/Offline · Demo-Daten.

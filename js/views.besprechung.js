@@ -34,6 +34,7 @@
     if (!s) { state.selectedSchuelerId = null; return ViewBesprechung(); }
     const notenS = notenAll.filter((n) => n.schuelerId === s.id);
     const res = Calc.berechneSchueler(kats, notenS, k, state.settings.rundung, quartalFilter("notenQuartal"));
+    const mss = Calc.istMSS(k);
 
     const body =
       '<div class="discussion">' +
@@ -45,10 +46,10 @@
         '<div class="hstack" style="justify-content:center;margin-bottom:10px"><div class="tabs" style="margin:0">' +
           quartalTabsHTML("notenQuartal", "noten-hj") + "</div></div>" +
         '<div class="card">' +
-          '<div class="big-grade" style="color:' + Calc.noteFarbe(res.gesamt) + '">' +
+          '<div class="big-grade" style="color:' + Calc.noteFarbe(res.gesamt, mss) + '">' +
             (res.gesamt !== null ? Calc.formatNote(res.gesamt, state.settings.rundung === "ganze" ? 0 : 1) : "–") + "</div>" +
           '<div class="center muted">Gesamtnote</div>' +
-          breakdownHTML(res) +
+          breakdownHTML(res, mss) +
         "</div>" +
         '<div class="btn-row" style="margin-top:var(--gap);justify-content:center">' +
           '<button class="btn" data-action="besprechung-list">‹ Zur Auswahl</button>' +
@@ -57,7 +58,7 @@
     return { topbar, body };
   }
 
-  function breakdownHTML(res) {
+  function breakdownHTML(res, mss) {
     function grpHTML(g, titel, anteil, zeugnisNote) {
       if (!g.kategorien.length) return "";
       const lines = g.kategorien.map((c) =>
@@ -66,15 +67,15 @@
       ).join("");
       return '<div class="grp"><h3>' + titel + " – Ø " + Calc.formatNote(g.schnitt) +
         (anteil ? " · Anteil " + Math.round(anteil * 100) + " %" : "") + "</h3>" + lines +
-        '<div class="line"><span class="muted">gerundet</span><span class="r">' + Calc.formatZeugnisnote(zeugnisNote) + "</span></div>" +
+        '<div class="line"><span class="muted">gerundet</span><span class="r">' + Calc.formatZeugnisnote(zeugnisNote, mss) + "</span></div>" +
         "</div>";
     }
-    const z = Calc.zeugnisErgebnis(res);
+    const z = Calc.zeugnisErgebnis(res, mss);
     return '<div class="breakdown">' +
       grpHTML(res.schriftlich, "Schriftlich", res.effAnteilS, z.schriftlich) +
       grpHTML(res.sonstige, "Sonstige", res.effAnteilO, z.sonstige) +
       '<div class="total"><span>Gesamtnote</span><span>' + (res.gesamt !== null ? Calc.formatNote(res.gesamt) : "–") + "</span></div>" +
-      '<div class="total"><span>Zeugnisnote</span><span>' + Calc.formatZeugnisnote(z.zeugnis) + "</span></div>" +
+      '<div class="total"><span>Zeugnisnote</span><span>' + Calc.formatZeugnisnote(z.zeugnis, mss) + "</span></div>" +
       "</div>";
   }
 

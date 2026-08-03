@@ -231,7 +231,7 @@
   // beim App-Start (app.js, vor dem ersten Render) ausgeführt.
   // Regel: Neue Felder bekommen immer Defaults (Factorys + getSettings-Merge),
   // damit auch nicht migrierte/alte Datensätze ohne das Feld funktionieren.
-  const SCHEMA_VERSION = 8;
+  const SCHEMA_VERSION = 9;
   const MIGRATION_STEPS = {
     // v1 -> v2: Noten und Ereignisse erhalten ein Halbjahr (1 | 2),
     // aus dem Datum abgeleitet (Aug–Jan = 1. HJ, Feb–Jul = 2. HJ).
@@ -331,6 +331,13 @@
       s.aktuellesQuartal = quartalAusDatum(datumLokal());
       s.haModus = "punkte";
       await saveSettings(s);
+    },
+    // v8 -> v9: Klassen bekommen eine Klassenstufe (5-13); ab 11 gelten
+    // MSS-Punkte (0-15) statt Schulnoten (siehe Calc.istMSS).
+    9: async () => {
+      const klassen = await DB.getAll("klassen");
+      klassen.forEach((k) => { if (k.klassenstufe === undefined) k.klassenstufe = null; });
+      await DB.bulkPut("klassen", klassen);
     }
   };
   async function migrateSchema() {
@@ -356,6 +363,7 @@
       schuljahr: "",
       fach: "",
       typ: "hauptfach",            // "hauptfach" | "nebenfach"
+      klassenstufe: null,          // 5..13; ab 11 gelten MSS-Punkte (0-15) statt Schulnoten
       anteilSchriftlich: 50,       // %
       anteilSonstige: 50,          // %
       // Eigene Mitarbeits-Schwellen dieser Klasse; null = globale Einstellung
