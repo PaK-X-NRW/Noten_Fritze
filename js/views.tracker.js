@@ -470,6 +470,14 @@
 
   // ---- Stunde starten / fortsetzen / beenden --------------------------------
   async function trackerStartDialog() {
+    // In einem abgeschlossenen Quartal wird nichts mehr erfasst – dort gehört
+    // keine neue Stunde mehr hinein (Abschluss im Mitarbeit-Tab aufhebbar).
+    const klasse = await Store.Klassen.get(state.klasseId);
+    const aktuellesQ = parseInt(state.settings.aktuellesQuartal, 10) || 1;
+    if (klasse && Store.abschlussVon(klasse, aktuellesQ)) {
+      UI.toast(aktuellesQ + ". Quartal ist abgeschlossen – im Reiter Mitarbeit erst den Abschluss aufheben");
+      return;
+    }
     const offen = await Store.Stunden.offeneVonHeute(state.klasseId);
     const jetzt = Store.now();
     const einzel = Calc.trackerSession(state.settings.stundenplan, jetzt, false);

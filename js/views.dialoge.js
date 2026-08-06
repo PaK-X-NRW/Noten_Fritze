@@ -7,7 +7,7 @@
 
   const {
     state, go, render, quartalFilter, halbjahrFilter, breakdownHTML,
-    schwellenFelderHTML, schwellenAusFormular, auswertungKontext
+    schwellenFelderHTML, schwellenAusFormular, auswertungKontext, mitarbeitNotenVonQuartal
   } = global.Views;
 
   // =========================================================================
@@ -157,17 +157,27 @@
     }).join("") || '<div class="line"><span class="muted">Keine Ereignisse im Zeitraum</span><span class="r">0</span></div>';
 
     const haHinweis = state.settings.haModus === "note6"
-      ? "Vergessene Hausaufgaben geben keine Punkte; jede 3. erzeugt automatisch eine Note 6 in Mündliche Mitarbeit."
+      ? "Vergessene Hausaufgaben geben keine Punkte; je drei kommt eine zusätzliche Stundennote 6 in diesen Ø."
       : "Vergessene Hausaufgaben zählen als Minuspunkte in ihrer Stunde.";
 
     const body =
       '<div class="breakdown">' +
         '<div class="grp"><h3>Stundennoten</h3>' + stundennotenZeilen +
-          '<div class="line"><span>Gehaltene Stunden (anwesend)</span><span class="r">' + a.stundenGezaehlt + "</span></div>" +
+          '<div class="line"><span>Gezählte Stunden (anwesend)<span class="muted"> · Doppelstunde = 2</span></span><span class="r">' + a.stundenGezaehlt + "</span></div>" +
           '<div class="line"><span class="muted">davon mit Ereignis</span><span class="r muted">' + a.stundenMitEreignis + "</span></div>" +
         "</div>" +
         '<div class="grp"><h3>Erfasste Ereignisse</h3>' + ereignisZeilen + "</div>" +
-        '<div class="total"><span>Ø der Stundennoten</span><span>' + Calc.formatNote(a.notenvorschlag, 1) + "</span></div>" +
+        // In der Oberstufe zusätzlich der Weg zur Punktzahl: gerundete Note ->
+        // offizielle Umrechnungstabelle -> MSS-Punkte (so wird auch vorbelegt).
+        (Calc.istMSS(k) && a.notenvorschlag !== null && a.notenvorschlag !== undefined
+          ? '<div class="grp"><h3>Umrechnung in MSS-Punkte</h3>' +
+            '<div class="line"><span>Ø der Stundennoten</span><span class="r">' + Calc.formatNote(a.notenvorschlag, 1) + "</span></div>" +
+            '<div class="line"><span>gerundete Note</span><span class="r">' +
+              Calc.formatTendenz(Calc.tendenznote(a.notenvorschlag, false), false) + "</span></div>" +
+            '<div class="line"><span class="muted">offizielle Tabelle (17 − Note × 3)</span><span class="r muted">→</span></div></div>' +
+            '<div class="total"><span>Vorschlag in Punkten</span><span>' +
+              Calc.noteZuMssPunkte(Calc.tendenznote(a.notenvorschlag, false)) + "</span></div>"
+          : '<div class="total"><span>Ø der Stundennoten</span><span>' + Calc.formatNote(a.notenvorschlag, 1) + "</span></div>") +
       "</div>" +
       '<p class="muted">Nur ein Vorschlag – ' + haHinweis +
         " Tage mit gemeldeter Abwesenheit sind herausgerechnet.</p>";
@@ -246,17 +256,24 @@
   // können so nicht versehentlich im anderen Halbjahr landen.
   async function leistungDialog(k, leistungId) {
     const kats = await Store.Kategorien.byKlasse(k.id);
-    const benutzbar = kats.filter((c) => (c.anzeige || "note") === "note");
+    const hj = halbjahrFilter();
+    const isNew = !leistungId;
+    const vorhanden = isNew ? null : await Store.Leistungen.get(leistungId);
+    if (!isNew && !vorhanden) { UI.toast("Spalte nicht gefunden"); return; }
+    // Mitarbeits-Kategorien stehen nicht zur Wahl: Ihre Noten kommen aus
+    // „Quartal abschließen" und ihre Spalten sind in der Übersicht
+    // ausgeblendet – eine neue Spalte dort wäre unsichtbar. Eine bereits
+    // zugeordnete Kategorie bleibt wählbar, damit sie beim Bearbeiten einer
+    // Altspalte nicht stillschweigend wechselt.
+    const benutzbar = kats.filter((c) => (c.anzeige || "note") === "note" &&
+      (c.quelle !== "mitarbeit" || (vorhanden && vorhanden.kategorieId === c.id)));
     if (!benutzbar.length) {
       UI.toast("Erst eine Kategorie anlegen (z. B. „Klassenarbeit“)");
       return;
     }
-    const hj = halbjahrFilter();
-    const isNew = !leistungId;
     const data = isNew
       ? Store.neueLeistung(k.id, { kategorieId: benutzbar[0].id, quartal: hj === 2 ? 3 : 1 })
-      : await Store.Leistungen.get(leistungId);
-    if (!data) { UI.toast("Spalte nicht gefunden"); return; }
+      : vorhanden;
 
     const body =
       UI.field("Bezeichnung", "titel", data.titel, {
@@ -317,13 +334,67 @@
     UI.modal({ title: isNew ? "Neue Spalte" : "Spalte bearbeiten", bodyHTML: body, buttons });
   }
 
+  // Rechenweg eines Halbjahres. Zusätzlich lässt sich hier die aus dem
+  // Mitarbeit-Tab übertragene Note je Quartal korrigieren – in der
+  // Notenübersicht hat sie bewusst keine eigene Spalte mehr.
   async function studentDetailDialog(k, sid) {
     const s = await Store.Schueler.get(sid);
-    const [kats, notenAll] = await Promise.all([Store.Kategorien.byKlasse(k.id), Store.Noten.byKlasse(k.id)]);
-    const hjErg = Calc.halbjahrErgebnis(kats, notenAll.filter((n) => n.schuelerId === sid),
-      k, halbjahrFilter(), Calc.istMSS(k));
-    UI.modal({ title: UI.vollerName(s), bodyHTML: breakdownHTML(hjErg, Calc.istMSS(k)),
-      buttons: [{ label: "Schließen", className: "primary" }] });
+    const [kats, notenAll, leistungen] = await Promise.all([
+      Store.Kategorien.byKlasse(k.id), Store.Noten.byKlasse(k.id), Store.Leistungen.byKlasse(k.id)
+    ]);
+    const mss = Calc.istMSS(k);
+    const hj = halbjahrFilter();
+    const hjErg = Calc.halbjahrErgebnis(kats, notenAll.filter((n) => n.schuelerId === sid), k, hj, mss);
+
+    const mitarbeitKats = kats.filter((c) =>
+      c.quelle === "mitarbeit" && c.art !== "schriftlich" && (c.anzeige || "note") === "note");
+    const quartale = hj === 2 ? [3, 4] : [1, 2];
+    let mitarbeitHTML = "";
+    if (mitarbeitKats.length) {
+      const katIds = mitarbeitKats.map((c) => c.id);
+      const felder = quartale.map((q) => {
+        const leistung = leistungen.find((l) => l.quartal === q && katIds.indexOf(l.kategorieId) !== -1);
+        const note = leistung
+          ? notenAll.find((n) => n.leistungId === leistung.id && n.schuelerId === sid)
+          : null;
+        const wert = note && note.wert !== null && note.wert !== undefined ? Calc.formatTendenz(note.wert, mss) : "";
+        return '<div class="field"><label for="mn-' + q + '">' + q + ". Quartal</label>" +
+          '<input id="mn-' + q + '" data-q="' + q + '" inputmode="' + (mss ? "numeric" : "text") + '" value="' +
+          UI.esc(wert) + '" placeholder="' + (mss ? "0–15" : "leer = keine Note") + '"></div>';
+      }).join("");
+      mitarbeitHTML =
+        '<div class="grp"><h3>Mitarbeitsnote je Quartal</h3>' +
+        '<p class="hint">Kommt aus „Quartal abschließen“ im Reiter Mitarbeit und zählt in die Epochalnote. ' +
+        "Hier kannst du sie korrigieren; leer speichern entfernt die Note.</p>" +
+        '<div class="form-row">' + felder + "</div></div>";
+    }
+
+    const buttons = [{ label: "Schließen", className: mitarbeitKats.length ? "" : "primary" }];
+    if (mitarbeitKats.length) {
+      buttons.push({ label: "Mitarbeitsnoten speichern", className: "primary", onClick: async (close, box) => {
+        const kategorieId = mitarbeitKats[0].id;
+        for (const q of quartale) {
+          const inp = box.querySelector('[data-q="' + q + '"]');
+          if (!inp) continue;
+          const text = inp.value.trim();
+          const wert = text === "" ? null : Calc.parseNote(text, mss);
+          if (text !== "" && wert === null) {
+            UI.toast("Ungültige Note im " + q + ". Quartal");
+            return; // Abbruch ohne Änderung
+          }
+          const katIds = mitarbeitKats.map((c) => c.id);
+          const vorhanden = leistungen.find((l) => l.quartal === q && katIds.indexOf(l.kategorieId) !== -1);
+          if (!vorhanden && wert === null) continue; // nichts zu tun
+          const leistung = vorhanden || await Store.leistungFuer(k.id, kategorieId, q,
+            "Mitarbeit " + q + ". Quartal", Store.datumLokal());
+          await Store.Noten.setzeZelle(leistung, sid, wert);
+        }
+        close(); render();
+        UI.toast("Mitarbeitsnoten gespeichert");
+      }});
+    }
+
+    UI.modal({ title: UI.vollerName(s), bodyHTML: breakdownHTML(hjErg, mss) + mitarbeitHTML, buttons });
   }
 
   // ---- Sitzplatz zuweisen --------------------------------------------------
@@ -406,16 +477,23 @@
 
   // ---- Quartal abschließen -------------------------------------------------
   // Überträgt die Mitarbeits-Vorschläge des im Auswertungs-Tab gewählten
-  // Quartals als Noten in eine Ziel-Kategorie und löscht danach alle
-  // Mitarbeits-Ereignisse und Stunden dieses Quartals (Abwesenheiten bleiben).
+  // Quartals als Noten in eine Ziel-Kategorie und markiert das Quartal an der
+  // Klasse als abgeschlossen. Stunden und Ereignisse bleiben erhalten (der
+  // Mitarbeit-Tab zeigt sie dann grau); der Abschluss ist dort aufhebbar.
   async function quartalAbschliessenDialog() {
     const q = quartalFilter("auswertungQuartal");
     if (q === null) { UI.toast("Bitte oben ein Quartal wählen"); return; }
     const k = await Store.Klassen.get(state.klasseId);
     if (!k) return;
     const mss = Calc.istMSS(k);
-    const [ktx, kategorien] = await Promise.all([auswertungKontext(k), Store.Kategorien.byKlasse(k.id)]);
+    // Schon übertragene Mitarbeitsnoten dieses Quartals haben Vorrang vor dem
+    // Vorschlag, damit ein zweiter Abschluss eine korrigierte Note nicht
+    // versehentlich mit dem Rohwert überschreibt.
+    const [ktx, kategorien, bereitsUebertragen] = await Promise.all([
+      auswertungKontext(k), Store.Kategorien.byKlasse(k.id), mitarbeitNotenVonQuartal(k, q)
+    ]);
     const schuelerListe = ktx.schueler;
+    const schonNoten = Object.keys(bereitsUebertragen).length;
 
     // Ziel-Kategorien: sonstige Leistungen mit Noten-Anzeige; "" = neu anlegen
     const ziele = kategorien.filter((c) => c.art === "sonstige" && (c.anzeige || "note") === "note");
@@ -434,6 +512,14 @@
       const a = ktx.ausw[s.id];
       const vorschlag = a ? a.notenvorschlag : null;
       const hatV = vorschlag !== null && vorschlag !== undefined;
+      const schon = bereitsUebertragen[s.id];
+      // Vorbelegung: bereits übertragene Note > umgerechneter Vorschlag.
+      // In der Oberstufe läuft der Vorschlag über die offizielle Umrechnung
+      // Note -> MSS-Punkte (Calc.noteZuMssPunkte).
+      const ausVorschlag = !hatV ? "" : (mss
+        ? String(Calc.noteZuMssPunkte(Calc.tendenznote(vorschlag, false)))
+        : Calc.formatTendenz(Calc.tendenznote(vorschlag, false), false));
+      const vorbelegt = schon !== undefined ? Calc.formatTendenz(schon, mss) : ausVorschlag;
       return "<tr>" +
         "<td><strong>" + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
         '<td class="num">' + (hatV
@@ -442,16 +528,21 @@
         // Vorgeschlagen wird eine echte Note (2+, 3, 4-), nicht der rohe Ø –
         // sonst stünde in der Notenübersicht eine Dezimalzahl wie „2,8".
         '<td><input data-sid="' + s.id + '" inputmode="' + (mss ? "numeric" : "text") + '" style="width:90px" value="' +
-          (mss ? "" : (hatV ? Calc.formatTendenz(Calc.tendenznote(vorschlag, false), false) : "")) + '" placeholder="' + (mss ? "0–15" : "–") + '"></td>' +
+          UI.esc(vorbelegt) + '" placeholder="' + (mss ? "0–15" : "–") + '"></td>' +
       "</tr>";
     }).join("");
 
     const body =
       '<p class="muted">' + (mss
-        ? "MSS-Punkte (0–15) für das " + q + ". Quartal eintragen. Die Stundennoten-Ø dient nur zur Orientierung."
+        ? "MSS-Punkte (0–15) für das " + q + ". Quartal. Vorbelegt ist der Stundennoten-Ø, " +
+          "über die offizielle Tabelle in Punkte umgerechnet (2 = 11, 3+ = 9, 4- = 4 …)."
         : "Mitarbeits-Vorschläge des " + q + ". Quartals als Noten übertragen. Vorbelegt ist der auf " +
           "eine Note gerundete Ø (2+, 3, 4-); die Spalte „Vorschlag“ zeigt den genauen Wert.") +
         " Leer lassen = kein Übertrag für diese/n Schüler/in.</p>" +
+      (schonNoten
+        ? '<p class="hint">Für dieses Quartal sind bereits ' + schonNoten + " Noten übertragen – " +
+          "die Felder sind mit diesen Noten vorbelegt, nicht mit dem Vorschlag.</p>"
+        : "") +
       katSelect +
       '<div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">' + (mss ? "Stundennoten-Ø" : "Vorschlag") + '</th><th>' +
         (mss ? "Punkte" : "Note") + "</th></tr></thead>" +
@@ -496,9 +587,10 @@
           }
           const kategorieWahl = box.querySelector("#qa-kategorie").value;
           const ok = await UI.confirmDialog("Quartal wirklich abschließen?",
-            "Die eingetragenen Noten werden übertragen. Danach werden alle Mitarbeits-Ereignisse und Stunden des " + q +
-            ". Quartals dieser Klasse endgültig gelöscht. Vorher ggf. CSV exportieren.",
-            { okLabel: "Übertragen & löschen" });
+            "Die eingetragenen Noten werden übertragen. Das " + q + ". Quartal wird danach gesperrt: " +
+            "Stunden und Meldungen bleiben zur Ansicht erhalten, es lässt sich aber nichts mehr erfassen. " +
+            "Aufheben kannst du das jederzeit im Reiter Mitarbeit.",
+            { okLabel: "Übertragen & abschließen", danger: false });
           if (!ok) return;
 
           // Ziel-Kategorie: gewählte oder neu angelegte „Mündliche Mitarbeit“.
@@ -526,11 +618,9 @@
           for (const e of eintraege) {
             await Store.Noten.setzeZelle(leistung, e.schuelerId, e.wert);
           }
-          const [ereignisse, stunden] = await Promise.all([
-            Store.Ereignisse.byKlasse(k.id), Store.Stunden.byKlasse(k.id)
-          ]);
-          for (const ev of ereignisse.filter((x) => x.quartal === q)) await Store.Ereignisse.remove(ev.id);
-          for (const st of stunden.filter((x) => x.quartal === q)) await DB.del("stunden", st.id);
+          // Stunden und Ereignisse bleiben stehen – das Quartal wird nur als
+          // abgeschlossen vermerkt und dadurch im Mitarbeit-Tab gesperrt.
+          await Store.quartalAbschliessen(k, q, Store.datumLokal());
           // Das Modal ist durch den Confirm-Dialog bereits geschlossen.
           UI.toast(eintraege.length + " Noten übertragen – Quartal abgeschlossen");
           render();

@@ -116,9 +116,12 @@ IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
      `store.migrationen.js` erhöhen und dort einen Schritt in
      `MIGRATION_STEPS` (Schlüssel = Ziel-Version)
      ergänzen. `migrateSchema()` läuft beim App-Start kaskadiert
-     (v1→v2→v3 …; aktueller Stand **11** – Spaltenmodell: Store `leistungen`
-     und `leistungId` auf den Noten, `quelle` auf den Kategorien). Neue Felder bekommen zusätzlich immer Defaults
+     (v1→v2→v3 …; aktueller Stand **13** – v12: neue Notenschwellen auf ganzen
+     Punkten, v13: `abgeschlosseneQuartale` an der Klasse). Neue Felder bekommen zusätzlich immer Defaults
      (Factorys + `getSettings`-Merge), damit alte Datensätze nicht crashen.
+     ⚠️ Ein Schritt, der **Einstellungen** ändert, muss `getSettings()` selbst
+     aufrufen und speichern; `migrateSchema` liest die Einstellungen nach den
+     Schritten neu (jeder `getSettings()`-Aufruf liefert eine frische Kopie).
 - IDs via `Store`-internem `uid()` (crypto.randomUUID mit Fallback).
 - Tages-Zuordnungen (Abwesenheiten, aktive Tage) nutzen das **lokale** Datum
   (`Store.datumLokal()` / `Calc.tagVonTs()`), nicht `toISOString()` (UTC).
@@ -147,7 +150,9 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
   entscheidet. Anzeige immer über `Calc.formatZeugnisnote`.
 - **Drittelnoten:** Alle Zwischennoten laufen über `Calc.tendenznote` (x,0 | x,3 | x,7);
   genau zwischen zwei Stufen gewinnt die **schlechtere** Note (2,15 → 2,3). Gerundet wird
-  in Tausendsteln, weil die Mitte binär sonst nicht exakt trifft. Angezeigt wird
+  in Tausendsteln, weil die Mitte binär sonst nicht exakt trifft. Bei MSS-Punkten runden
+  `tendenznote` und `zeugnisnote` einheitlich auf ganze Punkte, bei genau x,5 auf die
+  **größere** Punktzahl (10,5 → 11). Angezeigt wird
   ausschließlich über `Calc.formatTendenz` (1,7 → „2+"), nie als Dezimalzahl; nur Werte
   außerhalb der Skala fallen auf `formatNote` zurück.
 - **Halbjahres-Kette:** `Calc.halbjahrErgebnis(kategorien, noten, klasse, hj, mss)` ist die
@@ -161,9 +166,12 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
   zeigt die Anzahl der `keinehausaufgabe`-Ereignisse und die Kategorie fällt in
   `Calc.berechneSchueler` aus der Gewichtung (Feld `zaehltInNote` je Kategorie-Ergebnis).
 - **Kategorien tragen zusätzlich `quelle: "manuell" | "mitarbeit"`.** „mitarbeit" heißt:
-  die Noten kommen ausschließlich aus „Quartal abschließen". Aus dem Mitarbeitsbereich
-  erscheint in der Notenübersicht **nur diese fertige Note** – kein Zwischenstand, keine
-  automatisch erzeugten Einzelnoten. Daran hängt auch, wann die Epochalnote entsteht
+  die Noten kommen ausschließlich aus „Quartal abschließen". Ihre Spalten sind in der
+  Notenübersicht **ausgeblendet** (`halbjahrSpalten` filtert sie): Aus dem
+  Mitarbeitsbereich zeigt die Übersicht nur die fertige Epochalnote. Die Note zählt
+  unverändert mit und ist im **Schüler-Detail** (Tipp auf den Namen, Abschnitt
+  „Mitarbeitsnote je Quartal") editierbar; `leistungDialog` bietet Mitarbeits-Kategorien
+  deshalb nicht mehr zur Auswahl an. Daran hängt auch, wann die Epochalnote entsteht
   (`Calc.mitarbeitVorhanden`): Solange für ein Quartal keine Mitarbeitsnote vorliegt, ist
   `epochal[i].offen === true` und die Epochalnote bleibt `null`. Klassen **ohne** eine
   Kategorie mit `quelle: "mitarbeit"` arbeiten ohne Mitarbeitsnote – dort ist die
@@ -178,17 +186,27 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
   Noten nie mit `Store.Noten.save` direkt an der Spalte vorbei anlegen. Für automatisch
   erzeugte Noten (Quartalsabschluss, HA-Note 6) gibt es `Store.leistungFuer`.
 - **Zeitraum der Notenübersicht ist das Halbjahr** (`state.notenHalbjahr`,
-  `halbjahrFilter` / `halbjahrTabsHTML` in views.core.js) – die Quartale erscheinen darin
-  als Epochalnoten. Mitarbeit/Tracker bleiben quartalsweise (`quartalFilter`).
+  `halbjahrFilter` / `halbjahrTabsHTML(action, klasse)` in views.core.js) – die Quartale
+  erscheinen darin als Epochalnoten. In MSS-Klassen heißen die Reiter nach der
+  Klassenstufe („12.1 · 12.2"), weil dort jedes Kurshalbjahr eine eigene Endnote ist. Mitarbeit/Tracker bleiben quartalsweise (`quartalFilter`).
   Das Quartal einer Note kommt aus ihrer Spalte, **nicht** aus `settings.aktuellesQuartal` –
   sonst wandern Noten beim Erfassen ins falsche Halbjahr.
 - **Notentabelle = Spaltenmodell:** Kopf und Datenzellen entstehen aus einer Liste von
   Spalten-Deskriptoren (`halbjahrSpalten` in `views.home-klasse.js`), jeder mit `id`,
   Farbgruppe (`grp`) und `zelle(sp, ctx)`. Neue Spalten dort ergänzen, nicht im
-  HTML-String. Reihenfolge: schriftliche Leistungen · je Quartal (sonstige Leistungen,
-  HA-Zählung, Epochalnote) · Schriftlich · Sonstige · Zeugnisnote (+ Jahr im 2. HJ).
+  HTML-String. Reihenfolge: schriftliche Leistungen · je Quartal (sonstige Leistungen
+  **ohne** die der Mitarbeits-Kategorien, HA-Zählung, Epochalnote) · Schriftlich ·
+  Sonstige · Zeugnisnote (+ Jahr im 2. HJ, aber **nicht** in MSS-Klassen).
 - **Inline-Eingabe:** `notenEingabe` in `views.home-klasse.js` macht die Zelle zum
-  Eingabefeld (Enter = nächste Zeile, Tab = nächste Spalte, Esc = abbrechen). Nach dem
+  Eingabefeld (Enter = nächste Zeile, Tab = nächste Spalte, Esc = abbrechen).
+  Dazu öffnet sich das **Nummernpad** (`.notenpad`, im `body` mit
+  `position: fixed`, damit der Tabellen-Scroll es nicht abschneidet; Werte:
+  Drittelnoten bzw. 0–15 in MSS-Klassen). Das Eingabefeld trägt
+  `inputmode="none"`, damit auf dem iPad keine Bildschirmtastatur aufgeht –
+  eine echte Tastatur funktioniert weiter. Die Pad-Buttons hängen an
+  `pointerdown` mit `preventDefault()`: So verliert das Feld den Fokus nicht
+  (blur würde vorzeitig speichern) und iOS liefert das Ereignis zuverlässig.
+  Ein Tipp auf einen Wert speichert und springt eine Zeile weiter. Nach dem
   Speichern wird **nur die betroffene Zeile** neu gerechnet (`notenKtx` + `zeilenKontext`),
   kein `render()` – sonst springt der Fokus. `notenKtx` hält den Renderkontext zwischen
   `TabNoten` und `mountNotenTabelle`. Die per Ziehen gesetzte Reihenfolge liegt **nur** in
@@ -252,14 +270,27 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
   Heatmap, deaktivierte Ereignis-Buttons, und die Stunden dieses Tages fallen in
   `Calc.auswertungMitarbeit` aus den gezählten Stunden (bringen also weder Punkte
   noch eine Stundennote).
+- **Doppelstunde = zwei Stundennoten:** Eine Stunde bringt
+  `Math.max(1, Math.round(dauerMin / 45))` Einheiten in die Auswertung. Ihre
+  Punkte werden durch die Einheiten geteilt (die Schwellen gelten je 45 Minuten),
+  die daraus entstehende Note wird entsprechend oft gezählt – auch in
+  `stundenGezaehlt`. Bewusst ohne Einstellung.
 - **Mitarbeitsnote (Stundennoten-Modell):** `Calc.auswertungMitarbeit(ereignisse,
   settings, opts)` vergibt je **gehaltener Stunde mit Anwesenheit** eine
   Stundennote aus den Stundenpunkten via Schwellen (`Calc.punkteZuNote`);
   Stunden ohne Meldung zählen als 0 Punkte. Der Notenvorschlag ist der Ø der
   Stundennoten (1 NK). Die Schwellen bedeuten also „Punkte in einer Stunde →
-  Stundennote" (nicht mehr „Ø-Punkte"). Rückgabe u. a. `stundenNoten`
-  (chronologisch, `{stundeId, datum, note, punkte, verweigerung}`) und
-  `verweigerungen`. Die Schwellen liefert `Calc.schwellenFuer(settings,
+  Stundennote" (nicht mehr „Ø-Punkte") und liegen deshalb seit 1.8.0 auf **ganzen
+  Punkten** (ab 3 → 1 · ab 2 → 2 · ab 1 → 3 · ab 0 → 4 · ab −1 → 5 · darunter 6);
+  mit den alten Zwischenwerten waren die Stufen 2 und 4 unerreichbar. Rückgabe u. a.
+  `stundenNoten` (chronologisch, `{stundeId, datum, note, punkte, verweigerung}`),
+  `verweigerungen`, `anzahl` (alle Ereignisse) und `meldungen` (nur die positiven
+  Typen – das ist die Spalte „Meld." im Mitarbeit-Tab).
+  Die Tabelle zeigt den Vorschlag als **gerundete Note** (`tendenznote`, exakter Ø
+  im Tooltip und in der Herleitung) und daneben die Spalte **„Note"** mit der
+  tatsächlich übertragenen Mitarbeitsnote des Quartals
+  (`Views.mitarbeitNotenVonQuartal(klasse, quartal)` – dieselbe Quelle nutzt der
+  Abschluss-Dialog zum Vorbelegen). Die Schwellen liefert `Calc.schwellenFuer(settings,
   klasse)`: `klasse.mitarbeitSchwellen` (klassenweise, optional) schlägt
   `settings.mitarbeitSchwellen`. Beide sind im UI editierbar.
 - **Leistungsverweigerung:** Ereignistyp `verweigerung` (`aufKachel: false`),
@@ -277,11 +308,18 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
 - **Quartal abschließen:** Button im Mitarbeit-Tab (nur bei konkretem Quartal),
   Dialog `quartalAbschliessenDialog` mit pro Schüler editierbaren
   Notenvorschlägen (vorbelegt mit dem auf eine Note gerundeten Ø, nicht mit dem rohen
-  Dezimalwert) und Ziel-Kategorie (Default „Mündliche Mitarbeit", wird dabei auf
-  `quelle: "mitarbeit"` gesetzt). Vor dem
-  Löschen CSV-Export der Noten (`CSV.exportQuartalNoten`) und Ereignisse
-  (`CSV.exportEreignisse`); der Übertrag legt die Noten mit Quartal an und
-  löscht Ereignisse + Stunden des Quartals (Abwesenheiten bleiben).
+  Dezimalwert – liegt für das Quartal schon eine übertragene Note vor, hat **diese**
+  Vorrang) und Ziel-Kategorie (Default „Mündliche Mitarbeit", wird dabei auf
+  `quelle: "mitarbeit"` gesetzt). CSV-Export der Noten (`CSV.exportQuartalNoten`)
+  und Ereignisse (`CSV.exportEreignisse`) im Dialog.
+- **Der Abschluss löscht nichts** (seit 1.8.0): Stunden und Ereignisse bleiben
+  erhalten, stattdessen vermerkt `Store.quartalAbschliessen` das Quartal in
+  `klasse.abgeschlosseneQuartale` (`[{ quartal, datum }]`). Helfer:
+  `Store.abschlussVon(klasse, quartal)` / `Store.abschlussAufheben`. Wirkung:
+  Der Mitarbeit-Tab zeigt das Quartal grau (`.table-wrap.gesperrt`) mit
+  Hinweisleiste und Button „Abschluss aufheben"; `trackerStartDialog` verweigert
+  den Start, wenn `settings.aktuellesQuartal` dieser Klasse abgeschlossen ist.
+  Aufheben löscht die übertragene Note **nicht**.
 - **Exporte:** Alle Exporte laufen über `CSV.speichern(dateiname, inhalt, mime)` –
   dreistufig: 1) Export-Ordner via File System Access API (Handle in IndexedDB unter
   einstellungen/key `"export"`, Card „Export-Ordner“ in den Einstellungen),
@@ -300,16 +338,22 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
   ob eine Klasse Schulnoten (1–6, niedriger = besser) oder MSS-Punkte
   (0–15, ganzzahlig, höher = besser) verwendet. Die betroffenen `Calc`-
   Funktionen (`parseNote`, `clampNote`, `noteFarbe`, `zeugnisnote`,
-  `formatZeugnisnote`, `zeugnisErgebnis`, `jahresnote`) nehmen dafür einen
+  `formatZeugnisnote`, `zeugnisErgebnis`, `jahresnote`, `tendenznote`) nehmen dafür einen
   optionalen `mss`-Parameter (Default `false`); Aufrufer reichen ihn aus dem
   `klasse`-Objekt durch. `formatNote`/`berechneSchueler`/`rundeGesamt` bleiben
   skalenunabhängig (reine Mittelwertbildung). Der Mitarbeits-Tracker
   (Stundennoten-Modell, Notenschwellen) bleibt bewusst unverändert auf der
   1–6-Skala – er ist eine interne Vorschlags-Heuristik, keine gespeicherte
-  Note. Beim „Quartal abschließen" trägt die Lehrkraft den MSS-Punktwert für
-  Kursklassen deshalb selbst ein (kein Prefill aus dem 1–6-Vorschlag, der
-  bleibt nur als Orientierungswert sichtbar) – es gibt keine offizielle,
-  automatische Umrechnungstabelle zwischen den Skalen im Code.
+  Note. Für die Anzeige und die Vorbelegung beim „Quartal abschließen" wird der
+  gerundete Vorschlag über die **offizielle Umrechnungstabelle** in Punkte
+  gebracht: `Calc.noteZuMssPunkte(note)` = `17 − Note × 3`, gerundet und auf
+  0–15 begrenzt (1+ 15 · 1 14 · 1- 13 · 2+ 12 · 2 11 · … · 5- 1 · 6 0). Weil die
+  Notenskala der App bei 1,0 beginnt, ist 14 der höchste automatisch erreichbare
+  Wert; die 15 (= 1+) trägt die Lehrkraft von Hand ein. Gespeichert wird immer
+  der Wert der Klassenskala – die Umrechnung passiert nur an dieser Stelle.
+  **Keine Jahresnote:** In MSS-Klassen ist jedes Kurshalbjahr eine eigene
+  Endnote – die Spalte „Zeugnisnote Jahr" entfällt dort, und die
+  Halbjahres-Reiter heißen nach der Klassenstufe („12.1 · 12.2").
 
 ## 7. Testen & Verifizieren
 
@@ -392,5 +436,14 @@ folgt für jede Aufgabe:
   Quartale. `halbjahr` wird nur noch abgeleitet mitgeschrieben.
 - **Schwellen-Bedeutung geändert:** `mitarbeitSchwellen` gelten seit dem
   Stundennoten-Modell **pro Stunde** (Punkte in einer Stunde → Stundennote),
-  nicht mehr auf den Punkte-Ø. Alte Schwellenwerte wirken daher anders –
-  Texte/Dialoge entsprechend lesen.
+  nicht mehr auf den Punkte-Ø. Seit 1.8.0 liegen die Stufen deshalb auf ganzen
+  Punkten; Bestände mit der alten Voreinstellung wurden migriert, eigene
+  Schwellen (global oder je Klasse) blieben unangetastet.
+- **Einstellungen in Migrationsschritten:** `getSettings()` liefert jedes Mal
+  eine frische Kopie (Merge mit `DEFAULT_SETTINGS`). Ein Schritt muss daher
+  selbst laden **und** speichern; `migrateSchema` liest nach den Schritten neu,
+  sonst überschreibt es deren Änderungen.
+- **Beispieldaten:** `Store.seedDemoData` (Klasse 8b) läuft nur bei leerer
+  Datenbank beim App-Start. `Store.seedBeispielklassen` (9a Musterjahr + LK 12)
+  legt zusätzlich an, auch wenn schon Klassen da sind, und überspringt
+  gleichnamige Klassen – Knopf in den Einstellungen.

@@ -45,11 +45,12 @@
           '<button class="iconbtn" data-action="besprechung-next"' + (idx >= schueler.length - 1 ? " disabled" : "") + ">›</button>" +
         "</div>" +
         '<div class="hstack" style="justify-content:center;margin-bottom:10px"><div class="tabs" style="margin:0">' +
-          halbjahrTabsHTML("noten-hj") + "</div></div>" +
+          halbjahrTabsHTML("noten-hj", k) + "</div></div>" +
         '<div class="card">' +
           '<div class="big-grade" style="color:' + Calc.noteFarbe(hjErg.zeugnis, mss) + '">' +
             Calc.formatZeugnisnote(hjErg.zeugnis, mss) + "</div>" +
-          '<div class="center muted">Zeugnisnote ' + hj + ". Halbjahr</div>" +
+          '<div class="center muted">Zeugnisnote ' +
+            (mss && k.klassenstufe ? k.klassenstufe + "." + hj : hj + ". Halbjahr") + "</div>" +
           breakdownHTML(hjErg, mss) +
         "</div>" +
         '<div class="btn-row" style="margin-top:var(--gap);justify-content:center">' +

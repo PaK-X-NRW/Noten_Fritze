@@ -60,11 +60,15 @@
     return parseInt(state.notenHalbjahr, 10) === 2 ? 2 : 1;
   }
 
-  // Filter-Tabs „1. Halbjahr · 2. Halbjahr“ der Notenübersicht.
-  function halbjahrTabsHTML(action) {
+  // Filter-Tabs „1. Halbjahr · 2. Halbjahr“ der Notenübersicht. In der
+  // Oberstufe (MSS-Punkte ab Stufe 11) ist jedes Kurshalbjahr eine eigene
+  // Endnote – dort heißen die Reiter deshalb „12.1 · 12.2“.
+  function halbjahrTabsHTML(action, klasse) {
     const aktuell = halbjahrFilter();
+    const stufe = klasse && Calc.istMSS(klasse) ? klasse.klassenstufe : null;
     return [[1, "1. Halbjahr"], [2, "2. Halbjahr"]].map(([nr, label]) =>
-      '<button class="tab ' + (aktuell === nr ? "active" : "") + '" data-action="' + action + '" data-hj="' + nr + '">' + label + "</button>"
+      '<button class="tab ' + (aktuell === nr ? "active" : "") + '" data-action="' + action + '" data-hj="' + nr + '">' +
+      (stufe ? stufe + "." + nr : label) + "</button>"
     ).join("");
   }
 

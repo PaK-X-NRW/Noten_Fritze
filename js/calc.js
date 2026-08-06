@@ -107,12 +107,13 @@
     return liste;
   })();
 
-  // mss=true: MSS-Punkte kennen keine Tendenzen -> ganze Punkte; bei x,5
-  // ebenfalls zur schlechteren, also kleineren Punktzahl.
+  // mss=true: MSS-Punkte kennen keine Tendenzen -> ganze Punkte. Bei genau x,5
+  // wird zur größeren Punktzahl gerundet – dieselbe Regel wie in zeugnisnote,
+  // damit Zwischen- und Endnoten in der Oberstufe nicht auseinanderlaufen.
   function tendenznote(wert, mss) {
     if (wert === null || wert === undefined || isNaN(wert)) return null;
     const w = clampNote(Number(wert), mss);
-    if (mss) return Math.ceil(w - 0.5);
+    if (mss) return Math.round(w);
     const w1000 = Math.round(w * 1000);
     let beste = TENDENZ_STUFEN[0], abstand = Infinity;
     for (const stufe of TENDENZ_STUFEN) {
@@ -134,6 +135,20 @@
     if (rest === 3) return ganz + "-";
     if (rest === 7) return (ganz + 1) + "+";
     return formatNote(n, 1);
+  }
+
+  // ---- Umrechnung Schulnote -> MSS-Punkte ----------------------------------
+  // Offizielle Tabelle der gymnasialen Oberstufe (jede Tendenzstufe = 1 Punkt):
+  //   1+ 15 · 1 14 · 1- 13 · 2+ 12 · 2 11 · 2- 10 · 3+ 9 · 3 8 · 3- 7 ·
+  //   4+ 6 · 4 5 · 4- 4 · 5+ 3 · 5 2 · 5- 1 · 6 0
+  // Als Formel: Punkte = 17 - Note × 3, auf ganze Punkte gerundet (0..15).
+  // Zwischenwerte (z. B. ein roher Ø 2,5 -> 10) runden bei genau x,5 zur
+  // größeren Punktzahl – dieselbe Regel wie in tendenznote/zeugnisnote.
+  // Hinweis: Die Notenskala der App beginnt bei 1,0 (= 14 Punkte); die 15 gibt
+  // es nur als 1+ und damit nur von Hand.
+  function noteZuMssPunkte(note) {
+    if (note === null || note === undefined || isNaN(note)) return null;
+    return clampNote(Math.round(17 - Number(note) * 3), true);
   }
 
   // Liegt ein Wert exakt auf einer Grenze, ist die Rundung nicht eindeutig.
@@ -416,7 +431,8 @@
   // Rückgabe je Schüler u. a.: anzahl, punkte, typen, letzte, tage,
   // stundenIds, stundenGezaehlt, stundenMitEreignis, aktiveTage, nenner,
   // punkteProStunde (Info, treibt den Vorschlag nicht mehr), verweigerungen,
-  // stundenNoten (chronologisch, {stundeId, datum, note, punkte, verweigerung}),
+  // stundenNoten (chronologisch, {stundeId, datum, note, punkte, verweigerung,
+  //   einheiten} – eine Doppelstunde liefert zwei Einträge, s. unten),
   // notenvorschlag (Ø der Stundennoten, 1 NK; null ohne jede Grundlage).
   function auswertungMitarbeit(ereignisse, settings, opts) {
     opts = opts || {};
@@ -432,7 +448,9 @@
     function eintrag(sid) {
       if (!proSchueler[sid]) {
         proSchueler[sid] = {
-          schuelerId: sid, anzahl: 0, punkte: 0, letzte: 0,
+          // anzahl = alle Ereignisse, meldungen = nur die positiven
+          // (Wortmeldung/gut/sehr gut) – die Tabelle zeigt die Meldungen.
+          schuelerId: sid, anzahl: 0, meldungen: 0, punkte: 0, letzte: 0,
           typen: {}, tage: {}, stundenIds: {}, verweigerungen: 0
         };
       }
@@ -450,6 +468,8 @@
       const punkte = (e.punkte != null ? e.punkte : (settings.mitarbeitPunkte[e.typ] || 0));
       s.anzahl += 1;
       s.punkte += punkte;
+      const typDef = Store.EVENT_TYPE_MAP[e.typ];
+      if (typDef && typDef.positiv) s.meldungen += 1;
       if (e.typ === "verweigerung") s.verweigerungen += 1;
       s.letzte = Math.max(s.letzte, e.timestamp);
       s.typen[e.typ] = (s.typen[e.typ] || 0) + 1;
@@ -473,15 +493,22 @@
       let gezaehlt = 0;
       stunden.forEach((st) => {
         if (abwesendTage && abwesendTage.has(sid + "|" + st.datum)) return;
-        gezaehlt += 1;
+        // Eine Doppelstunde zählt wie zwei Einzelstunden: Ihre Punkte werden
+        // auf 45 Minuten umgerechnet (die Schwellen gelten je Unterrichts-
+        // stunde), und die daraus entstehende Note zählt entsprechend oft.
+        const einheiten = Math.max(1, Math.round((st.dauerMin || 45) / 45));
+        gezaehlt += einheiten;
         const g = (eventsProStunde[sid] || {})[st.id] || null;
         const punkte = g ? g.punkte : 0;
         const verw = g ? g.verweigerung : false;
-        stundenNoten.push({
-          stundeId: st.id, datum: st.datum,
-          note: verw ? 6 : punkteZuNote(punkte, schwellen),
-          punkte, verweigerung: verw
-        });
+        const note = verw ? 6 : punkteZuNote(punkte / einheiten, schwellen);
+        for (let i = 0; i < einheiten; i++) {
+          stundenNoten.push({
+            stundeId: st.id, datum: st.datum, note,
+            punkte: punkte / einheiten, verweigerung: verw,
+            einheiten
+          });
+        }
       });
       if (gezaehlt === 0 && s.anzahl > 0) {
         // Keine Stunden bekannt (z. B. gefilterter Zeitraum): ersatzweise je
@@ -636,7 +663,7 @@
     parseNote, formatNote, clampNote, rundeGesamt,
     berechneSchueler, quartaleVonFilter, noteFarbe,
     zeugnisnote, formatZeugnisnote, zeugnisErgebnis, jahresnote,
-    tendenznote, formatTendenz, halbjahrErgebnis, mitarbeitVorhanden,
+    tendenznote, formatTendenz, noteZuMssPunkte, halbjahrErgebnis, mitarbeitVorhanden,
     auswertungMitarbeit, punkteZuNote, schwellenFuer, heatFarbe,
     tagVonTs,
     heatPunkteAktuell, heatFarbeDurchPunkte,

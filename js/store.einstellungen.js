@@ -77,14 +77,17 @@
     schuelerSortierung: "nachname",
     // Punkte je Ereignistyp (überschreibbar)
     mitarbeitPunkte: EVENT_TYPES.reduce((m, t) => (m[t.id] = t.defaultPunkte, m), {}),
-    // Schwellen: Ø Punkte pro gehaltener Stunde -> Vorschlag Mitarbeitsnote.
-    // Startwerte, gedacht zum Nachjustieren (global und je Klasse editierbar).
+    // Schwellen: Punkte in EINER Stunde -> Stundennote (Ø der Stundennoten ist
+    // der Notenvorschlag). Weil Ereignisse ganze Punkte geben, liegen die
+    // Stufen auf ganzen Zahlen: sehr gute Meldung (3) = 1 · gute Meldung (2) = 2 ·
+    // Meldung (1) = 3 · stille Stunde (0) = 4 · vergessene HA (-1) = 5 ·
+    // Störung (-2) = 6. Global und je Klasse editierbar.
     mitarbeitSchwellen: [
-      { abPunkte: 2.0, note: 1 },
-      { abPunkte: 1.3, note: 2 },
-      { abPunkte: 0.7, note: 3 },
-      { abPunkte: 0.2, note: 4 },
-      { abPunkte: -0.5, note: 5 }
+      { abPunkte: 3.0, note: 1 },
+      { abPunkte: 2.0, note: 2 },
+      { abPunkte: 1.0, note: 3 },
+      { abPunkte: 0.0, note: 4 },
+      { abPunkte: -1.0, note: 5 }
       // darunter: 6
     ],
     // Heatmap-Erfassungspunkte je Ereignistyp

@@ -104,7 +104,7 @@
         UI.field("Vergessene Hausaufgaben werten", "haModus", s.haModus, { type: "select", options: [
           { value: "punkte", label: "Punkteabzug in der Mitarbeit" },
           { value: "note6", label: "Ab der 3. je eine Note 6 (Mündliche Mitarbeit)" }
-        ], hint: "Bei „Note 6“ geben vergessene Hausaufgaben keine Punkte; jede 3. je Quartal erzeugt automatisch eine Note 6 in der Kategorie „Mündliche Mitarbeit“." }) +
+        ], hint: "Bei „Note 6“ geben vergessene Hausaufgaben keine Punkte; je drei vergessene HA im Quartal kommt eine zusätzliche Stundennote 6 in den Notenvorschlag – eine eigene Notenspalte entsteht dabei nicht." }) +
       "</div>" +
       '<div class="card"><h2>Mitarbeit – Notenschwellen</h2>' +
         '<p class="muted">Übersetzt die Punkte einer einzelnen Stunde in eine Stundennote; der Vorschlag für die Mitarbeitsnote ist der Ø aller Stundennoten. Einzelne Klassen können eigene Schwellen bekommen (Klasse → Auswertung → Schwellen), z. B. weil eine Biologiestunde andere Mitarbeit ermöglicht als eine Deutschstunde.</p>' +
@@ -141,6 +141,15 @@
           '<button class="btn" data-action="backup-import">Backup importieren</button>' +
           '<button class="btn" data-action="reset-demo">Demo-Daten neu laden</button>' +
           '<button class="btn danger" data-action="delete-all">Alle Daten löschen</button>' +
+        "</div>" +
+      "</div>" +
+      '<div class="card"><h2>Beispielklassen</h2>' +
+        '<p class="muted">Zwei Klassen mit einem komplett durchgespielten Schuljahr zum Ausprobieren: ' +
+        '„9a (Musterjahr)“ mit Schulnoten und „Mathematik LK 12“ mit MSS-Punkten. ' +
+        "In beiden sind das 1.–3. Quartal abgeschlossen, das 4. Quartal läuft noch. " +
+        "Deine eigenen Klassen bleiben unverändert; löschen kannst du die Beispiele jederzeit auf der Startseite.</p>" +
+        '<div class="btn-row">' +
+          '<button class="btn" data-action="seed-beispielklassen">Beispielklassen anlegen</button>' +
         "</div>" +
       "</div>" +
       '<div class="card"><h2>Über</h2><p class="muted">Noten-Fritze · Version ' + APP_VERSION +

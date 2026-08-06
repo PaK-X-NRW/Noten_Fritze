@@ -172,6 +172,19 @@
 
     // Mitarbeit: Quartal abschließen (Dialog in views.dialoge.js)
     "quartal-abschliessen": () => quartalAbschliessenDialog(),
+    "abschluss-aufheben": async (el) => {
+      const k = await Store.Klassen.get(state.klasseId);
+      const q = parseInt(el.getAttribute("data-q"), 10);
+      if (!k || !q) return;
+      const ok = await UI.confirmDialog("Abschluss aufheben?",
+        "Das " + q + ". Quartal wird wieder freigegeben: Tracker und Abschluss sind erneut möglich. " +
+        "Die bereits übertragene Mitarbeitsnote bleibt stehen.",
+        { okLabel: "Aufheben", danger: false });
+      if (!ok) return;
+      await Store.abschlussAufheben(k, q);
+      render();
+      UI.toast(q + ". Quartal wieder freigegeben");
+    },
 
     // Export-Ordner (File System Access API, Chrome/Edge)
     "export-ordner-waehlen": async () => {
@@ -194,6 +207,18 @@
         UI.toast(ok ? "Demo-Daten geladen" : "Es sind bereits Klassen vorhanden");
         go("home");
       }
+    },
+    "seed-beispielklassen": async () => {
+      const ok = await UI.confirmDialog("Beispielklassen anlegen?",
+        "Angelegt werden „9a (Musterjahr)“ mit Schulnoten und „Mathematik LK 12“ mit MSS-Punkten – " +
+        "beide mit einem kompletten Beispieljahr. Deine vorhandenen Klassen bleiben unverändert.",
+        { okLabel: "Anlegen", danger: false });
+      if (!ok) return;
+      const angelegt = await Store.seedBeispielklassen();
+      UI.toast(angelegt.length
+        ? angelegt.join(" und ") + " angelegt"
+        : "Die Beispielklassen sind bereits vorhanden");
+      go("home");
     },
     "delete-all": async () => {
       if (await UI.confirmDialog("Wirklich ALLE Daten löschen?", "Diese Aktion kann nicht rückgängig gemacht werden. Vorher am besten ein Backup exportieren.")) {

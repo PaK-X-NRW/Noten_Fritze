@@ -251,7 +251,7 @@
 
     return (
       '<div class="hstack wrap" style="margin-bottom:var(--gap)">' +
-        '<div class="tabs" style="margin:0">' + halbjahrTabsHTML("noten-hj") + "</div>" +
+        '<div class="tabs" style="margin:0">' + halbjahrTabsHTML("noten-hj", k) + "</div>" +
         '<button class="btn small primary" data-action="add-leistung">＋ Spalte</button>' +
         '<div class="grow muted">' + hinweis + "</div>" +
         (eigeneReihenfolge ? '<button class="btn small" data-action="noten-spalten-reset">Spalten zurücksetzen</button>' : "") +
@@ -327,11 +327,15 @@
       .filter((l) => vonKategorie(l).art === "schriftlich")
       .forEach((l) => spalten.push(leistungSpalte(l, vonKategorie(l), mss)));
 
-    // 2) Je Quartal: sonstige Leistungen, HA-Zählung, dann die Epochalnote
+    // 2) Je Quartal: sonstige Leistungen, HA-Zählung, dann die Epochalnote.
+    // Spalten aus einer Mitarbeits-Kategorie bleiben ausgeblendet: Aus dem
+    // Mitarbeitsbereich zeigt die Übersicht nur die fertige Epochalnote. Die
+    // Note selbst zählt unverändert mit und ist im Schüler-Detail (Tipp auf
+    // den Namen) korrigierbar.
     ktx.quartale.forEach((q, i) => {
       ktx.leistungen
         .filter((l) => l.quartal === q && vonKategorie(l).art !== "schriftlich" &&
-          (vonKategorie(l).anzeige || "note") === "note")
+          (vonKategorie(l).anzeige || "note") === "note" && vonKategorie(l).quelle !== "mitarbeit")
         .forEach((l) => spalten.push(leistungSpalte(l, vonKategorie(l), mss)));
       Object.keys(ktx.katById).map((id) => ktx.katById[id])
         .filter((c) => c.art !== "schriftlich" && c.anzeige === "fehlendeHA")
@@ -363,12 +367,15 @@
       kopf: "Sonstige<br>Leistungen",
       zelle: (sp, ctx) => spaltenZelle(sp, tendenzBadge(ctx.hjErg.sonstige, mss))
     });
+    const stufe = mss ? ktx.k.klassenstufe : null;
     spalten.push({
       id: "sum:zeugnis", grp: "grp-zeugnis", trenner: true, stark: true,
-      kopf: "Zeugnisnote<br>" + ktx.hj + ". Halbjahr",
+      kopf: "Zeugnisnote<br>" + (stufe ? stufe + "." + ktx.hj : ktx.hj + ". Halbjahr"),
       zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.hjErg.zeugnis, mss))
     });
-    if (ktx.hj === 2) {
+    // In der Oberstufe ist jedes Kurshalbjahr eine eigene Endnote – dort gibt
+    // es keine Jahresnote aus beiden Halbjahren.
+    if (ktx.hj === 2 && !mss) {
       spalten.push({
         id: "sum:jahr", grp: "grp-zeugnis", stark: true,
         kopf: "Zeugnisnote<br>Jahr",
@@ -448,6 +455,7 @@
   // (die Sammelspalten hängen allein an ihr).
   function notenEingabe(table) {
     let aktiv = null;   // { td, input, lid, sid, alt }
+    let pad = null;     // Nummernpad (im body, position: fixed)
 
     table.addEventListener("click", (ev) => {
       const td = ev.target.closest ? ev.target.closest("td.zelle") : null;
@@ -465,28 +473,100 @@
       const alt = vorhanden && vorhanden.wert !== null && vorhanden.wert !== undefined
         ? Calc.formatTendenz(vorhanden.wert, notenKtx.mss) : "";
       td.classList.add("editiert");
-      td.innerHTML = '<input class="zelle-input" inputmode="' + (notenKtx.mss ? "numeric" : "text") +
-        '" value="' + UI.esc(alt) + '">';
+      // inputmode="none": Auf dem iPad soll die Bildschirmtastatur zubleiben –
+      // eingegeben wird über das Nummernpad (eine angeschlossene Tastatur
+      // funktioniert trotzdem weiter).
+      td.innerHTML = '<input class="zelle-input" inputmode="none" value="' + UI.esc(alt) + '">';
       const input = td.querySelector("input");
       aktiv = { td, input, lid, sid, alt };
       input.focus();
       input.select();
       input.addEventListener("keydown", taste);
       input.addEventListener("blur", () => { if (aktiv && aktiv.input === input) schliessen(true); });
+      padOeffnen();
     }
 
     function taste(ev) {
       if (ev.key === "Escape") { ev.preventDefault(); schliessen(false); return; }
       if (ev.key === "Enter" || ev.key === "Tab") {
         ev.preventDefault();
-        const richtung = ev.shiftKey ? -1 : 1;
-        const lid = aktiv.lid, sid = aktiv.sid;
-        const nachUnten = ev.key === "Enter";
-        schliessen(true).then(() => {
-          const naechste = nachbarZelle(sid, lid, nachUnten, richtung);
-          if (naechste) oeffnen(naechste);
-        });
+        speichernUndWeiter(ev.key === "Enter", ev.shiftKey ? -1 : 1);
       }
+    }
+
+    // Speichern und zur Nachbarzelle springen (Enter/Tab und Nummernpad).
+    function speichernUndWeiter(nachUnten, richtung) {
+      if (!aktiv) return;
+      const lid = aktiv.lid, sid = aktiv.sid;
+      schliessen(true).then(() => {
+        const naechste = nachbarZelle(sid, lid, nachUnten, richtung);
+        if (naechste) oeffnen(naechste);
+      });
+    }
+
+    // ---- Nummernpad --------------------------------------------------------
+    // Tastenfeld direkt an der Zelle: Sek I die Drittelnoten, Oberstufe die
+    // Punkte 0–15 (jeweils beste zuerst). Ein Tipp speichert und springt eine
+    // Zeile weiter, damit sich eine Spalte zügig ausfüllen lässt.
+    function padWerte() {
+      if (notenKtx.mss) {
+        const liste = [];
+        for (let p = 15; p >= 0; p--) liste.push(String(p));
+        return liste;
+      }
+      return ["1", "1-", "2+", "2", "2-", "3+", "3", "3-", "4+", "4", "4-", "5+", "5", "5-", "6"];
+    }
+
+    function padOeffnen() {
+      padSchliessen();
+      pad = document.createElement("div");
+      pad.className = "notenpad" + (notenKtx.mss ? " mss" : "");
+      pad.innerHTML =
+        '<div class="pad-grid">' +
+          padWerte().map((w) =>
+            '<button type="button" class="pad-btn" data-wert="' + UI.esc(w) + '">' + UI.esc(w) + "</button>"
+          ).join("") +
+        "</div>" +
+        '<div class="pad-fuss">' +
+          '<button type="button" class="pad-btn leer" data-wert="">leeren</button>' +
+          '<button type="button" class="pad-btn fertig" data-fertig="1">fertig</button>' +
+        "</div>";
+      document.body.appendChild(pad);
+      padPosition();
+      // pointerdown statt click: So behält das Eingabefeld den Fokus (ein blur
+      // würde vorzeitig speichern und schließen), und iOS liefert das Ereignis
+      // zuverlässig – ein click kommt nach preventDefault dort nicht mehr an.
+      pad.addEventListener("pointerdown", (ev) => {
+        const btn = ev.target.closest ? ev.target.closest("button") : null;
+        if (!btn || !aktiv) return;
+        ev.preventDefault();
+        if (btn.hasAttribute("data-fertig")) { schliessen(true); return; }
+        aktiv.input.value = btn.getAttribute("data-wert");
+        speichernUndWeiter(true, 1);
+      });
+      window.addEventListener("scroll", padPosition, true);
+      window.addEventListener("resize", padPosition);
+    }
+
+    // Unter der Zelle, sonst darüber; immer innerhalb des Fensters.
+    function padPosition() {
+      if (!pad || !aktiv) return;
+      const r = aktiv.td.getBoundingClientRect();
+      const breite = pad.offsetWidth, hoehe = pad.offsetHeight;
+      let links = r.left + r.width / 2 - breite / 2;
+      links = Math.max(8, Math.min(links, window.innerWidth - breite - 8));
+      let oben = r.bottom + 6;
+      if (oben + hoehe > window.innerHeight - 8) oben = Math.max(8, r.top - hoehe - 6);
+      pad.style.left = Math.round(links) + "px";
+      pad.style.top = Math.round(oben) + "px";
+    }
+
+    function padSchliessen() {
+      if (!pad) return;
+      window.removeEventListener("scroll", padPosition, true);
+      window.removeEventListener("resize", padPosition);
+      if (pad.parentNode) pad.parentNode.removeChild(pad);
+      pad = null;
     }
 
     // Nachbarzelle: Enter = gleiche Spalte, nächste Zeile · Tab = gleiche Zeile,
@@ -507,6 +587,7 @@
       const { td, input, lid, sid, alt } = aktiv;
       const text = input.value.trim();
       aktiv = null;
+      padSchliessen();
       td.classList.remove("editiert");
       if (!speichern || text === alt) { zeileNeu(sid); return; }
       const wert = text === "" ? null : Calc.parseNote(text, notenKtx.mss);
@@ -747,34 +828,89 @@
     };
   }
 
+  // Übertragene Mitarbeitsnoten eines Quartals: schuelerId -> wert. Quelle sind
+  // die Spalten der Mitarbeits-Kategorien in diesem Quartal – also genau das,
+  // was „Quartal abschließen" geschrieben hat und was in die Note eingeht.
+  async function mitarbeitNotenVonQuartal(k, quartal) {
+    if (!quartal) return {};
+    const [kats, leistungen, noten] = await Promise.all([
+      Store.Kategorien.byKlasse(k.id), Store.Leistungen.byKlasse(k.id), Store.Noten.byKlasse(k.id)
+    ]);
+    const katIds = kats.filter((c) => c.quelle === "mitarbeit" &&
+      c.art !== "schriftlich" && (c.anzeige || "note") === "note").map((c) => c.id);
+    const leistungIds = leistungen
+      .filter((l) => l.quartal === quartal && katIds.indexOf(l.kategorieId) !== -1)
+      .map((l) => l.id);
+    const map = {};
+    noten.forEach((n) => {
+      if (leistungIds.indexOf(n.leistungId) !== -1 && n.wert !== null && n.wert !== undefined) {
+        map[n.schuelerId] = n.wert;
+      }
+    });
+    return map;
+  }
+
   async function TabAuswertung(k) {
     const ktx = await auswertungKontext(k);
     const schueler = ktx.schueler, ausw = ktx.ausw;
     const stundenGefiltert = ktx.stunden, eigeneSchwellen = ktx.eigeneSchwellen;
     const q = quartalFilter("auswertungQuartal");
+    const mss = Calc.istMSS(k);
+    const uebertragen = await mitarbeitNotenVonQuartal(k, q);
 
     const rangeBtns = [["alle", "Gesamt"], ["30", "30 Tage"], ["7", "7 Tage"]].map(([id, l]) =>
       '<button class="tab ' + (state.auswertungRange === id ? "active" : "") + '" data-action="ausw-range" data-range="' + id + '">' + l + "</button>"
     ).join("");
+
+    // Abgeschlossenes Quartal: Stunden und Ereignisse bleiben stehen, die
+    // Ansicht wird nur grau und gesperrt (kein Tracker, kein neuer Abschluss).
+    const abschluss = q !== null ? Store.abschlussVon(k, q) : null;
 
     const rows = schueler.map((s) => {
       const a = ausw[s.id];
       const typen = a ? Store.EVENT_TYPES.filter((t) => a.typen[t.id]).map((t) =>
         '<span class="chip" style="background:' + t.farbe + '22;color:' + t.farbe + '">' + (a.typen[t.id]) + "× " + UI.esc(t.kurz) + "</span>").join(" ") : "";
       const note = a ? a.notenvorschlag : null;
+      const hatVorschlag = note !== null && note !== undefined;
+      // Der Tracker rechnet immer auf der 1–6-Skala. Angezeigt wird der
+      // Vorschlag so, wie ihn der Abschluss-Dialog vorbelegt: als echte Note
+      // (2+, 3, 4-) bzw. in der Oberstufe als MSS-Punkte (offizielle
+      // Umrechnung). Der genaue Ø steht im Tooltip und in der Herleitung.
+      const gerundet = hatVorschlag ? Calc.tendenznote(note, false) : null;
+      const vorschlagText = !hatVorschlag ? "–"
+        : mss ? String(Calc.noteZuMssPunkte(gerundet)) : Calc.formatTendenz(gerundet, false);
+      const eingetragen = uebertragen[s.id];
       return "<tr>" +
         "<td><strong>" + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
-        '<td class="num">' + (a ? a.anzahl : 0) + "</td>" +
+        '<td class="num">' + (a ? a.meldungen : 0) + "</td>" +
         '<td class="num">' + (a ? a.punkte : 0) + "</td>" +
         '<td class="num">' + (a ? a.nenner : 0) + "</td>" +
-        '<td class="num">' + (note !== null && note !== undefined ? Calc.formatNote(note, 1) : "–") + "</td>" +
         "<td>" + (a && a.letzte ? UI.relZeit(a.letzte) : '<span class="danger-text">nie</span>') + "</td>" +
-        '<td class="num">' + (note !== null && note !== undefined
-          ? '<button class="note-badge tappable" data-action="ausw-herleitung" data-sid="' + s.id + '" title="So kommt der Vorschlag zustande" style="background:' + Calc.noteFarbe(note) + '">' + Calc.formatNote(note, 1) + "</button>"
+        '<td class="num">' + (hatVorschlag
+          ? '<button class="note-badge tappable" data-action="ausw-herleitung" data-sid="' + s.id +
+            '" title="Ø der Stundennoten: ' + Calc.formatNote(note, 1) +
+            (mss ? " (Note " + Calc.formatTendenz(gerundet, false) + ")" : "") +
+            ' – tippen für die Herleitung" style="background:' +
+            (mss ? Calc.noteFarbe(Calc.noteZuMssPunkte(gerundet), true) : Calc.noteFarbe(note)) + '">' +
+            vorschlagText + "</button>"
           : "–") + "</td>" +
+        '<td class="num">' + (eingetragen !== undefined
+          ? '<span class="note-badge" style="background:' + Calc.noteFarbe(eingetragen, mss) + '">' +
+            Calc.formatTendenz(eingetragen, mss) + "</span>"
+          : '<span class="muted">–</span>') + "</td>" +
         "<td>" + typen + "</td>" +
       "</tr>";
     }).join("");
+
+    const hinweis = abschluss
+      ? '<div class="hint-box">🔒 <strong>' + q + ". Quartal abgeschlossen</strong> am " + UI.datumKurz(abschluss.datum) +
+        ". Die Noten stehen in der Notenübersicht; Stunden und Meldungen bleiben zur Ansicht erhalten. " +
+        "Für dieses Quartal lässt sich kein Tracker starten – dafür erst den Abschluss aufheben.</div>"
+      : '<p class="muted">Stundennoten-Modell: jede gehaltene Stunde bekommt aus ihren Punkten eine Note (Schwellen' +
+        (eigeneSchwellen ? " dieser Klasse" : " aus den Einstellungen") + "); der Vorschlag ist der Ø dieser Stundennoten. " +
+        "Leistungsverweigerung = 6 für die Stunde, Tage mit Abwesenheit zählen nicht. " +
+        stundenGefiltert.length + " Stunde" + (stundenGefiltert.length === 1 ? "" : "n") + " im gewählten Zeitraum. " +
+        "Tippe auf einen Vorschlag, um die Rechnung zu sehen.</p>";
 
     return (
       '<div class="hstack wrap" style="margin-bottom:var(--gap)">' +
@@ -782,17 +918,19 @@
         '<div class="tabs" style="margin:0">' + quartalTabsHTML("auswertungQuartal", "ausw-hj") + "</div>" +
         '<div class="grow"></div>' +
         '<button class="btn small" data-action="edit-schwellen">Schwellen' + (eigeneSchwellen ? " (eigene)" : "") + "</button>" +
-        (q !== null ? '<button class="btn small" data-action="quartal-abschliessen">Quartal abschließen</button>' : "") +
+        (q === null ? "" : abschluss
+          ? '<button class="btn small" data-action="abschluss-aufheben" data-q="' + q + '">Abschluss aufheben</button>'
+          : '<button class="btn small" data-action="quartal-abschliessen">Quartal abschließen</button>') +
         '<button class="btn small" data-action="export-events">Mitarbeit-CSV</button>' +
       "</div>" +
-      '<p class="muted">Stundennoten-Modell: jede gehaltene Stunde bekommt aus ihren Punkten eine Note (Schwellen' +
-        (eigeneSchwellen ? " dieser Klasse" : " aus den Einstellungen") + "); der Vorschlag ist der Ø dieser Stundennoten. " +
-        "Leistungsverweigerung = 6 für die Stunde, Tage mit Abwesenheit zählen nicht. " +
-        stundenGefiltert.length + " Stunde" + (stundenGefiltert.length === 1 ? "" : "n") + " im gewählten Zeitraum. " +
-        "Tippe auf einen Vorschlag, um die Rechnung zu sehen.</p>" +
-      '<div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Meld.</th><th class="num">Punkte</th><th class="num">Stunden</th><th class="num">Noten-Ø</th><th>Zuletzt</th><th class="num">Vorschlag</th><th>Aufschlüsselung</th></tr></thead><tbody>' + rows + "</tbody></table></div>"
+      hinweis +
+      '<div class="table-wrap' + (abschluss ? " gesperrt" : "") + '"><table><thead><tr>' +
+        "<th>Name</th><th class=\"num\">Meld.</th><th class=\"num\">Punkte</th><th class=\"num\">Stunden</th>" +
+        "<th>Zuletzt</th><th class=\"num\">Vorschlag" + (mss ? " (Punkte)" : "") + "</th>" +
+        '<th class="num" title="Die beim Quartalsabschluss übertragene Note – sie geht in die Epochalnote ein">Note</th>' +
+        "<th>Aufschlüsselung</th></tr></thead><tbody>" + rows + "</tbody></table></div>"
     );
   }
 
-  Object.assign(global.Views, { ViewHome, ViewKlasse, auswertungKontext });
+  Object.assign(global.Views, { ViewHome, ViewKlasse, auswertungKontext, mitarbeitNotenVonQuartal });
 })(window);

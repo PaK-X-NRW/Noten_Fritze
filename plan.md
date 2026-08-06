@@ -1,134 +1,126 @@
-# Plan: Noten-Fritze – Feature-Paket (Quartale, Verweigerung, Exporte, Fixes)
+# Auftrag für die nächste Sitzung
 
-Stand nach Rückfragen. Entscheidungen des Nutzers:
-- **Leistungsverweigerung**: Stundennoten-Modell (jede Stunde bekommt eine Note aus ihren Punkten via Schwellen, Verweigerung = glatte 6, Mitarbeitsnote = Ø der Stundennoten)
-- **Quartale**: ganze Gruppe „Sonstige Leistungen" wird quartalsweise gerechnet (HJ-Sonstige = 50 % Ø(Q1) + 50 % Ø(Q2))
-- **HA-Modus „3× vergessen = Note 6"**: Note geht in Kategorie „Mündliche Mitarbeit" (wird angelegt, falls nicht vorhanden), Zählung pro Quartal
-- **Demo-Daten**: gemischt (Q1 abgeschlossen/übertragen, Q2–Q4 laufend)
-
-Hinweis: Der Plan-Modus erlaubt nur diese Plan-Datei. **Schritt 0** kopiert den Plan nach `plan.md` im Repo, damit er dort festgehalten ist.
+Diese Datei zum Start einer neuen KI-Sitzung komplett als Prompt einfügen.
 
 ---
 
-## Datenmodell & Migration (store.js, SCHEMA_VERSION 7 → 8)
+# Einleitung
 
-DB_VERSION bleibt 3 (keine neuen Stores/Indizes nötig).
+Du arbeitest am Projekt Noten-Fritze: eine 100 % lokale, offline-fähige PWA zur
+Noten- und Mitarbeitsverwaltung für Lehrkräfte (Vanilla HTML/CSS/JS, klassische
+`<script>`-Tags, keine ES-Module, keine Frameworks/CDNs, Daten ausschließlich in
+IndexedDB, iPad-first).
 
-- Neues Feld `quartal` (1–4) auf `noten`, `ereignisse`, `stunden`.
-  Ableitung aus Datum: Aug–Okt → 1, Nov–Jan → 2, Feb–Apr → 3, Mai–Jul → 4
-  (neue Helfer `Store.quartalAusDatum(datum)`, `Store.halbjahrAusQuartal(q)`).
-  Das Feld `halbjahr` bleibt auf den Datensätzen (Kompatibilität), wird aber nicht mehr gelesen.
-- Migrationsschritt `8`: allen vorhandenen Noten/Ereignissen/Stunden ohne `quartal` das Quartal aus ihrem Datum zuweisen; `settings.aktuellesQuartal` aus dem heutigen Datum setzen; `settings.haModus = "punkte"` persistieren.
-- `DEFAULT_SETTINGS`:
-  - `aktuellesHalbjahr` → ersetzt durch `aktuellesQuartal` (1–4). `aktuellesHalbjahr` bleibt als Feld erhalten (Alt-Daten), ist aber kein UI-Setting mehr.
-  - neu `haModus: "punkte"` (`"punkte"` = bisherige Punktewertung | `"note6"` = ab der 3. vergessenen HA je Quartal eine Note 6, HA geben dann keine Punkte).
-- `EVENT_TYPES`:
-  - Kachel-Typen bekommen `icon`: einfach `★`, gut `★★`, sehrgut `★★★`, stoerung `⚡`.
-  - Neuer Typ `{ id: "verweigerung", label: "Leistungsverweigerung", kurz: "Verweigerung", farbe: "#4a148c", defaultPunkte: 0, heatDelta: 0, positiv: false, aufKachel: false }` (Erfassung nur über Tracker-Modus).
-- `neueNote` / `neuesEreignis` / `neueStunde` setzen `quartal` (und weiterhin `halbjahr`, abgeleitet).
-- Klasse: kein neues Feld nötig (abgeschlossene Quartale erkennt man an fehlenden Ereignissen/Stunden; die übertragenen Noten tragen das Quartal).
+Lies vor jeder Änderung `AGENTS.md` vollständig – dort stehen Architektur,
+Konventionen und Fallstricke (u. a.: `APP_VERSION` in `js/version.js` bei jeder
+Änderung an gecachten Dateien erhöhen, `data-action` + Action-Map statt onclick,
+Nutzerdaten mit `UI.esc()` escapen, `render()` nach jeder Mutation).
 
-## Calc-Umbau (calc.js)
+Arbeite minimal und fokussiert, keine ungefragten Refactorings oder Commits.
+UI-Texte, Kommentare und Commit-Messages auf Deutsch.
 
-### 1. Mitarbeit: Stundennoten-Modell (ersetzt Punkte-Ø-Modell)
-`auswertungMitarbeit(ereignisse, settings, opts)` wird umgebaut:
-- Pro Schüler und **gezählter Stunde** (Stunden im Zeitraum/Quartal, Tage mit Abwesenheit weiterhin ausgenommen):
-  - `punkteDerStunde` = Summe der Event-Punkte dieser Stunde. Stunde ohne Ereignis = 0 Punkte (zählt weiterhin mit).
-  - Enthält die Stunde ein `verweigerung`-Event des Schülers → **Stundennote 6**; alle Meldungs-Events dieser Stunde werden ignoriert. `keinehausaufgabe` zählt weiter (s. HA-Modus).
-  - Sonst: `note = punkteZuNote(punkteDerStunde, schwellen)` – dieselben Schwellen wie bisher, nur jetzt pro Stunde statt auf den Gesamt-Ø.
-- `notenvorschlag` = Ø der Stundennoten (1 NK, z. B. 3,4). Im HA-Modus `"note6"` fließen `keinehausaufgabe`-Punkte nie ein.
-- Rückgabe zusätzlich: `stundenNoten` (Liste {stundeId, note, punkte, verweigerung}) für den Herleitungs-Dialog; aggregierte Felder (`anzahl`, `typen`, `letzte`, `stundenGezaehlt`) bleiben für die Tabelle erhalten.
-- Effekt: Schwellen-Bedeutung ändert sich von „Ø Punkte/Stunde" zu „Punkte in einer Stunde" – UI-Texte in Einstellungen/Schwellen-Dialog/Herleitung entsprechend anpassen.
+# Vorgehen: erst planen, dann bauen
 
-### 2. Notenberechnung: Quartale
-`berechneSchueler(kategorien, noten, klasse, rundung, filter)` – letzter Parameter wird:
-`1|2|3|4` (Quartal) | `"hj1"` | `"hj2"` | `null` (Jahr). Noten ohne `quartal`-Feld fließen immer ein (Kompatibilität).
-- Quartal-Filter: nur Noten dieses Quartals (bisherige Logik, nur Feldname neu).
-- Halbjahr/Jahr: **schriftlich** unverändert über den ganzen Zeitraum; **sonstige** = Mittel der Quartals-Durchschnitte (Q1 & Q2 je 50 % bei HJ1, fehlende Quartale werden robust übersprungen → vorhandenes zählt 100 %; Jahr = Ø der bis zu vier Quartals-Ø).
-- `zeugnisErgebnis`, `jahresnote` unverändert.
+Fang bitte im Plan-Modus an und ändere noch nichts:
 
-## Navigation: Quartale statt Halbjahre (views.core.js + alle Nutzer)
+1. Sieh dir die betroffenen Stellen an und stell mir deine offenen Fragen.
+2. Leg mir den Plan in Alltagssprache vor: Was ändert sich in der App? Welche
+   Dateien fasst du an? Was passiert mit meinen vorhandenen Daten? In welcher
+   Reihenfolge gehst du vor? Wo bist du unsicher?
+3. Warte auf mein ausdrückliches OK. Erst danach änderst du etwas.
 
-- `state.notenHalbjahr` → `state.notenQuartal`, `state.auswertungHalbjahr` → `state.auswertungQuartal`; `hjFilter` → `quartalFilter` (liefert 1–4 | null); `state.notenSpalten`-Key analog.
-- `hjTabsHTML` → `quartalTabsHTML`: Tabs **1. Q · 2. Q · 3. Q · 4. Q · Jahr** (Jahr bleibt, dort stehen die Halbjahres- und Jahreszeugnis-Ergebnisse).
-- Betroffene Views: TabNoten, TabAuswertung, ViewBesprechung (Tabs + Filter), cellDialog/studentDetailDialog (Filter), Einstellungen (Select „Aktuelles Quartal" 1–4 ersetzt „Aktuelles Halbjahr"; beim Wechsel Filter-Defaults zurücksetzen).
-- Tracker/ neue Daten: `e.halbjahr = ...`-Zeilen werden zu `e.quartal = settings.aktuellesQuartal` (+ halbjahr abgeleitet).
+# So sollst du mit mir sprechen
 
-## Notenübersicht (views.home-klasse.js)
+Ich bin kein Entwickler, sondern Lehrer. Bitte richte dich danach:
 
-- **Quartal-Ansicht** (Tab 1. Q–4. Q): wie bisherige Halbjahr-Ansicht, Kategorien + Sammelspalten Schriftlich/Sonstige/Gesamt/Zeugnis für dieses Quartal.
-- **Jahr-Ansicht** (`jahresSpalten`): neue Spalten **„Sonstige 1. Q" … „Sonstige 4. Q"** (Zeugnis-Badge des Quartals-Sonstige-Ø, `grp-sonstige`), danach wie bisher HJ1/HJ2 (schriftl./sonstige/Zeugnis) und Jahr. Die HJ-Sonstige kommt aus der 50/50-Quartalsrechnung (s. Calc).
-- **Fix: Spalten ziehen auf iPad** (`spaltenZiehen`):
-  - `th.zieh` bekommt `touch-action: none` + `-webkit-touch-callout: none` (Gesten ab dem Kopf gehören komplett dem JS; vertikales Scrollen bleibt über den Tabellenkörper möglich).
-  - `ev.preventDefault()` im `pointerdown`; Move/Up/Cancel-Listener während des Ziehens auf `document` statt nur per Pointer-Capture auf dem `<th>` (Capture bleibt als Bonus), damit iOS den Drag nicht per `pointercancel`/Scroll-Übernahme abwürgt.
-  - ⚠️ Auf echtem iPad hier nicht verifizierbar – Nutzer-Test erforderlich.
+- Frag lieber einmal zu viel als zu wenig. Wenn mein Wunsch mehrdeutig ist,
+  mehrere Umsetzungen denkbar sind oder du eine Annahme treffen müsstest:
+  stell mir vorher eine Frage, statt einfach loszulegen.
+- Stell deine Fragen in kleinen Häppchen, jeweils mit einer kurzen Begründung,
+  warum du das wissen willst und was der Unterschied für mich praktisch
+  bedeutet. Am liebsten mit konkreten Auswahlmöglichkeiten („Soll A passieren
+  oder B?“) statt offener Fragen.
+- Kein Fachjargon. Erkläre alles aus Sicht der App und des Schulalltags, nicht
+  aus Sicht des Codes. Wenn ein Fachbegriff unvermeidbar ist, erkläre ihn in
+  einem Halbsatz.
+- Beschreibe Änderungen so, wie ich sie sehe: Was ändert sich auf dem
+  Bildschirm? Wo muss ich hinklicken? Was passiert mit meinen bisherigen Daten?
+- Bevor du etwas Größeres umbaust oder löschst: erst kurz beschreiben, was du
+  vorhast, und meine Zustimmung abwarten.
+- Sag mir am Ende, wie ich es selbst prüfen kann – Schritt für Schritt, z. B.
+  „Klasse 8b öffnen → Reiter Mitarbeit → …“. Weise mich darauf hin, wenn ich die
+  App neu laden muss, damit die Änderung ankommt.
+- Sei ehrlich, wenn etwas nicht funktioniert hat, unklar ist oder du etwas nicht
+  geprüft hast. Lieber ein klarer Hinweis als ein zu optimistisches „fertig“.
 
-## Tracker (views.tracker.js, css)
+# Meine Aufgabe: die Oberstufe in einer Ansicht
 
-- **Piktogramme**: Kachel-Buttons zeigen `icon` (★ / ★★ / ★★★ / ⚡) statt Kurztext; Legende oben zeigt Icon + Label + Punkte.
-- **Kompakte Kacheln**: `tracker-grid` bekommt je nach `plan.cols` eine Klasse: ≤6 = normal, 7–8 = `kompakt`, ≥9 = `mini`. CSS staffelt: Kachel-`min-height` (132 → ~96 → ~72 px), Padding/Gap, Namens- und Button-Schrift, `typebtn`-`min-height` (46 → ~34 → ~28 px); in `mini` wird das Σ-Badge ausgeblendet. So passen z. B. 4×9 Kacheln auf den Schirm.
-- **Neuer Modus „Leistungsverweigerung"** in der Topbar (Icon 🚫, zwischen „Abwesend" und „Keine HA"):
-  - `MODI`-Eintrag + `body.modus-verweigerung`-Farbschema (dunkles Violett, passend zur Typ-Farbe).
-  - Tap auf Kachel toggelt ein `verweigerung`-Event (mit `stundeId`, `quartal`); Kachel bekommt Badge „Verweigerung", Typ-Buttons werden deaktiviert (wie bei abwesend); erneuter Tap entfernt das Event (Undo). Zähler im Tracker-State mitführen (`t.verweigerung`).
-  - Heatmap unverändert (kein Delta).
+Ich möchte für einen Oberstufenkurs **alle fünf Kurshalbjahre in derselben
+Notenansicht** sehen: **11.1 · 11.2 · 12.1 · 12.2 · 13.1**. Heute zeigt die
+Notenübersicht immer nur ein Halbjahr einer einzelnen Klasse – ich muss also
+zwischen drei Klassen und zwei Reitern hin- und herspringen, um den Verlauf eines
+Kurses zu sehen.
 
-## Mitarbeit-Tab (views.home-klasse.js / views.dialoge.js)
+## Was heute schon da ist (Stand v1.8.2)
 
-- Tabelle an Stundennoten-Modell anpassen: Spalte „Ø/Stunde" → „Noten-Ø" (Ø der Stundennoten), Vorschlag = dieser Ø (1 NK). Punkte-Spalte bleibt als Info.
-- Herleitungs-Dialog: statt Punkte-Rechnung jetzt Verteilung der Stundennoten (z. B. „3× Note 2, 5× Note 3, 1× Note 6 (Verweigerung)") + Ø + Schwellen-Hinweis; HA-Hinweis je nach `haModus`.
-- **Button „Quartal abschließen"** (nur aktiv/sichtbar, wenn ein konkretes Quartal 1–4 gewählt ist):
-  - Dialog `quartalAbschliessenDialog`: Tabelle aller Schüler mit Notenvorschlag des gewählten Quartals, **pro Schüler editierbar** (Tendenzen erlaubt, leer = kein Übertrag für diesen Schüler); Select „Ziel-Kategorie" (sonstige Noten-Kategorien, Default „Mündliche Mitarbeit" – wird angelegt, falls nicht vorhanden).
-  - Buttons: **„CSV: Noten"** (Einzelnoten der Übertragung: Name, Quartal, Note) und **„CSV: Ereignisse"** (Rohdaten des Quartals) – vor dem Löschen; dann **„Übertragen & abschließen"** mit Bestätigungs-Warnung.
-  - Übertrag: je Schüler eine Note (Ziel-Kategorie, `quartal`, abgeleitetes `halbjahr`, Titel „Mündliche Mitarbeit n. Quartal"). Danach **Ereignisse und Stunden des Quartals dieser Klasse löschen** (Zählung startet bei 0; Abwesenheiten bleiben erhalten). Toast + render.
+- Eine **Klasse ist genau ein Schuljahr** (Feld `schuljahr`), und die
+  Schülerliste gehört zu genau dieser Klasse. 11.1 bis 13.1 sind also drei
+  Klassen mit drei getrennten Schülerlisten – die App weiß nicht, dass „Anna
+  Bauer“ in allen dreien dieselbe Person ist.
+- Ab `klassenstufe` 11 rechnet die App in **MSS-Punkten** (0–15), es gibt **keine
+  Jahresnote**, und die beiden Halbjahres-Reiter heißen nach der Klassenstufe
+  („12.1 · 12.2“).
+- Der Mitarbeits-Vorschlag wird über die **offizielle Tabelle** in Punkte
+  umgerechnet (`Calc.noteZuMssPunkte`, `Punkte = 17 − Note × 3`).
+- Die Rechenkette eines Halbjahres steckt vollständig in
+  `Calc.halbjahrErgebnis`; die Spalten der Notenübersicht entstehen in
+  `halbjahrSpalten` (`js/views.home-klasse.js`).
+- `Schuljahr-Schema.md` beschreibt den kompletten Ablauf eines Schuljahrs mit
+  Beispielzahlen – auch den Oberstufen-Teil. Bitte vorher lesen.
 
-## HA-Modus wählbar (store/calc/tracker/einstellungen)
+## Der vorgeschlagene Weg (bitte prüfen, nicht blind übernehmen)
 
-- Einstellungen: Select „Vergessene Hausaufgaben werten": „Punkteabzug in der Mitarbeit" (`punkte`, bisheriges Verhalten) | „Ab der 3. je eine Note 6" (`note6`).
-- `note6`: `keinehausaufgabe` gibt keine Mitarbeits-Punkte (Calc). Beim Anlegen eines `keinehausaufgabe`-Events (Tracker-Modus „Keine HA") wird die Anzahl dieses Typs im laufenden Quartal gezählt: bei jeder 3. (3., 6., 9. …) automatisch eine **Note 6** in die Kategorie „Mündliche Mitarbeit" (per Name suchen, sonst anlegen; Titel „3× Hausaufgaben vergessen (n. Quartal)", `quartal` gesetzt) + Toast. Entfernen eines HA-Vermerks löscht keine bereits erzeugte Note.
+Aus einer früheren Sitzung stammt dieser Vorschlag – halte ihn für einen
+Ausgangspunkt, nicht für eine Vorgabe:
 
-## Exporte (csv.js, store.js, views)
+1. **Kurse verknüpfen:** Beim Anlegen einer Klasse eine Auswahl „Fortsetzung von
+   …“ anbieten. Die Schülerliste wird übernommen, und die Personen bleiben über
+   die Schuljahre hinweg verknüpft.
+2. **Neue Ansicht „Oberstufe“:** eine rein lesende Tabelle, je Person eine Zeile
+   mit den Endnoten der fünf Kurshalbjahre (11.1 … 13.1) und einer
+   Zusammenfassung.
+3. Die einzelnen Kurshalbjahre bleiben eigene Klassen und werden weiter wie
+   bisher gepflegt.
 
-- **`CSV.speichern(dateiname, inhalt, mime)`** – dreistufig:
-  1. `showDirectoryPicker` (Chrome/Edge Desktop): Ordner einmal in den Einstellungen wählen, Handle in IndexedDB (`einstellungen`) ablegen, Berechtigung bei Bedarf erneuern → alle Exporte landen direkt dort.
-  2. Sonst Web Share API mit Dateien (`navigator.canShare({files})`, iPad-Safari): Teilen-Blatt → „In Dateien sichern" erlaubt dort die Ordnerwahl.
-  3. Fallback: klassischer Download (Downloads-Ordner).
-  - ⚠️ Ehrliche Einschränkung: iPad-Safari hat keinen echten Ordner-Picker für Downloads; Stufe 2 ist der iPad-Weg.
-  - Einstellungen: neue Card „Export-Ordner" (Status + „Ordner wählen"-Button nur, wo die API existiert). Alle bestehenden Exporte (CSV + JSON-Backup) auf `CSV.speichern` umstellen.
-- **Klassen-Export** (Button ⤓ auf der Home-Kachel + in der Klassen-Topbar): JSON `{ app: "noten-fritze-klasse", appVersion, exportedAt, klasse, schueler, kategorien, noten, ereignisse, stunden, abwesenheiten, sitzplan }` einer einzelnen Klasse (z. B. zur Übergabe an Kolleg/innen).
-- **Klassen-Import** (Home-Topbar „Klasse importieren"): Datei validieren; existiert die Klassen-ID bereits → Dialog „Ersetzen" (bestehende Klasse kaskadierend löschen, dann importieren) oder „Als Kopie importieren" (alle IDs neu vergeben, Referenzen inkl. `sitzplan.seats[].schuelerId` ummappen).
-- CSV-Anpassungen: `exportEinzelnoten` Spalte „Halbjahr" → „Quartal"; `exportNoten` um Spalten „Sonstige Q1–Q4" ergänzen; `exportEreignisse` unverändert.
+Ausdrücklich **verworfen** wurde die Alternative, alles in *eine* Klasse mit zehn
+Quartalen zu pressen: Das würde die gesamte Quartalslogik umbauen und auch die
+Sekundarstufe I gefährden.
 
-## Home: Klasse löschen (views.home-klasse.js, views.js)
+## Bitte kläre mit mir vorab unter anderem
 
-- 🗑-Button oben rechts auf jeder Klassen-Kachel (eigene `data-action="delete-class"`, greift vor dem Karten-`open-class` durch `closest`). Bestätigungsdialog („… und alle Noten/Ereignisse/Stunden werden gelöscht"), dann `Store.Klassen.remove(id)` (Kaskade existiert bereits) + render. Gilt für jede Klasse, auch die Demo-8b.
+- Soll die Oberstufen-Ansicht ein **eigener Reiter/Bereich** sein oder eine
+  dritte Auswahl neben „1. Halbjahr / 2. Halbjahr“ in der Notenübersicht?
+- Soll man in dieser Ansicht **nur lesen** oder auch Noten eintragen können?
+- Wie werden die Personen zugeordnet: über die Übernahme der Schülerliste beim
+  Anlegen der Folgeklasse, über den Namen, oder soll ich eine Zuordnung von Hand
+  anbieten (falls jemand dazukommt oder den Kurs verlässt)?
+- Was passiert mit Personen, die **nicht in allen fünf Halbjahren** dabei sind?
+- Soll zusätzlich etwas ausgerechnet werden (Durchschnitt über die
+  Kurshalbjahre, Summe der Punkte, Einbringung fürs Abitur) – oder erst einmal
+  nur die fünf Endnoten nebeneinander?
+- Brauchst du dafür eine **Beispielklasse** wie „Mathematik LK 12“, nur über drei
+  Schuljahre hinweg?
 
-## Demo-Daten 8b (store.js `seedDemoData`)
+## Was unangetastet bleiben soll
 
-Realistischer „Stand Ende Schuljahr" (Schuljahr 2025/26, heute = Anfang August 2026):
-- 14 Schüler mit festen Leistungsprofilen (stark/mittel/schwach), damit Noten plausibel streuen statt rein zufällig.
-- Kategorien wie bisher (Klassenarbeit Gew 2, Test Gew 1, Mündliche Mitarbeit Gew 2, Hausaufgaben als `fehlendeHA`).
-- Stunden: Di + Do jede Schulwoche Aug 2025 – Jul 2026 (beendet, 45 Min), Quartale aus dem Datum.
-- **Q1 abgeschlossen**: keine Q1-Ereignisse/Stunden; stattdessen übertragene Noten in „Mündliche Mitarbeit" mit `quartal: 1`, Titel „Mündliche Mitarbeit 1. Quartal".
-- **Q2–Q4 laufend**: Stunden + Ereignisse mit profilgesteuerter Verteilung; mehrere Schüler mit ≥3 vergessenen HA pro Quartal (testet den HA-Modus); 1–2 `verweigerung`-Events; vereinzelte Abwesenheiten.
-- Schriftliche Noten über alle Quartale verteilt (KA Sep/Dez/Mär/Jun, Tests dazwischen).
+- Die Sekundarstufe-I-Ansicht (Halbjahre, Epochalnoten, Jahresnote).
+- Die Rechenkette in `calc.js` (`halbjahrErgebnis`, Drittel- und Zeugnisskala,
+  MSS-Umrechnung) und der Mitarbeits-Tracker.
+- Das Datenmodell bestehender Klassen: Vorhandene Noten dürfen sich nicht
+  verändern und nichts darf gelöscht werden.
 
-## Version, Doku, Verifikation
+## Zum Schluss
 
-- `APP_VERSION` 1.4.0 → **1.5.0** (MINOR: neue Funktionen; Pflicht wegen Service-Worker-Cache). Keine neuen Dateien → `ASSETS` unverändert.
-- `AGENTS.md` + `README.md` aktualisieren: Quartale statt Halbjahre, Stundennoten-Modell, Verweigerung, `haModus`, Klassen-Export, Export-Ordner, Kompakt-Tracker.
-- Verifikation manuell: Browser-Konsole fehlerfrei; Flows durchklicken: Spalten ziehen (Maus; iPad durch Nutzer), Tracker-Modi inkl. Verweigerung + Undo, Quartal abschließen (mit CSV), HA-Modus beide Varianten, Klasse löschen/exportieren/importieren (Ersetzen + Kopie), Demo-Daten prüfen, Zeugnisrechnung HJ/Jahr gegenrechnen (50/50-Sonstige).
-
-## Umsetzungsreihenfolge
-
-1. Plan nach `plan.md` kopieren; `APP_VERSION` erhöhen
-2. store.js: `quartal`-Feld, Migration 8, Settings, EVENT_TYPES (Icons + Verweigerung)
-3. calc.js: Stundennoten-Modell + Quartals-Filter/50-50-Sonstige
-4. views.core.js + Navigation/Filter auf Quartale (home-klasse, besprechung, einstellungen, dialoge)
-5. Notenübersicht: Quartalsspalten + iPad-Drag-Fix
-6. Tracker: Icons, Kompakt-Modi, Verweigerungs-Modus
-7. Mitarbeit-Tab: Stundennoten-Anzeige, Herleitung, „Quartal abschließen"-Dialog
-8. HA-Modus (Einstellung + Auto-Note-6)
-9. Exporte: `CSV.speichern`, Export-Ordner, Klassen-Export/-Import, CSV-Spalten
-10. Home: Klasse löschen
-11. Demo-Daten 8b
-12. Doku (AGENTS.md/README.md), finale Verifikation
+Sag mir am Ende ehrlich, was du geprüft hast und was nicht (du kannst die App
+nicht selbst anklicken), und gib mir einen Klickpfad zum Nachprüfen inklusive
+Hinweis aufs Neuladen.

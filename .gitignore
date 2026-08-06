@@ -10,3 +10,6 @@
 # Übersetzungsausgaben des .NET-Projekts
 obj/
 bin/
+
+# Eigene Notizzettel / Zwischenablage
+tmp/

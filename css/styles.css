@@ -181,6 +181,15 @@ body {
 
 /* ---------- Tabellen ---------- */
 .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); }
+/* Abgeschlossenes Quartal im Mitarbeit-Tab: nur noch zum Nachschauen.
+   Bewusst ohne pointer-events: none, damit die Herleitung antippbar bleibt. */
+.table-wrap.gesperrt { opacity: .55; filter: grayscale(1); }
+/* Hinweisleiste über einer gesperrten Ansicht */
+.hint-box {
+  margin: 0 0 var(--gap); padding: 10px 14px; border-radius: var(--radius);
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--text-muted); font-size: 15px;
+}
+.hint-box strong { color: var(--text); }
 table { border-collapse: collapse; width: 100%; font-size: 16px; }
 th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
 th { background: var(--surface-2); font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); position: sticky; top: 0; }
@@ -236,11 +245,39 @@ tbody td.grp-zeugnis.summe-stark { background: var(--grp-zeugnis-stark); }
 .noten-tab td.zelle:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .noten-tab td.zelle.editiert { padding: 0; }
 .noten-tab .zelle-input {
-  width: 100%; min-width: 56px; box-sizing: border-box;
-  padding: 8px 6px; margin: 0;
+  width: 100%; min-width: 48px; box-sizing: border-box;
+  /* Bewusst flacher als normale Formularfelder (kein var(--tap)): Das Feld
+     sitzt in einer Tabellenzelle, die Zeilenhöhe soll beim Wechsel nicht
+     springen. */
+  min-height: 0; height: 34px; line-height: 34px;
+  padding: 0 4px; margin: 0;
   border: 2px solid var(--accent); border-radius: 0;
-  font: inherit; text-align: center; background: var(--surface);
+  font: inherit; font-size: 15px; text-align: center; background: var(--surface);
 }
+
+/* Nummernpad an der Zelle: Noteneingabe per Fingertipp, ohne dass auf dem iPad
+   die Bildschirmtastatur aufgeht (das Eingabefeld trägt inputmode="none").
+   Liegt im body mit position:fixed, damit es nicht vom Tabellen-Scroll
+   abgeschnitten wird; über der Tabelle, aber unter Modal (100) und Toast (200). */
+.notenpad {
+  position: fixed; z-index: 60; padding: 8px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0, 0, 0, .2);
+}
+.notenpad .pad-grid { display: grid; grid-template-columns: repeat(3, 58px); gap: 6px; }
+.notenpad.mss .pad-grid { grid-template-columns: repeat(4, 52px); }
+.notenpad .pad-btn {
+  min-height: var(--tap); padding: 0;
+  font: inherit; font-size: 17px; font-weight: 600;
+  color: var(--text); background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  cursor: pointer; touch-action: manipulation;
+  user-select: none; -webkit-user-select: none;
+}
+.notenpad .pad-btn:active { background: var(--accent-soft); border-color: var(--accent); }
+.notenpad .pad-fuss { display: flex; gap: 6px; margin-top: 6px; }
+.notenpad .pad-fuss .pad-btn { flex: 1; font-size: 15px; font-weight: 500; }
+.notenpad .pad-btn.fertig { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .noten-tab th.zieh { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .noten-tab.spalten-ziehen { user-select: none; -webkit-user-select: none; }

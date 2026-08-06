@@ -72,6 +72,7 @@ Sie können die App als PWA installieren („Zum Home-Bildschirm hinzufügen") u
 klassen        { id, name, schuljahr, fach, typ('hauptfach'|'nebenfach'),
                  klassenstufe(5..13, null=Sek.I), anteilSchriftlich, anteilSonstige,
                  mitarbeitSchwellen(null=global),
+                 abgeschlosseneQuartale[{quartal(1..4), datum}],
                  notizen, createdAt, updatedAt, lastOpenedAt }
 schueler       { id, klasseId, vorname, nachname, bemerkung, sortIndex, ... }
                  (sortIndex = manuelle Reihenfolge; angezeigt wird je nach
@@ -110,7 +111,7 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
   Sitzplatz-Zuweisung); das Löschen einer Kategorie oder einer Spalte nimmt die
   darin erfassten Noten mit.
 - **App-Version:** `APP_VERSION` in `js/version.js` (Schema `MAJOR.MINOR.PATCH`,
-  aktuell **1.7.3**) ist die sichtbare Programmversion: angezeigt unter
+  aktuell **1.8.2**) ist die sichtbare Programmversion: angezeigt unter
   Einstellungen → Über, Name des Service-Worker-Caches, Feld `appVersion` im
   JSON-Backup. Sie wird von Hand gepflegt und ist unabhängig von den beiden
   internen Zählern unten.
@@ -140,7 +141,8 @@ stecken als Epochalnoten in der Tabelle. Die Kette (`Calc.halbjahrErgebnis`):
    Kategorien über das ganze Halbjahr, auf Drittel gerundet.
 5. **Zeugnisnote:** `anteilSchriftlich %` · schriftlich + `anteilSonstige %` ·
    sonstige, auf die Zeugnisskala gerundet (ganze Note, einzige Tendenz 4-).
-6. **Jahresnote** (nur im 2. Halbjahr): aus beiden Halbjahres-Zeugnisnoten.
+6. **Jahresnote** (nur im 2. Halbjahr, **nicht** in MSS-Klassen): aus beiden
+   Halbjahres-Zeugnisnoten.
 
 Innerhalb einer Gruppe gilt weiter die Zwei-Ebenen-Gewichtung: erst der
 Kategorie-Ø (Durchschnitt der Einzelnoten), dann der über `gewichtung`
@@ -189,10 +191,24 @@ inkl. der 4- -Tendenz.
 
 Bewusst **ausgenommen** bleibt der Mitarbeits-Tracker: Das Stundennoten-Modell
 und die Notenschwellen (Abschnitt 5) rechnen intern weiterhin auf der
-1–6-Skala, da sie nur eine Vorschlags-Heuristik sind. Beim „Quartal
-abschließen" trägt die Lehrkraft den tatsächlichen MSS-Punktwert für
-Kursklassen deshalb selbst ein; der 1–6-Ø der Stundennoten dient dort nur noch
-als Orientierung, ohne automatische Umrechnung.
+1–6-Skala, da sie nur eine Vorschlags-Heuristik sind. Angezeigt und beim
+„Quartal abschließen" vorbelegt wird der Vorschlag in Kursklassen aber als
+**MSS-Punkte** – umgerechnet über die offizielle Tabelle:
+
+| Note | 1+ | 1 | 1- | 2+ | 2 | 2- | 3+ | 3 | 3- | 4+ | 4 | 4- | 5+ | 5 | 5- | 6 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **Punkte** | 15 | 14 | 13 | 12 | 11 | 10 | 9 | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+
+Als Formel: `Punkte = 17 − Note × 3`. Weil die Notenskala der App bei 1,0
+beginnt, sind 14 Punkte der höchste automatisch vorgeschlagene Wert; die 15
+(= 1+) trägst du bei Bedarf selbst ein. Die Herleitung (Tipp auf den Vorschlag)
+zeigt den Weg Ø → gerundete Note → Punkte.
+
+**Keine Jahresnote in der Oberstufe:** Jedes Kurshalbjahr ist eine eigene
+Endnote. In MSS-Klassen entfällt die Spalte „Zeugnisnote Jahr“, und die beiden
+Halbjahres-Reiter heißen nach der Klassenstufe – in einer Klasse der Stufe 12
+also **„12.1“** und **„12.2“**. Gerundet wird bei genau x,5 durchgehend auf die
+**größere** Punktzahl, bei Zwischen- wie bei Endnoten.
 
 **Quartale und Halbjahre:** Jede Spalte (und jedes Mitarbeits-Ereignis, jede
 Stunde) gehört zu einem der vier Quartale (1. Q: Aug–Okt, 2. Q: Nov–Jan,
@@ -210,9 +226,12 @@ Stunde) gehört zu einem der vier Quartale (1. Q: Aug–Okt, 2. Q: Nov–Jan,
 ### Mitarbeit in der Notenübersicht
 
 Aus dem Mitarbeitsbereich erscheint in der Notenübersicht **nur die fertige
-Mitarbeitsnote** – eine Spalte je Quartal, die beim „Quartal abschließen“ entsteht.
-Vorbelegt wird sie mit dem auf eine Note gerundeten Ø der Stundennoten (`3+`, nicht
-`2,8`); ändern lässt sie sich danach direkt in der Tabelle wie jede andere Note.
+Epochalnote** – die übertragene Mitarbeitsnote selbst hat dort **keine eigene
+Spalte**. Sie zählt unverändert mit (doppelt gewichtet, wenn die Kategorie
+Gewicht 2 hat) und ist im **Schüler-Detail** (Tipp auf den Namen) unter
+„Mitarbeitsnote je Quartal“ einzeln korrigierbar; leer speichern entfernt sie.
+Vorbelegt wird sie beim Abschluss mit dem auf eine Note gerundeten Ø der
+Stundennoten (`3+`, nicht `2,8`).
 
 - Die Ziel-Kategorie des Abschlusses ist als **Mitarbeits-Kategorie** markiert
   (`quelle: 'mitarbeit'`, im Kategorie-Dialog umstellbar). Solange für ein Quartal
@@ -279,8 +298,13 @@ Vorbelegt wird sie mit dem auf eine Note gerundeten Ø der Stundennoten (`3+`, n
 - **Mitarbeitsnote / Epochalnote (Vorschlag, Stundennoten-Modell):** Jede
   **gehaltene Stunde, in der der/die Schüler/in anwesend war**, bekommt aus ihren
   Punkten eine eigene Stundennote 1–6 (über konfigurierbare Schwellen). Stunden
-  ohne jede Meldung zählen mit 0 Punkten – Schweigen wird also sichtbar. Der
-  Vorschlag ist der **Ø der Stundennoten** (eine Nachkommastelle). Eine Stunde mit
+  ohne jede Meldung zählen mit 0 Punkten – Schweigen wird also sichtbar. Eine
+  **Doppelstunde zählt wie zwei Einzelstunden**: Ihre Punkte werden auf 45 Minuten
+  umgerechnet (3 Punkte in 90 Minuten = 1,5 je Stunde), und die daraus entstehende
+  Note zählt zweimal. Der
+  Vorschlag ist der **Ø der Stundennoten** (eine Nachkommastelle) und wird in der
+  Tabelle als echte Note gezeigt (2+, 3, 4-); daneben steht in der Spalte **Note**
+  die beim Quartalsabschluss tatsächlich übertragene Note. Eine Stunde mit
   Leistungsverweigerung zählt als glatte 6, die Meldungspunkte dieser Stunde
   entfallen. Bewusst als **Vorschlag** markiert (Mitarbeit-Tab, pro Zeitraum:
   Gesamt / 30 Tage / 7 Tage, je Quartal oder fürs Jahr filterbar); ein Tap auf den
@@ -288,17 +312,26 @@ Vorbelegt wird sie mit dem auf eine Note gerundeten Ø der Stundennoten (`3+`, n
 - **Notenschwellen:** global in den Einstellungen editierbar (Note 1–5 ab X Punkten
   **in einer Stunde**, darunter 6) und **pro Klasse überschreibbar** (Klasse →
   Mitarbeit → „Schwellen“), weil z. B. eine Biologiestunde andere Mitarbeit
-  ermöglicht als eine Deutschstunde.
+  ermöglicht als eine Deutschstunde. Voreinstellung seit 1.8.0 auf ganzen Punkten:
+  ab 3 → 1 · ab 2 → 2 · ab 1 → 3 · ab 0 → 4 · ab −1 → 5 · darunter 6. In der Praxis
+  also: sehr gute Meldung = 1, gute Meldung = 2, Wortmeldung = 3, stille Stunde = 4,
+  vergessene HA = 5, Störung = 6. (Wer eigene Werte eingestellt hatte, behält sie.)
 - **Vergessene Hausaufgaben (HA-Modus):** In den Einstellungen wählbar –
   „Punkteabzug in der Mitarbeit“ (−1 Punkt, Voreinstellung) oder „Ab der 3. je eine
-  Note 6“: Dann geben vergessene HA keine Punkte, und bei jeder 3. vergessenen HA
-  eines Quartals legt die App automatisch eine Note 6 in der Kategorie „Mündliche
-  Mitarbeit“ an (wird bei Bedarf erzeugt).
+  Note 6“: Dann geben vergessene HA keine Punkte, stattdessen hängt je drei
+  vergessener HA im Quartal eine zusätzliche **Stundennote 6** im Notenvorschlag –
+  eine eigene Notenspalte entsteht dabei nicht, die Wirkung landet über den
+  Quartalsabschluss in der Mitarbeitsnote.
 - **Quartal abschließen:** Im Mitarbeit-Tab (bei gewähltem Quartal) überträgt ein
   Dialog die Notenvorschläge als richtige Noten – pro Schüler/in editierbar, in eine
-  wählbare Ziel-Kategorie (Voreinstellung „Mündliche Mitarbeit“). Vorher lassen sich
-  die Noten und die Roh-Ereignisse als CSV sichern; danach werden die Ereignisse und
-  Stunden des Quartals gelöscht und die Zählung startet bei 0.
+  wählbare Ziel-Kategorie (Voreinstellung „Mündliche Mitarbeit“). Noten und
+  Roh-Ereignisse lassen sich dabei als CSV sichern.
+  **Gelöscht wird nichts:** Stunden und Meldungen bleiben erhalten, das Quartal
+  wird nur als abgeschlossen markiert. Der Mitarbeit-Tab zeigt es dann grau mit
+  dem Hinweis „Abgeschlossen am …“, für dieses Quartal lässt sich kein Tracker
+  mehr starten. Der Knopf **„Abschluss aufheben“** gibt es wieder frei; die
+  übertragene Note bleibt dabei stehen. Ein erneuter Abschluss ist mit den
+  bereits übertragenen Noten vorbelegt.
 
 ## 6. CSV-Schema
 
@@ -352,6 +385,11 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   **Eingabe wie in einer Tabellenkalkulation:** Zelle antippen → tippen →
   **Enter** springt eine Zeile tiefer, **Tab** eine Spalte weiter, **Esc** bricht ab;
   ein leeres Feld löscht die Note. Die Zeile wird sofort neu gerechnet.
+  Beim Antippen erscheint zusätzlich ein **Nummernpad** direkt an der Zelle
+  (`1 · 1- · 2+ … 6`, in MSS-Klassen `0–15`) mit „leeren“ und „fertig“; ein Tipp
+  darauf speichert und springt eine Zeile weiter. Die Bildschirmtastatur bleibt
+  dabei zu (das Feld ist auf `inputmode="none"` gesetzt) – eine angeschlossene
+  Tastatur funktioniert unverändert.
   „＋ Spalte“ legt eine neue Leistung an (Bezeichnung, Kategorie, Quartal, Datum) –
   voreingestellt im angezeigten Halbjahr. Ein Tipp auf den Spaltenkopf bearbeitet
   oder löscht die Spalte, ein Tipp auf den Namen zeigt die komplette Herleitung.
@@ -377,7 +415,16 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   Wertung vergessener Hausaufgaben (HA-Modus),
   Stundenplan (10 Stunden,
   täglich gleich), Mitarbeitspunkte, Notenschwellen, Heatmap-Punktverfall,
-  Export-Ordner, Backup/Restore, Demo-Daten, alles löschen.
+  Export-Ordner, Backup/Restore, Demo-Daten, Beispielklassen, alles löschen.
+- **Beispielklassen** – Knopf „Beispielklassen anlegen“ (Einstellungen) legt
+  zwei Klassen mit einem komplett durchgespielten Schuljahr an: **„9a
+  (Musterjahr)“** (Sek. I, Schulnoten) und **„Mathematik LK 12“** (Oberstufe,
+  MSS-Punkte). In beiden sind das 1.–3. Quartal abgeschlossen (Stunden und
+  Meldungen bleiben grau sichtbar), das 4. Quartal läuft noch, sodass sich
+  „Quartal abschließen“ selbst ausprobieren lässt. Anders als „Demo-Daten neu
+  laden“ funktioniert das auch bei bereits vorhandenen Klassen; gleichnamige
+  Klassen werden übersprungen. Der Ablauf ist in `Schuljahr-Schema.md` Schritt
+  für Schritt mit Beispielzahlen beschrieben.
 
 ## 8. MVP-Funktionsumfang
 
@@ -390,15 +437,21 @@ Tracker mit Stunden (anlegen/fortsetzen/beenden), Stundenplan/Restzeit
 Modi für Abwesend/Leistungsverweigerung/Keine HA/Heatmap ·
 Abwesenheiten (tageweise, beeinflusst Heatmap & Mitarbeitsnote) ·
 Mitarbeits-Auswertung nach dem Stundennoten-Modell + Notenvorschlag mit sichtbarer
-Herleitung · Quartal abschließen (Übertrag als Noten, CSV-Sicherung) ·
+Herleitung · Quartal abschließen ohne Datenverlust (Übertrag als Noten, Quartal
+danach gesperrt und wieder aufhebbar, CSV-Sicherung) ·
 HA-Modus wählbar (Punkteabzug oder Note 6 ab der 3., wirkt über den Notenvorschlag) ·
 Notenschwellen global und je Klasse editierbar · Besprechungsmodus ·
 MSS-Punkte-Skala (0–15) für Klassenstufe ab 11, umschaltbar je Klasse ·
 CSV-Export (5 Arten) mit Export-Ordner/Teilen-Blatt · CSV-Import Schüler ·
 Klassen-Export/-Import (ersetzen/als Kopie) · Klasse löschen direkt auf der
-Home-Kachel · JSON-Voll-Backup · PWA/Offline · Demo-Daten.
+Home-Kachel · JSON-Voll-Backup · PWA/Offline · Demo-Daten · Beispielklassen
+(Sek. I und Oberstufe) mit komplettem Musterjahr.
 
 **Bewusst später (klar als Ausbau markiert):**
+**Oberstufen-Gesamtansicht** über alle fünf Kurshalbjahre (11.1 · 11.2 · 12.1 ·
+12.2 · 13.1) in einer Tabelle – dafür müssen Klassen aufeinanderfolgender
+Schuljahre als ein Kurs verknüpft und dieselben Personen über die Schuljahre
+hinweg zugeordnet werden (siehe `plan.md`) ·
 Drag&Drop-Sortierung (aktuell ▲▼-Buttons) · Noten-CSV-**Import** (nur Export + Schüler-Import) ·
 mehrere Sitzpläne/Perioden je Klasse · Verwaltungsansicht für vergangene Stunden
 (nachträglich korrigieren/löschen) · Abwesenheiten je Stunde statt je Tag ·
@@ -411,6 +464,11 @@ Noten_Fritze/
 ├─ index.html               App-Shell
 ├─ manifest.webmanifest     PWA-Manifest
 ├─ service-worker.js        Offline-Cache
+├─ AGENTS.md                verbindliche Arbeitsanleitung für KI-Assistenten
+├─ Schuljahr-Schema.md      Ablauf eines Schuljahrs mit Beispielzahlen
+├─ Notenuebersicht.md       Beispielrechnung für die Zeugnisnote (Vorlage)
+├─ plan.md                  Auftrag für die nächste Sitzung
+├─ Prompt.md                Prompt-Vorlagen für neue KI-Sitzungen
 ├─ css/styles.css           Styles (iPad-first)
 ├─ icons/icon.svg           App-Icon
 └─ js/

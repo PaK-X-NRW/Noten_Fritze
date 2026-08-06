@@ -120,6 +120,9 @@
       anteilSonstige: 50,          // %
       // Eigene Mitarbeits-Schwellen dieser Klasse; null = globale Einstellung
       mitarbeitSchwellen: null,
+      // Abgeschlossene Quartale: [{ quartal: 1..4, datum: "YYYY-MM-DD" }].
+      // Ein Eintrag sperrt das Quartal im Mitarbeit-Tab (siehe abschlussVon).
+      abgeschlosseneQuartale: [],
       notizen: "",
       createdAt: t,
       updatedAt: t,
@@ -148,6 +151,30 @@
       await DB.del("klassen", id);
     }
   };
+
+  // ---- Quartalsabschluss ---------------------------------------------------
+  // „Quartal abschließen" löscht nichts mehr: Stunden und Ereignisse bleiben
+  // erhalten, das Quartal wird an der Klasse als abgeschlossen vermerkt. Der
+  // Mitarbeit-Tab zeigt es dann grau und gesperrt, bis der Abschluss wieder
+  // aufgehoben wird.
+  function abschlussVon(klasse, quartal) {
+    const liste = (klasse && klasse.abgeschlosseneQuartale) || [];
+    return liste.find((a) => a && a.quartal === quartal) || null;
+  }
+  async function quartalAbschliessen(klasse, quartal, datum) {
+    if (!Array.isArray(klasse.abgeschlosseneQuartale)) klasse.abgeschlosseneQuartale = [];
+    const vorhanden = abschlussVon(klasse, quartal);
+    if (vorhanden) vorhanden.datum = datum || datumLokal();
+    else klasse.abgeschlosseneQuartale.push({ quartal, datum: datum || datumLokal() });
+    await Klassen.save(klasse);
+    return klasse;
+  }
+  async function abschlussAufheben(klasse, quartal) {
+    klasse.abgeschlosseneQuartale = ((klasse.abgeschlosseneQuartale) || [])
+      .filter((a) => !a || a.quartal !== quartal);
+    await Klassen.save(klasse);
+    return klasse;
+  }
 
   // ---- Schüler/innen -------------------------------------------------------
   function neuerSchueler(klasseId, data) {
@@ -553,6 +580,7 @@
     EVENT_TYPES, EVENT_TYPE_MAP, KACHEL_EVENT_TYPES,
     halbjahrAusDatum, quartalAusDatum, halbjahrAusQuartal, datumLokal,
     Klassen, neueKlasse,
+    abschlussVon, quartalAbschliessen, abschlussAufheben,
     Schueler, neuerSchueler,
     Kategorien, neueKategorie,
     Leistungen, neueLeistung, leistungFuer, leistungenAusNoten,

@@ -23,7 +23,7 @@
   // beim App-Start (app.js, vor dem ersten Render) ausgeführt.
   // Regel: Neue Felder bekommen immer Defaults (Factorys + getSettings-Merge),
   // damit auch nicht migrierte/alte Datensätze ohne das Feld funktionieren.
-  const SCHEMA_VERSION = 11;
+  const SCHEMA_VERSION = 13;
   const MIGRATION_STEPS = {
     // v1 -> v2: Noten und Ereignisse erhalten ein Halbjahr (1 | 2),
     // aus dem Datum abgeleitet (Aug–Jan = 1. HJ, Feb–Jul = 2. HJ).
@@ -156,15 +156,64 @@
           ? "mitarbeit" : "manuell";
       });
       await DB.bulkPut("kategorien", kategorien);
+    },
+    // v11 -> v12: Neue Notenschwellen. Sie galten ursprünglich für den Ø-Punkte-
+    // stand, gelten aber seit dem Stundennoten-Modell pro Einzelstunde – dort
+    // waren die Stufen 2 und 4 mit ganzen Punkten unerreichbar und eine stille
+    // Stunde ergab eine 5. Übernommen werden die neuen Werte nur dort, wo noch
+    // exakt die alte Voreinstellung steht; eigene Schwellen (global oder je
+    // Klasse) bleiben unangetastet.
+    12: async () => {
+      const ALT = [
+        { abPunkte: 2.0, note: 1 }, { abPunkte: 1.3, note: 2 }, { abPunkte: 0.7, note: 3 },
+        { abPunkte: 0.2, note: 4 }, { abPunkte: -0.5, note: 5 }
+      ];
+      const istAlteVorgabe = (liste) =>
+        Array.isArray(liste) && liste.length === ALT.length &&
+        ALT.every((s, i) => Number(liste[i].abPunkte) === s.abPunkte && Number(liste[i].note) === s.note);
+      const s = await getSettings();
+      if (istAlteVorgabe(s.mitarbeitSchwellen)) {
+        s.mitarbeitSchwellen = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.mitarbeitSchwellen));
+        await saveSettings(s);
+      }
+    },
+    // v12 -> v13: „Quartal abschließen" löscht keine Stunden und Ereignisse
+    // mehr, sondern merkt sich das abgeschlossene Quartal an der Klasse.
+    // Bestandsklassen: Quartale, für die bereits eine Mitarbeitsnote übertragen
+    // wurde, gelten rückwirkend als abgeschlossen.
+    13: async () => {
+      const klassen = await DB.getAll("klassen");
+      if (!klassen.length) return;
+      const kategorien = await DB.getAll("kategorien");
+      const noten = await DB.getAll("noten");
+      klassen.forEach((k) => {
+        if (!Array.isArray(k.abgeschlosseneQuartale)) k.abgeschlosseneQuartale = [];
+        const mitarbeitIds = kategorien
+          .filter((c) => c.klasseId === k.id && c.quelle === "mitarbeit")
+          .map((c) => c.id);
+        if (!mitarbeitIds.length) return;
+        noten.forEach((n) => {
+          if (n.klasseId !== k.id || mitarbeitIds.indexOf(n.kategorieId) === -1) return;
+          const q = n.quartal || quartalAusDatum(n.datum);
+          if (!q || k.abgeschlosseneQuartale.some((a) => a.quartal === q)) return;
+          k.abgeschlosseneQuartale.push({ quartal: q, datum: n.datum || datumLokal() });
+        });
+      });
+      await DB.bulkPut("klassen", klassen);
     }
   };
   async function migrateSchema() {
-    const s = await getSettings();
-    let v = parseInt(s.schemaVersion, 10) || 1;
+    const start = await getSettings();
+    let v = parseInt(start.schemaVersion, 10) || 1;
     while (v < SCHEMA_VERSION) {
       v++;
       if (MIGRATION_STEPS[v]) await MIGRATION_STEPS[v]();
     }
+    // Einstellungen NACH den Schritten neu lesen: getSettings liefert jedes Mal
+    // eine frische Kopie (Merge mit den Defaults). Würde hier das vor den
+    // Schritten geholte Objekt gespeichert, verlöre man alles, was ein Schritt
+    // an den Einstellungen geändert hat (z. B. die neuen Notenschwellen).
+    const s = await getSettings();
     if (s.schemaVersion !== SCHEMA_VERSION) {
       s.schemaVersion = SCHEMA_VERSION;
       await saveSettings(s);
