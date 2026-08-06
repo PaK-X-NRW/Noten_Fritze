@@ -231,7 +231,7 @@
   // beim App-Start (app.js, vor dem ersten Render) ausgeführt.
   // Regel: Neue Felder bekommen immer Defaults (Factorys + getSettings-Merge),
   // damit auch nicht migrierte/alte Datensätze ohne das Feld funktionieren.
-  const SCHEMA_VERSION = 9;
+  const SCHEMA_VERSION = 11;
   const MIGRATION_STEPS = {
     // v1 -> v2: Noten und Ereignisse erhalten ein Halbjahr (1 | 2),
     // aus dem Datum abgeleitet (Aug–Jan = 1. HJ, Feb–Jul = 2. HJ).
@@ -338,6 +338,32 @@
       const klassen = await DB.getAll("klassen");
       klassen.forEach((k) => { if (k.klassenstufe === undefined) k.klassenstufe = null; });
       await DB.bulkPut("klassen", klassen);
+    },
+    // v9 -> v10: Spaltenmodell. Jede Note gehört jetzt zu einer Leistung –
+    // das ist eine Spalte der Notenübersicht („2. Klassenarbeit", „HÜ 10.09."),
+    // in der je Schüler/in genau eine Note steht. Bestandsnoten werden nach
+    // Kategorie/Quartal/Titel/Datum zu Spalten zusammengefasst; hat ein/e
+    // Schüler/in dort mehrere Noten, entstehen entsprechend viele Spalten.
+    10: async () => {
+      const noten = await DB.getAll("noten");
+      if (!noten.length) return;
+      const neu = leistungenAusNoten(noten);
+      if (neu.length) await DB.bulkPut("leistungen", neu);
+      await DB.bulkPut("noten", noten);
+    },
+    // v10 -> v11: Kategorien bekommen eine Herkunft (`quelle`). Kategorien, die
+    // bisher schon Ziel des Quartalsabschlusses waren, werden als
+    // „mitarbeit" markiert – erkennbar am Namen, so wie es der Abschluss und
+    // der HA-Modus bisher auch getan haben.
+    11: async () => {
+      const kategorien = await DB.getAll("kategorien");
+      kategorien.forEach((c) => {
+        if (c.quelle) return;
+        const name = String(c.name || "").toLowerCase();
+        c.quelle = (c.art === "sonstige" && (c.anzeige || "note") === "note" && name.indexOf("mitarbeit") !== -1)
+          ? "mitarbeit" : "manuell";
+      });
+      await DB.bulkPut("kategorien", kategorien);
     }
   };
   async function migrateSchema() {
@@ -387,6 +413,7 @@
       // Kaskadierendes Löschen aller abhängigen Daten
       await DB.delByIndex("schueler", "klasseId", id);
       await DB.delByIndex("kategorien", "klasseId", id);
+      await DB.delByIndex("leistungen", "klasseId", id);
       await DB.delByIndex("noten", "klasseId", id);
       await DB.delByIndex("ereignisse", "klasseId", id);
       await DB.delByIndex("abwesenheiten", "klasseId", id);
@@ -481,6 +508,12 @@
       // "note"       = normale Notenspalte
       // "fehlendeHA" = zählt nur vergessene Hausaufgaben, geht nicht in die Note
       anzeige: "note",
+      // Woher die Noten dieser Kategorie kommen:
+      // "manuell"   = von Hand in der Notenübersicht erfasst
+      // "mitarbeit" = wird durch „Quartal abschließen" im Mitarbeit-Tab gefüllt.
+      //   Solange für ein Quartal keine solche Note vorliegt, bleibt dessen
+      //   Epochalnote leer (das Quartal ist noch nicht abgeschlossen).
+      quelle: "manuell",
       sortIndex: now(),
       createdAt: now()
     }, data || {});
@@ -491,10 +524,95 @@
     get: (id) => DB.get("kategorien", id),
     save: (k) => DB.put("kategorien", k),
     async remove(id) {
+      await DB.delByIndex("leistungen", "kategorieId", id);
       await DB.delByIndex("noten", "kategorieId", id);
       await DB.del("kategorien", id);
     }
   };
+
+  // ---- Leistungen (Spalten der Notenübersicht) -----------------------------
+  // Eine Leistung ist genau eine Spalte: „2. Klassenarbeit", „HÜ 10.09.",
+  // „Mitarbeit 1. Quartal". Sie hängt an einer Kategorie (die das Gewicht
+  // liefert) und an einem Quartal (das über die Epochalnote entscheidet).
+  // Je Schüler/in steht in einer Leistung höchstens eine Note.
+  function neueLeistung(klasseId, data) {
+    const t = now();
+    const datum = (data && data.datum) || datumLokal();
+    return Object.assign({
+      id: uid(),
+      klasseId,
+      kategorieId: null,
+      quartal: quartalAusDatum(datum),
+      titel: "",
+      datum,
+      sortIndex: t,
+      createdAt: t
+    }, data || {});
+  }
+  const Leistungen = {
+    // Spaltenreihenfolge: erst Datum, bei gleichem Datum die Anlage-Reihenfolge.
+    byKlasse: (klasseId) => DB.getAllByIndex("leistungen", "klasseId", klasseId)
+      .then((list) => list.sort((a, b) =>
+        (a.datum || "") === (b.datum || "")
+          ? (a.sortIndex || 0) - (b.sortIndex || 0)
+          : ((a.datum || "") < (b.datum || "") ? -1 : 1))),
+    get: (id) => DB.get("leistungen", id),
+    save: (l) => DB.put("leistungen", l),
+    async remove(id) {
+      await DB.delByIndex("noten", "leistungId", id);
+      await DB.del("leistungen", id);
+    }
+  };
+
+  // Leitet für Noten ohne leistungId die Spalten ab (Migration und Import
+  // alter Exporte): gruppiert nach Kategorie/Quartal/Titel/Datum. Hat ein/e
+  // Schüler/in in einer Gruppe mehrere Noten, entstehen entsprechend viele
+  // Spalten – in einer Spalte steht nur eine Note. Setzt leistungId auf den
+  // übergebenen Noten und liefert die neuen Leistungen zurück.
+  function leistungenAusNoten(noten) {
+    const gruppen = {};
+    noten.forEach((n) => {
+      if (n.leistungId) return;
+      const q = n.quartal || quartalAusDatum(n.datum);
+      const key = [n.klasseId, n.kategorieId, q, n.titel || "", n.datum || ""].join("|");
+      (gruppen[key] = gruppen[key] || []).push(n);
+    });
+    const neue = [];
+    Object.keys(gruppen).forEach((key) => {
+      const liste = gruppen[key].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      const proSchueler = {};   // schuelerId -> wievielte Note in dieser Gruppe
+      const spalten = [];       // Index -> Leistung
+      liste.forEach((n) => {
+        const i = (proSchueler[n.schuelerId] = (proSchueler[n.schuelerId] || 0) + 1) - 1;
+        if (!spalten[i]) {
+          spalten[i] = neueLeistung(n.klasseId, {
+            kategorieId: n.kategorieId,
+            quartal: n.quartal || quartalAusDatum(n.datum),
+            datum: n.datum, titel: n.titel || "",
+            sortIndex: i, createdAt: n.createdAt || now()
+          });
+          neue.push(spalten[i]);
+        }
+        n.leistungId = spalten[i].id;
+      });
+    });
+    return neue;
+  }
+
+  // Sucht die Spalte einer Kategorie im Quartal über ihren Titel oder legt sie
+  // an – für automatisch erzeugte Noten (Quartalsabschluss, HA-Note 6).
+  async function leistungFuer(klasseId, kategorieId, quartal, titel, datum) {
+    const alle = await Leistungen.byKlasse(klasseId);
+    const vorhanden = alle.find((l) =>
+      l.kategorieId === kategorieId && l.quartal === quartal && (l.titel || "") === titel);
+    if (vorhanden) return vorhanden;
+    const l = neueLeistung(klasseId, {
+      kategorieId, quartal, titel,
+      datum: datum || datumLokal(), sortIndex: alle.length
+    });
+    await Leistungen.save(l);
+    return l;
+  }
 
   // ---- Noten (Einzelnoten) -------------------------------------------------
   function neueNote(data) {
@@ -508,6 +626,7 @@
       klasseId: null,
       schuelerId: null,
       kategorieId: null,
+      leistungId: null,     // Spalte, zu der die Note gehört (siehe Leistungen)
       wert: null,           // Zahl 1..6 (mit Nachkomma, z. B. 2.3)
       titel: "",
       datum,
@@ -519,7 +638,32 @@
   const Noten = {
     byKlasse: (klasseId) => DB.getAllByIndex("noten", "klasseId", klasseId),
     save: (n) => DB.put("noten", n),
-    remove: (id) => DB.del("noten", id)
+    remove: (id) => DB.del("noten", id),
+    // Eine Zelle der Notenübersicht setzen: In einer Leistung steht je
+    // Schüler/in genau eine Note. wert === null löscht die Zelle; etwaige
+    // Altbestände (mehrere Noten in derselben Zelle) werden dabei bereinigt.
+    async setzeZelle(leistung, schuelerId, wert) {
+      const alle = await DB.getAllByIndex("noten", "leistungId", leistung.id);
+      const eigene = alle.filter((n) => n.schuelerId === schuelerId);
+      for (const ueberzaehlig of eigene.slice(1)) await DB.del("noten", ueberzaehlig.id);
+      if (wert === null || wert === undefined) {
+        if (eigene[0]) await DB.del("noten", eigene[0].id);
+        return null;
+      }
+      const n = eigene[0] || neueNote({
+        klasseId: leistung.klasseId, schuelerId, kategorieId: leistung.kategorieId,
+        leistungId: leistung.id
+      });
+      n.wert = wert;
+      // Titel/Datum/Quartal folgen immer der Spalte
+      n.titel = leistung.titel || "";
+      n.datum = leistung.datum;
+      n.quartal = leistung.quartal;
+      n.halbjahr = halbjahrAusQuartal(leistung.quartal);
+      n.kategorieId = leistung.kategorieId;
+      await DB.put("noten", n);
+      return n;
+    }
   };
 
   // ---- Sitzplan ------------------------------------------------------------
@@ -657,15 +801,16 @@
 
   // ---- Backup (Gesamt-Export/Import als JSON) ------------------------------
   async function exportAll() {
-    const [klassen, schueler, kategorien, noten, sitzplaene, ereignisse, abwesenheiten, stunden, settings] = await Promise.all([
+    const [klassen, schueler, kategorien, leistungen, noten, sitzplaene, ereignisse, abwesenheiten, stunden, settings] = await Promise.all([
       DB.getAll("klassen"), DB.getAll("schueler"), DB.getAll("kategorien"),
+      DB.getAll("leistungen"),
       DB.getAll("noten"), DB.getAll("sitzplaene"), DB.getAll("ereignisse"),
       DB.getAll("abwesenheiten"), DB.getAll("stunden"), getSettings()
     ]);
     return {
       app: "noten-fritze", appVersion: APP_VERSION,
       schemaVersion: DB.DB_VERSION, exportedAt: new Date().toISOString(),
-      data: { klassen, schueler, kategorien, noten, sitzplaene, ereignisse, abwesenheiten, stunden, settings }
+      data: { klassen, schueler, kategorien, leistungen, noten, sitzplaene, ereignisse, abwesenheiten, stunden, settings }
     };
   }
   async function importAll(backup, { replace }) {
@@ -676,7 +821,14 @@
     const settings = await getSettings();
     await DB.bulkPut("schueler", (d.schueler || []).map((s) => normalisiereSchuelerHeat(s, settings)));
     await DB.bulkPut("kategorien", d.kategorien || []);
-    await DB.bulkPut("noten", d.noten || []);
+    // Backup aus einer älteren Version: Spalten aus den Noten ableiten
+    const noten = (d.noten || []).map((n) => Object.assign({}, n));
+    const leistungen = (d.leistungen || []).slice();
+    if (!leistungen.length && noten.some((n) => !n.leistungId)) {
+      leistungenAusNoten(noten).forEach((l) => leistungen.push(l));
+    }
+    await DB.bulkPut("leistungen", leistungen);
+    await DB.bulkPut("noten", noten);
     await DB.bulkPut("sitzplaene", d.sitzplaene || []);
     await DB.bulkPut("ereignisse", d.ereignisse || []);
     await DB.bulkPut("abwesenheiten", d.abwesenheiten || []);
@@ -685,11 +837,15 @@
   }
 
   // ---- HA-Modus „note6": automatische Note 6 --------------------------------
-  // Zählt die vergessenen Hausaufgaben (keinehausaufgabe) eines Schülers in
-  // einer Klasse und einem Quartal. Bei jeder 3. (3., 6., 9. …) wird eine
-  // Note 6 in die Kategorie „Mündliche Mitarbeit" eingefügt (wird angelegt,
-  // falls nicht vorhanden). Nur aktiv, wenn settings.haModus === "note6".
-  // Rückgabe: true, wenn eine Note erzeugt wurde.
+  // Meldet, ob mit der gerade erfassten vergessenen Hausaufgabe eine volle
+  // Dreiergruppe (3., 6., 9. …) im Quartal erreicht ist. Nur relevant, wenn
+  // settings.haModus === "note6".
+  // Die Note 6 wird bewusst NICHT als eigene Spalte in die Notenübersicht
+  // geschrieben: Aus dem Mitarbeitsbereich erscheint dort nur die fertige
+  // Mitarbeitsnote des abgeschlossenen Quartals. Stattdessen zählt jede
+  // Dreiergruppe in `Calc.auswertungMitarbeit` als zusätzliche Stundennote 6
+  // und landet so im Notenvorschlag – und mit dem Abschluss in der Note.
+  // Rückgabe: true, wenn die Zählung gerade eine Dreiergruppe voll gemacht hat.
   async function haNote6Pruefen(klasseId, schuelerId, quartal) {
     const settings = await getSettings();
     if (settings.haModus !== "note6") return false;
@@ -697,33 +853,17 @@
     const anzahl = ereignisse.filter((e) =>
       e.klasseId === klasseId && e.typ === "keinehausaufgabe" && e.quartal === quartal
     ).length;
-    if (anzahl <= 0 || anzahl % 3 !== 0) return false;
-    const kategorien = await Kategorien.byKlasse(klasseId);
-    let kat = kategorien.find((c) =>
-      c.art === "sonstige" && (c.anzeige || "note") === "note" &&
-      String(c.name || "").toLowerCase() === "mündliche mitarbeit");
-    if (!kat) {
-      kat = neueKategorie(klasseId, {
-        name: "Mündliche Mitarbeit", art: "sonstige", gewichtung: 2,
-        sortIndex: kategorien.length
-      });
-      await Kategorien.save(kat);
-    }
-    await Noten.save(neueNote({
-      klasseId, schuelerId, kategorieId: kat.id, wert: 6,
-      titel: "3× Hausaufgaben vergessen (" + quartal + ". Quartal)",
-      quartal
-    }));
-    return true;
+    return anzahl > 0 && anzahl % 3 === 0;
   }
 
   // ---- Klassen-Export/-Import (einzelne Klasse als JSON) -------------------
   // Alle Datensätze einer Klasse (z. B. zur Übergabe an Kolleg/innen).
   async function exportKlasse(klasseId) {
-    const [klasse, schueler, kategorien, noten, ereignisse, stunden, abwesenheiten, sitzplan] = await Promise.all([
+    const [klasse, schueler, kategorien, leistungen, noten, ereignisse, stunden, abwesenheiten, sitzplan] = await Promise.all([
       Klassen.get(klasseId),
       DB.getAllByIndex("schueler", "klasseId", klasseId),
       DB.getAllByIndex("kategorien", "klasseId", klasseId),
+      DB.getAllByIndex("leistungen", "klasseId", klasseId),
       DB.getAllByIndex("noten", "klasseId", klasseId),
       DB.getAllByIndex("ereignisse", "klasseId", klasseId),
       DB.getAllByIndex("stunden", "klasseId", klasseId),
@@ -734,7 +874,7 @@
       app: "noten-fritze-klasse", appVersion: APP_VERSION,
       exportedAt: new Date().toISOString(),
       data: {
-        klasse, schueler, kategorien, noten, ereignisse, stunden, abwesenheiten,
+        klasse, schueler, kategorien, leistungen, noten, ereignisse, stunden, abwesenheiten,
         sitzplan: sitzplan || null
       }
     };
@@ -752,25 +892,39 @@
     let klasse = d.klasse;
     let schueler = d.schueler || [];
     let kategorien = d.kategorien || [];
+    let leistungen = d.leistungen || [];
     let noten = d.noten || [];
     let ereignisse = d.ereignisse || [];
     let stunden = d.stunden || [];
     let abwesenheiten = d.abwesenheiten || [];
     let sitzplan = d.sitzplan || null;
 
+    // Export aus einer älteren Version (vor dem Spaltenmodell): Spalten aus
+    // den Noten ableiten, sonst wären sie in der Notenübersicht unsichtbar.
+    if (!leistungen.length && noten.some((n) => !n.leistungId)) {
+      noten = noten.map((n) => Object.assign({}, n));
+      leistungen = leistungenAusNoten(noten);
+    }
+
     if (modus === "kopie") {
       const klasseIdNeu = uid();
-      const schuelerMap = {}, kategorienMap = {}, stundenMap = {};
+      const schuelerMap = {}, kategorienMap = {}, stundenMap = {}, leistungenMap = {};
       schueler.forEach((s) => { schuelerMap[s.id] = uid(); });
       kategorien.forEach((c) => { kategorienMap[c.id] = uid(); });
       stunden.forEach((st) => { stundenMap[st.id] = uid(); });
+      leistungen.forEach((l) => { leistungenMap[l.id] = uid(); });
       klasse = Object.assign({}, klasse, { id: klasseIdNeu, name: (klasse.name || "") + " (Kopie)" });
       schueler = schueler.map((s) => Object.assign({}, s, { id: schuelerMap[s.id], klasseId: klasseIdNeu }));
       kategorien = kategorien.map((c) => Object.assign({}, c, { id: kategorienMap[c.id], klasseId: klasseIdNeu }));
+      leistungen = leistungen.map((l) => Object.assign({}, l, {
+        id: leistungenMap[l.id], klasseId: klasseIdNeu,
+        kategorieId: kategorienMap[l.kategorieId] || l.kategorieId
+      }));
       noten = noten.map((n) => Object.assign({}, n, {
         id: uid(), klasseId: klasseIdNeu,
         schuelerId: schuelerMap[n.schuelerId] || n.schuelerId,
-        kategorieId: kategorienMap[n.kategorieId] || n.kategorieId
+        kategorieId: kategorienMap[n.kategorieId] || n.kategorieId,
+        leistungId: leistungenMap[n.leistungId] || n.leistungId
       }));
       ereignisse = ereignisse.map((e) => Object.assign({}, e, {
         id: uid(), klasseId: klasseIdNeu,
@@ -798,6 +952,7 @@
     await Klassen.save(klasse);
     await DB.bulkPut("schueler", schueler.map((s) => normalisiereSchuelerHeat(s, settings)));
     await DB.bulkPut("kategorien", kategorien);
+    await DB.bulkPut("leistungen", leistungen);
     await DB.bulkPut("noten", noten);
     await DB.bulkPut("ereignisse", ereignisse);
     await DB.bulkPut("stunden", stunden);
@@ -843,11 +998,11 @@
     const schuelerListe = namen.map((n, i) => neuerSchueler(k.id, { vorname: n[0], nachname: n[1], sortIndex: i }));
     await DB.bulkPut("schueler", schuelerListe);
 
-    // Notenwert um die Profil-Basis (stark ~1,8 / mittel ~2,8 / schwach ~4,0)
+    // Notenwert um die Profil-Basis (stark ~1,8 / mittel ~2,8 / schwach ~4,0),
+    // auf die Drittelskala gerundet – erfasst werden immer echte Noten (2+, 3, 4-).
     function profilNote(profil) {
       const basis = profil === "stark" ? 1.8 : profil === "mittel" ? 2.8 : 4.0;
-      const wert = basis + (zufall() - 0.5) * 1.6;
-      return Math.max(1, Math.min(6, Math.round(wert * 10) / 10));
+      return Calc.tendenznote(basis + (zufall() - 0.5) * 1.6);
     }
     // Übertragene Mündlich-Note fürs abgeschlossene 1. Quartal (ganze Note):
     // stark 1–2, mittel 2–3, schwach 4–5
@@ -859,7 +1014,8 @@
     const kats = [
       neueKategorie(k.id, { name: "Klassenarbeit", art: "schriftlich", gewichtung: 2, sortIndex: 0 }),
       neueKategorie(k.id, { name: "Test",          art: "schriftlich", gewichtung: 1, sortIndex: 1 }),
-      neueKategorie(k.id, { name: "Mündliche Mitarbeit", art: "sonstige", gewichtung: 2, sortIndex: 2 }),
+      // Wird über „Quartal abschließen“ gefüllt – daran hängt die Epochalnote
+      neueKategorie(k.id, { name: "Mündliche Mitarbeit", art: "sonstige", gewichtung: 2, sortIndex: 2, quelle: "mitarbeit" }),
       // Hausaufgaben werden nicht benotet – die Spalte zählt nur die vergessenen
       neueKategorie(k.id, { name: "Hausaufgaben", art: "sonstige", gewichtung: 1, sortIndex: 3, anzeige: "fehlendeHA" })
     ];
@@ -976,31 +1132,39 @@
     });
     await DB.bulkPut("ereignisse", ereignisse);
 
-    // Schriftliche Noten über das ganze Schuljahr verteilt (profilbasiert)
+    // Spalten (Leistungen) über das ganze Schuljahr verteilt; je Spalte
+    // bekommt jede/r Schüler/in genau eine Note (profilbasiert).
+    const spalten = [];
+    let spaltenNr = 0;
+    function demoSpalte(kategorie, titel, datum) {
+      const l = neueLeistung(k.id, {
+        kategorieId: kategorie.id, titel, datum, sortIndex: spaltenNr++
+      });
+      spalten.push(l);
+      return l;
+    }
+    const kaSpalten = ["2025-09-15", "2025-12-08", "2026-03-09", "2026-06-15"]
+      .map((datum, i) => demoSpalte(kats[0], "Klassenarbeit " + (i + 1), datum));
+    const testSpalten = ["2025-10-13", "2026-01-26", "2026-04-20", "2026-06-29"]
+      .map((datum, i) => demoSpalte(kats[1], "Test " + (i + 1), datum));
+    // 1. Quartal ist abgeschlossen: die mündliche Note wurde bereits als
+    // ganze Note in „Mündliche Mitarbeit" übertragen.
+    const muendlichQ1 = demoSpalte(kats[2], "Mitarbeit 1. Quartal", "2025-10-20");
+    await DB.bulkPut("leistungen", spalten);
+
     const noten = [];
-    const kaDaten = ["2025-09-15", "2025-12-08", "2026-03-09", "2026-06-15"];
-    const testDaten = ["2025-10-13", "2026-01-26", "2026-04-20", "2026-06-29"];
+    function demoNote(leistung, s, wert) {
+      noten.push(neueNote({
+        klasseId: k.id, schuelerId: s.id, kategorieId: leistung.kategorieId,
+        leistungId: leistung.id, wert, titel: leistung.titel,
+        datum: leistung.datum, quartal: leistung.quartal
+      }));
+    }
     schuelerListe.forEach((s, idx) => {
       const profil = profilVon(idx);
-      kaDaten.forEach((datum, i) => {
-        noten.push(neueNote({
-          klasseId: k.id, schuelerId: s.id, kategorieId: kats[0].id,
-          wert: profilNote(profil), titel: "Klassenarbeit " + (i + 1), datum
-        }));
-      });
-      testDaten.forEach((datum, i) => {
-        noten.push(neueNote({
-          klasseId: k.id, schuelerId: s.id, kategorieId: kats[1].id,
-          wert: profilNote(profil), titel: "Test " + (i + 1), datum
-        }));
-      });
-      // 1. Quartal ist abgeschlossen: die mündliche Note wurde bereits als
-      // ganze Note in „Mündliche Mitarbeit" übertragen (Datum im Oktober 2025).
-      noten.push(neueNote({
-        klasseId: k.id, schuelerId: s.id, kategorieId: kats[2].id,
-        wert: q1Note(profil), titel: "Mündliche Mitarbeit 1. Quartal",
-        datum: "2025-10-" + ("0" + (13 + (idx % 10))).slice(-2), quartal: 1
-      }));
+      kaSpalten.forEach((l) => demoNote(l, s, profilNote(profil)));
+      testSpalten.forEach((l) => demoNote(l, s, profilNote(profil)));
+      demoNote(muendlichQ1, s, q1Note(profil));
     });
     await DB.bulkPut("noten", noten);
 
@@ -1020,6 +1184,7 @@
     Klassen, neueKlasse,
     Schueler, neuerSchueler,
     Kategorien, neueKategorie,
+    Leistungen, neueLeistung, leistungFuer,
     Noten, neueNote,
     Sitzplan, neuerSitzplan,
     Ereignisse, neuesEreignis,

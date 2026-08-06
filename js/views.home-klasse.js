@@ -5,7 +5,7 @@
 (function (global) {
   "use strict";
 
-  const { state, render, quartalFilter, quartalTabsHTML } = global.Views;
+  const { state, render, quartalFilter, quartalTabsHTML, halbjahrFilter, halbjahrTabsHTML } = global.Views;
 
   // =========================================================================
   //  HOME – Klassenübersicht
@@ -149,7 +149,8 @@
         const anteil = ((Number(c.gewichtung) || 0) / gewSumme * 100).toFixed(0);
         return "<tr>" +
           "<td><strong>" + UI.esc(c.name) + "</strong>" +
-            (zaehltNicht ? ' <span class="chip">zählt nicht in die Note · vergessene HA</span>' : "") + "</td>" +
+            (zaehltNicht ? ' <span class="chip">zählt nicht in die Note · vergessene HA</span>' : "") +
+            (c.quelle === "mitarbeit" ? ' <span class="chip accent">aus „Quartal abschließen“</span>' : "") + "</td>" +
           '<td class="num">' + (zaehltNicht ? '<span class="muted">–</span>' : UI.esc(String(c.gewichtung))) + "</td>" +
           '<td class="num">' + (zaehltNicht ? '<span class="muted">–</span>' : anteil + " %") + "</td>" +
           '<td class="right nowrap">' +
@@ -181,16 +182,34 @@
   }
 
   // ---- Tab: Noten ----------------------------------------------------------
+  // Die Notenübersicht zeigt genau ein Halbjahr. Aufbau der Spalten:
+  //   Name | schriftliche Leistungen | [1. Quartal: sonstige Leistungen] |
+  //   Epochalnote 1 | [2. Quartal: …] | Epochalnote 2 | Schriftliche
+  //   Leistungen | Sonstige Leistungen | Zeugnisnote (im 2. HJ + Jahr)
+  // Jede Leistung („2. Klassenarbeit", „HÜ 10.09.") ist eine eigene Spalte mit
+  // genau einer Note je Schüler/in; die Rechenkette steckt in
+  // Calc.halbjahrErgebnis.
+
+  // Render-Kontext der Tabelle. TabNoten füllt ihn; die Inline-Eingabe rechnet
+  // damit einzelne Zeilen neu, ohne die ganze View neu aufzubauen.
+  let notenKtx = null;
+
   // Badge für eine Note auf der Zeugnisskala (ganze Note bzw. 4-).
   function zeugnisBadge(note, mss) {
     if (note === null || note === undefined) return '<span class="muted">–</span>';
     return '<span class="note-badge" style="background:' + Calc.noteFarbe(note, mss) + '">' + Calc.formatZeugnisnote(note, mss) + "</span>";
   }
+  // Badge für eine Drittelnote – angezeigt als Tendenz (2+, 3, 4-).
+  function tendenzBadge(note, mss) {
+    if (note === null || note === undefined) return '<span class="muted">–</span>';
+    return '<span class="note-badge" style="background:' + Calc.noteFarbe(note, mss) + '">' + Calc.formatTendenz(note, mss) + "</span>";
+  }
 
   async function TabNoten(k) {
-    const [schueler, katsRoh, notenAll, ereignisse] = await Promise.all([
+    const [schueler, katsRoh, leistungen, notenAll, ereignisse] = await Promise.all([
       Store.Schueler.byKlasse(k.id),
       Store.Kategorien.byKlasse(k.id),
+      Store.Leistungen.byKlasse(k.id),
       Store.Noten.byKlasse(k.id),
       Store.Ereignisse.byKlasse(k.id)
     ]);
@@ -198,55 +217,49 @@
     if (!katsRoh.length) return '<div class="empty"><div class="big">🏷️</div><p>Erst Kategorien anlegen.</p><button class="btn primary" data-action="class-tab" data-tab="kategorien">Zu den Kategorien</button></div>';
 
     const mss = Calc.istMSS(k);
+    const hj = halbjahrFilter();
+    const quartale = hj === 2 ? [3, 4] : [1, 2];
 
-    // Spalten gruppiert: erst die schriftlichen, dann die sonstigen Kategorien –
-    // so stehen die Sammelspalten direkt hinter ihrer Gruppe.
-    const schriftlicheKats = katsRoh.filter((c) => c.art === "schriftlich");
-    const sonstigeKats = katsRoh.filter((c) => c.art !== "schriftlich");
-    const kats = schriftlicheKats.concat(sonstigeKats);
+    const katById = {};
+    katsRoh.forEach((c) => { katById[c.id] = c; });
+    // Reihenfolge für die Rechnung: erst schriftlich, dann sonstige
+    const kats = katsRoh.filter((c) => c.art === "schriftlich")
+      .concat(katsRoh.filter((c) => c.art !== "schriftlich"));
+
+    // Spalten dieses Halbjahres (Kategorie muss es noch geben)
+    const hjLeistungen = leistungen.filter((l) =>
+      katById[l.kategorieId] && quartale.indexOf(l.quartal) !== -1);
 
     const notenBySchueler = {};
     notenAll.forEach((n) => (notenBySchueler[n.schuelerId] = notenBySchueler[n.schuelerId] || []).push(n));
-    const q = quartalFilter("notenQuartal");
-    const key = spaltenKey(k.id, q);
+
+    const key = spaltenKey(k.id, hj);
     const eigeneReihenfolge = !!(state.notenSpalten && state.notenSpalten.key === key);
+    notenKtx = { k, mss, hj, quartale, kats, katById, leistungen: hjLeistungen, schueler, notenBySchueler, ereignisse, key };
+    notenKtx.spalten = spaltenOrdnen(halbjahrSpalten(notenKtx), key);
 
-    const spalten = spaltenOrdnen(
-      q === null ? jahresSpalten(mss) : halbjahrSpalten(schriftlicheKats, sonstigeKats, mss), key
-    );
+    const body = schueler.map((s) => notenZeile(s)).join("");
 
-    const body = schueler.map((s) => {
-      const noten = notenBySchueler[s.id] || [];
-      if (q === null) {
-        // Jahr: die vier Quartale (nur Sonstige), dazu beide Halbjahre
-        const qZeugnis = [1, 2, 3, 4].map((nq) =>
-          Calc.zeugnisErgebnis(Calc.berechneSchueler(kats, noten, k, state.settings.rundung, nq), mss));
-        const hj1 = Calc.zeugnisErgebnis(Calc.berechneSchueler(kats, noten, k, state.settings.rundung, "hj1"), mss);
-        const hj2 = Calc.zeugnisErgebnis(Calc.berechneSchueler(kats, noten, k, state.settings.rundung, "hj2"), mss);
-        return notenZeile(spalten, s, { q: qZeugnis, hj1, hj2, jahr: Calc.jahresnote(hj1.zeugnis, hj2.zeugnis, mss) });
-      }
-      const res = Calc.berechneSchueler(kats, noten, k, state.settings.rundung, q);
-      const gBadge = res.gesamt !== null
-        ? '<span class="note-badge" style="background:' + Calc.noteFarbe(res.gesamt, mss) + '">' +
-          Calc.formatNote(res.gesamt, state.settings.rundung === "ganze" ? 0 : (state.settings.rundung === "keine" ? 2 : 1)) + "</span>"
-        : '<span class="muted">–</span>';
-      return notenZeile(spalten, s, { s, res, gBadge, ereignisse, quartal: q, zeugnis: Calc.zeugnisErgebnis(res, mss) });
-    }).join("");
-
-    const hinweis = q === null
-      ? "Jahresübersicht: Sonstige der vier Quartale, dazu beide Halbjahre und das Jahr. Die Jahresnote entsteht aus den beiden Zeugnisnoten (je 50 %, bei Gleichstand zählt das 2. Halbjahr)."
-      : "Tippe auf eine Zelle, um Einzelnoten zu erfassen. Tippe auf den Namen für die Berechnung. Spaltenköpfe lassen sich seitlich verschieben.";
+    // Offene Quartale (Mitarbeitsnote fehlt) im Hinweis benennen – sonst wirkt
+    // das „⋯“ in der Epochalnote wie ein Fehler.
+    const offeneQuartale = quartale.filter((q) => !Calc.mitarbeitVorhanden(kats, notenAll, q));
+    const hinweis = offeneQuartale.length
+      ? "Noch offen: " + offeneQuartale.map((q) => q + ". Quartal").join(" und ") +
+        " – die Epochalnote entsteht, sobald die Mitarbeitsnote über „Quartal abschließen“ im Mitarbeit-Tab übertragen ist."
+      : "Noten direkt in die Zellen tippen (2+, 3, 4-) – Enter springt nach unten, Tab nach rechts. " +
+        "Tipp auf einen Spaltenkopf bearbeitet die Spalte, Tipp auf den Namen zeigt die Berechnung.";
 
     return (
       '<div class="hstack wrap" style="margin-bottom:var(--gap)">' +
-        '<div class="tabs" style="margin:0">' + quartalTabsHTML("notenQuartal", "noten-hj") + "</div>" +
+        '<div class="tabs" style="margin:0">' + halbjahrTabsHTML("noten-hj") + "</div>" +
+        '<button class="btn small primary" data-action="add-leistung">＋ Spalte</button>' +
         '<div class="grow muted">' + hinweis + "</div>" +
         (eigeneReihenfolge ? '<button class="btn small" data-action="noten-spalten-reset">Spalten zurücksetzen</button>' : "") +
         '<button class="btn small" data-action="export-noten">Noten-CSV</button>' +
         '<button class="btn small" data-action="export-einzelnoten">Einzelnoten-CSV</button>' +
       "</div>" +
       '<div class="table-wrap noten-wrap"><table class="noten-tab"><thead>' +
-        spaltenKopfZeile(spalten) + "</thead><tbody>" + body + "</tbody></table>" +
+        spaltenKopfZeile(notenKtx.spalten) + "</thead><tbody>" + body + "</tbody></table>" +
         '<div class="noten-rand"></div>' +
       "</div>"
     );
@@ -266,80 +279,107 @@
     return '<td class="' + spaltenKlassen(sp, extra) + '"' + (attr || "") + ">" + inhalt + "</td>";
   }
 
-  function katSpalte(c, mss) {
-    const zusatz = c.anzeige === "fehlendeHA"
-      ? "vergessene HA"
-      : (c.art === "schriftlich" ? "schriftl." : "sonst.") + " · Gew " + c.gewichtung;
+  // Spalte einer einzelnen Leistung: hier wird getippt (eine Note je Zelle).
+  function leistungSpalte(l, kat, mss) {
+    const untertitel = UI.esc(kat.name) + (l.datum ? " · " + UI.datumKurz(l.datum) : "");
     return {
-      id: "kat:" + c.id,
-      grp: grpKlasse(c.art),
-      kopf: UI.esc(c.name) + '<br><span class="muted" style="text-transform:none;font-weight:400">' + zusatz + "</span>",
+      id: "l:" + l.id,
+      grp: grpKlasse(kat.art),
+      leistungId: l.id,
+      kopf: UI.esc(l.titel || kat.name) +
+        '<br><span class="muted" style="text-transform:none;font-weight:400">' + untertitel + "</span>",
       zelle: (sp, ctx) => {
-        if (c.anzeige === "fehlendeHA") {
-          const anzahl = ctx.ereignisse.filter((e) =>
-            e.schuelerId === ctx.s.id && e.typ === "keinehausaufgabe" && (!ctx.quartal || !e.quartal || e.quartal === ctx.quartal)
-          ).length;
-          return spaltenZelle(sp, anzahl ? "<strong>" + anzahl + "×</strong>" : '<span class="muted">–</span>');
-        }
-        const ke = ctx.res.kategorien.find((x) => x.id === c.id);
-        const badge = ke && ke.schnitt !== null
-          ? '<span class="note-badge" style="background:' + Calc.noteFarbe(ke.schnitt, mss) + '">' + Calc.formatNote(ke.schnitt) + "</span>"
+        const n = ctx.werte[l.id];
+        const inhalt = n && n.wert !== null && n.wert !== undefined
+          ? '<span class="note-badge" style="background:' + Calc.noteFarbe(n.wert, mss) + '">' + Calc.formatTendenz(n.wert, mss) + "</span>"
           : '<span class="muted">–</span>';
-        const anz = ke && ke.anzahl ? '<span class="muted"> n=' + ke.anzahl + "</span>" : "";
-        return spaltenZelle(sp, badge + anz, "pointer row-hover",
-          ' data-action="edit-cell" data-sid="' + ctx.s.id + '" data-cid="' + c.id + '"');
+        return spaltenZelle(sp, inhalt, "zelle",
+          ' data-lid="' + l.id + '" data-sid="' + ctx.s.id + '" tabindex="0"');
       }
     };
   }
 
-  // Quartal-Ansicht: Kategorien, dahinter je Gruppe eine Sammelspalte.
-  function halbjahrSpalten(schriftlicheKats, sonstigeKats, mss) {
-    return [].concat(
-      schriftlicheKats.map((c) => katSpalte(c, mss)),
-      [{ id: "sum:schriftlich", grp: "grp-schriftlich", trenner: true, stark: true, kopf: "Schriftlich",
-         zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.zeugnis.schriftlich, mss)) }],
-      sonstigeKats.map((c) => katSpalte(c, mss)),
-      [{ id: "sum:sonstige", grp: "grp-sonstige", trenner: true, stark: true, kopf: "Sonstige",
-         zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.zeugnis.sonstige, mss)) },
-       { id: "sum:gesamt", grp: "grp-zeugnis", trenner: true, kopf: "Gesamt",
-         zelle: (sp, ctx) => spaltenZelle(sp, ctx.gBadge) },
-       { id: "sum:zeugnis", grp: "grp-zeugnis", stark: true, kopf: "Zeugnis",
-         zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.zeugnis.zeugnis, mss)) }]
-    );
+  // Zählspalte einer Kategorie mit anzeige "fehlendeHA" – je Quartal.
+  function haSpalte(kat, quartal) {
+    return {
+      id: "ha:" + kat.id + ":" + quartal,
+      grp: "grp-sonstige",
+      kopf: UI.esc(kat.name) +
+        '<br><span class="muted" style="text-transform:none;font-weight:400">vergessene HA · ' + quartal + ". Q</span>",
+      zelle: (sp, ctx) => {
+        const anzahl = ctx.ereignisse.filter((e) =>
+          e.schuelerId === ctx.s.id && e.typ === "keinehausaufgabe" &&
+          (!e.quartal || e.quartal === quartal)
+        ).length;
+        return spaltenZelle(sp, anzahl ? "<strong>" + anzahl + "×</strong>" : '<span class="muted">–</span>');
+      }
+    };
   }
 
-  // Jahresübersicht: keine Einzelleistungen, sondern erst die sonstigen
-  // Leistungen der vier Quartale, dann beide Halbjahre und das Jahr.
-  function jahresSpalten(mss) {
-    const qSpalte = (nq) => ({
-      id: "jahr:q" + nq + ":sonstige",
-      grp: "grp-sonstige",
-      trenner: nq === 1,
-      kopf: "Sonst. " + nq + ". Q",
-      zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.q[nq - 1].sonstige, mss))
+  // Aufbau der Spalten eines Halbjahres (siehe Kopfkommentar des Tabs).
+  function halbjahrSpalten(ktx) {
+    const mss = ktx.mss;
+    const spalten = [];
+    const vonKategorie = (l) => ktx.katById[l.kategorieId];
+
+    // 1) Schriftliche Leistungen des Halbjahres (über beide Quartale hinweg)
+    ktx.leistungen
+      .filter((l) => vonKategorie(l).art === "schriftlich")
+      .forEach((l) => spalten.push(leistungSpalte(l, vonKategorie(l), mss)));
+
+    // 2) Je Quartal: sonstige Leistungen, HA-Zählung, dann die Epochalnote
+    ktx.quartale.forEach((q, i) => {
+      ktx.leistungen
+        .filter((l) => l.quartal === q && vonKategorie(l).art !== "schriftlich" &&
+          (vonKategorie(l).anzeige || "note") === "note")
+        .forEach((l) => spalten.push(leistungSpalte(l, vonKategorie(l), mss)));
+      Object.keys(ktx.katById).map((id) => ktx.katById[id])
+        .filter((c) => c.art !== "schriftlich" && c.anzeige === "fehlendeHA")
+        .forEach((c) => spalten.push(haSpalte(c, q)));
+      spalten.push({
+        id: "epochal:" + q, grp: "grp-sonstige", trenner: true, stark: true,
+        kopf: "Epochalnote " + (i + 1) +
+          '<br><span class="muted" style="text-transform:none;font-weight:400">' + q + ". Quartal</span>",
+        zelle: (sp, ctx) => {
+          const e = ctx.hjErg.epochal.find((x) => x.quartal === q);
+          // Ohne Mitarbeitsnote ist das Quartal noch offen – kein Zwischenstand,
+          // der wie ein Ergebnis aussieht.
+          if (e && e.offen) {
+            return spaltenZelle(sp, '<span class="muted" title="Quartal noch nicht abgeschlossen – die Mitarbeitsnote fehlt">⋯</span>');
+          }
+          return spaltenZelle(sp, tendenzBadge(e ? e.note : null, mss));
+        }
+      });
     });
-    const hjSpalte = (nr, feld, grp, label, trenner) => ({
-      id: "jahr:" + nr + ":" + feld,
-      grp: grp,
-      trenner: !!trenner,
-      kopf: nr + ". HJ " + label,
-      zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx["hj" + nr][feld], mss))
+
+    // 3) Halbjahres-Teilnoten und Zeugnisnote
+    spalten.push({
+      id: "sum:schriftlich", grp: "grp-schriftlich", trenner: true, stark: true,
+      kopf: "Schriftliche<br>Leistungen",
+      zelle: (sp, ctx) => spaltenZelle(sp, tendenzBadge(ctx.hjErg.schriftlich, mss))
     });
-    return [
-      qSpalte(1), qSpalte(2), qSpalte(3), qSpalte(4),
-      hjSpalte(1, "schriftlich", "grp-schriftlich", "schriftl.", true),
-      hjSpalte(1, "sonstige", "grp-sonstige", "sonstige"),
-      hjSpalte(1, "zeugnis", "grp-zeugnis", "Zeugnis"),
-      hjSpalte(2, "schriftlich", "grp-schriftlich", "schriftl.", true),
-      hjSpalte(2, "sonstige", "grp-sonstige", "sonstige"),
-      hjSpalte(2, "zeugnis", "grp-zeugnis", "Zeugnis"),
-      { id: "jahr:gesamt", grp: "grp-zeugnis", trenner: true, stark: true, kopf: "Jahr",
-        zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.jahr, mss)) }
-    ];
+    spalten.push({
+      id: "sum:sonstige", grp: "grp-sonstige", stark: true,
+      kopf: "Sonstige<br>Leistungen",
+      zelle: (sp, ctx) => spaltenZelle(sp, tendenzBadge(ctx.hjErg.sonstige, mss))
+    });
+    spalten.push({
+      id: "sum:zeugnis", grp: "grp-zeugnis", trenner: true, stark: true,
+      kopf: "Zeugnisnote<br>" + ktx.hj + ". Halbjahr",
+      zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.hjErg.zeugnis, mss))
+    });
+    if (ktx.hj === 2) {
+      spalten.push({
+        id: "sum:jahr", grp: "grp-zeugnis", stark: true,
+        kopf: "Zeugnisnote<br>Jahr",
+        zelle: (sp, ctx) => spaltenZelle(sp, zeugnisBadge(ctx.jahr, mss))
+      });
+    }
+    return spalten;
   }
 
   function spaltenKey(klasseId, hj) {
-    return klasseId + "|" + (hj === null ? "jahr" : hj);
+    return klasseId + "|hj" + hj;
   }
 
   // Wendet eine per Ziehen gemerkte Reihenfolge an. Sie liegt nur im State
@@ -365,21 +405,131 @@
     ).join("") + "</tr>";
   }
 
-  function notenZeile(spalten, s, ctx) {
-    ctx.s = s;
-    return "<tr>" +
-      '<td class="pointer" data-action="student-detail" data-sid="' + s.id + '"><strong>' + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
-      spalten.map((sp) => sp.zelle(sp, ctx)).join("") +
-    "</tr>";
+  // Rechenkontext einer Zeile: die Noten des Schülers nach Spalte, dazu die
+  // komplette Halbjahres-Kette (im 2. HJ zusätzlich die Jahresnote).
+  function zeilenKontext(s) {
+    const noten = notenKtx.notenBySchueler[s.id] || [];
+    const werte = {};
+    noten.forEach((n) => { if (n.leistungId) werte[n.leistungId] = n; });
+    const hjErg = Calc.halbjahrErgebnis(notenKtx.kats, noten, notenKtx.k, notenKtx.hj, notenKtx.mss);
+    let jahr = null;
+    if (notenKtx.hj === 2) {
+      const hj1 = Calc.halbjahrErgebnis(notenKtx.kats, noten, notenKtx.k, 1, notenKtx.mss);
+      jahr = Calc.jahresnote(hj1.zeugnis, hjErg.zeugnis, notenKtx.mss);
+    }
+    return { s, werte, hjErg, jahr, ereignisse: notenKtx.ereignisse };
   }
 
-  // ---- Noten: Scroll-Spielraum und Spalten ziehen ---------------------------
+  function notenZeilenInhalt(s) {
+    const ctx = zeilenKontext(s);
+    return '<td class="pointer" data-action="student-detail" data-sid="' + s.id + '"><strong>' +
+      UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
+      notenKtx.spalten.map((sp) => sp.zelle(sp, ctx)).join("");
+  }
+  function notenZeile(s) {
+    return '<tr data-sid="' + s.id + '">' + notenZeilenInhalt(s) + "</tr>";
+  }
+
+  // ---- Noten: Scroll-Spielraum, Inline-Eingabe, Spalten ziehen -------------
   function mountNotenTabelle(k) {
     const wrap = UI.$(".noten-wrap");
     const table = wrap && UI.$(".noten-tab", wrap);
-    if (!table) return;
+    if (!table || !notenKtx) return;
     randSpielraum(wrap, table);
-    spaltenZiehen(wrap, table, spaltenKey(k.id, quartalFilter("notenQuartal")));
+    notenEingabe(table);
+    spaltenZiehen(wrap, table, notenKtx.key, (spaltenId) => {
+      if (spaltenId.indexOf("l:") === 0) Views.leistungDialog(k, spaltenId.slice(2));
+    });
+  }
+
+  // Excel-artige Eingabe: Tipp auf eine Zelle macht sie zum Eingabefeld,
+  // Enter springt eine Zeile nach unten, Tab in die nächste Spalte. Gespeichert
+  // wird beim Verlassen; danach wird nur die betroffene Zeile neu gerechnet
+  // (die Sammelspalten hängen allein an ihr).
+  function notenEingabe(table) {
+    let aktiv = null;   // { td, input, lid, sid, alt }
+
+    table.addEventListener("click", (ev) => {
+      const td = ev.target.closest ? ev.target.closest("td.zelle") : null;
+      if (td && td !== (aktiv && aktiv.td)) oeffnen(td);
+    });
+
+    function zellen() { return UI.$all("td.zelle", table); }
+
+    function oeffnen(td) {
+      if (aktiv) schliessen(true);
+      const lid = td.getAttribute("data-lid");
+      const sid = td.getAttribute("data-sid");
+      const noten = notenKtx.notenBySchueler[sid] || [];
+      const vorhanden = noten.find((n) => n.leistungId === lid);
+      const alt = vorhanden && vorhanden.wert !== null && vorhanden.wert !== undefined
+        ? Calc.formatTendenz(vorhanden.wert, notenKtx.mss) : "";
+      td.classList.add("editiert");
+      td.innerHTML = '<input class="zelle-input" inputmode="' + (notenKtx.mss ? "numeric" : "text") +
+        '" value="' + UI.esc(alt) + '">';
+      const input = td.querySelector("input");
+      aktiv = { td, input, lid, sid, alt };
+      input.focus();
+      input.select();
+      input.addEventListener("keydown", taste);
+      input.addEventListener("blur", () => { if (aktiv && aktiv.input === input) schliessen(true); });
+    }
+
+    function taste(ev) {
+      if (ev.key === "Escape") { ev.preventDefault(); schliessen(false); return; }
+      if (ev.key === "Enter" || ev.key === "Tab") {
+        ev.preventDefault();
+        const richtung = ev.shiftKey ? -1 : 1;
+        const lid = aktiv.lid, sid = aktiv.sid;
+        const nachUnten = ev.key === "Enter";
+        schliessen(true).then(() => {
+          const naechste = nachbarZelle(sid, lid, nachUnten, richtung);
+          if (naechste) oeffnen(naechste);
+        });
+      }
+    }
+
+    // Nachbarzelle: Enter = gleiche Spalte, nächste Zeile · Tab = gleiche Zeile,
+    // nächste Spalte (Shift kehrt die Richtung um).
+    function nachbarZelle(sid, lid, nachUnten, richtung) {
+      const alle = zellen();
+      const index = alle.findIndex((td) =>
+        td.getAttribute("data-sid") === sid && td.getAttribute("data-lid") === lid);
+      if (index < 0) return null;
+      if (!nachUnten) return alle[index + richtung] || null;
+      const spalte = alle.filter((td) => td.getAttribute("data-lid") === lid);
+      const pos = spalte.indexOf(alle[index]);
+      return spalte[pos + richtung] || null;
+    }
+
+    async function schliessen(speichern) {
+      if (!aktiv) return;
+      const { td, input, lid, sid, alt } = aktiv;
+      const text = input.value.trim();
+      aktiv = null;
+      td.classList.remove("editiert");
+      if (!speichern || text === alt) { zeileNeu(sid); return; }
+      const wert = text === "" ? null : Calc.parseNote(text, notenKtx.mss);
+      if (text !== "" && wert === null) {
+        UI.toast(notenKtx.mss ? "Bitte Punkte 0–15 eingeben" : "Bitte eine Note eingeben, z. B. 2, 2+ oder 3-");
+        zeileNeu(sid);
+        return;
+      }
+      const leistung = notenKtx.leistungen.find((l) => l.id === lid);
+      if (!leistung) return;
+      const gespeichert = await Store.Noten.setzeZelle(leistung, sid, wert);
+      // Lokalen Notenstand nachziehen, damit die Zeile ohne Neuladen stimmt
+      const liste = (notenKtx.notenBySchueler[sid] || []).filter((n) => n.leistungId !== lid);
+      if (gespeichert) liste.push(gespeichert);
+      notenKtx.notenBySchueler[sid] = liste;
+      zeileNeu(sid);
+    }
+
+    function zeileNeu(sid) {
+      const tr = UI.$('tbody tr[data-sid="' + sid + '"]', table);
+      const s = notenKtx.schueler.find((x) => x.id === sid);
+      if (tr && s) tr.innerHTML = notenZeilenInhalt(s);
+    }
   }
 
   // Zusätzlicher Platz rechts neben der Tabelle, damit sich auch die letzten
@@ -398,7 +548,9 @@
   // HTML5-Drag&Drop – letzteres gibt es auf iPad-Safari nicht. Während des
   // Ziehens wird nur die Zielspalte markiert; sortiert (und neu gerendert)
   // wird erst beim Loslassen, damit der Pointer nicht sein Element verliert.
-  function spaltenZiehen(wrap, table, key) {
+  // Ein reiner Tipp (ohne Bewegung) ruft beimTippen(spaltenId) – der Klick
+  // selbst kommt auf iOS nicht an, weil pointerdown preventDefault() macht.
+  function spaltenZiehen(wrap, table, key, beimTippen) {
     const koepfe = UI.$all("thead th[data-spalte]", table);
     if (koepfe.length < 2) return;
 
@@ -516,7 +668,10 @@
       const id = quelleId;
       aktiv = false;
       aufraeumen(ev);
-      if (!warAktiv || pos < 0) return;         // reiner Tap: nichts tun
+      if (!warAktiv || pos < 0) {               // reiner Tap: Spalte bearbeiten
+        if (!warAktiv && beimTippen && id) beimTippen(id);
+        return;
+      }
       const ids = koepfe.map((th) => th.getAttribute("data-spalte"));
       const von = ids.indexOf(id);
       const nach = pos > von ? pos - 1 : pos;   // eigene Spalte fällt vorher raus

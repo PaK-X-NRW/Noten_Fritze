@@ -84,8 +84,9 @@ Wichtige Muster:
 IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
 
 - **Kaskadierung beachten:** Löschen einer Klasse/eines Schülers muss abhängige
-  Datensätze mitlöschen (Noten, Ereignisse, Stunden, Abwesenheiten, Sitzplatz-Zuweisung).
-  Bestehende Logik in `store.js` wiederverwenden, nicht umgehen.
+  Datensätze mitlöschen (Leistungen, Noten, Ereignisse, Stunden, Abwesenheiten,
+  Sitzplatz-Zuweisung); eine Kategorie nimmt ihre Leistungen mit, eine Leistung
+  ihre Noten. Bestehende Logik in `store.js` wiederverwenden, nicht umgehen.
 - **Versionierung ist dreistufig** – die App-Version ist unabhängig von den
   beiden internen Zählern, sie werden **nicht** gekoppelt:
   0. **App-Version** (`APP_VERSION` in `js/version.js`, `MAJOR.MINOR.PATCH`):
@@ -97,8 +98,8 @@ IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
   2. **Datenform** (neue/geänderte Felder): `SCHEMA_VERSION` in `store.js`
      erhöhen und einen Schritt in `MIGRATION_STEPS` (Schlüssel = Ziel-Version)
      ergänzen. `migrateSchema()` läuft beim App-Start kaskadiert
-     (v1→v2→v3 …; aktueller Stand **8** – `quartal` auf noten/ereignisse/stunden,
-     `aktuellesQuartal` + `haModus` in den Settings). Neue Felder bekommen zusätzlich immer Defaults
+     (v1→v2→v3 …; aktueller Stand **11** – Spaltenmodell: Store `leistungen`
+     und `leistungId` auf den Noten, `quelle` auf den Kategorien). Neue Felder bekommen zusätzlich immer Defaults
      (Factorys + `getSettings`-Merge), damit alte Datensätze nicht crashen.
 - IDs via `Store`-internem `uid()` (crypto.randomUUID mit Fallback).
 - Tages-Zuordnungen (Abwesenheiten, aktive Tage) nutzen das **lokale** Datum
@@ -124,23 +125,61 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
 - **Zeugnisskala:** `Calc.zeugnisnote` rundet auf ganze Noten plus die einzige zulässige
   Tendenz 4- (=4,3): bis 1,5→1 · bis 2,5→2 · bis 3,5→3 · unter 4,15→4 · bis 4,5→4- ·
   bis 5,5→5 · darüber 6 (genau auf der Grenze gewinnt die bessere Note).
-  `Calc.zeugnisErgebnis(res)` rechnet die Zeugnisnote aus den **gerundeten** Teilnoten und
-  fällt nur bei Ergebnissen exakt auf einer Grenze auf `res.gesamtRoh` zurück.
   `Calc.jahresnote(hj1, hj2)` gewichtet 49/51, damit bei Gleichstand das 2. Halbjahr
   entscheidet. Anzeige immer über `Calc.formatZeugnisnote`.
+- **Drittelnoten:** Alle Zwischennoten laufen über `Calc.tendenznote` (x,0 | x,3 | x,7);
+  genau zwischen zwei Stufen gewinnt die **schlechtere** Note (2,15 → 2,3). Gerundet wird
+  in Tausendsteln, weil die Mitte binär sonst nicht exakt trifft. Angezeigt wird
+  ausschließlich über `Calc.formatTendenz` (1,7 → „2+"), nie als Dezimalzahl; nur Werte
+  außerhalb der Skala fallen auf `formatNote` zurück.
+- **Halbjahres-Kette:** `Calc.halbjahrErgebnis(kategorien, noten, klasse, hj, mss)` ist die
+  eine Quelle für die Notenübersicht, den Besprechungsmodus, das Schüler-Detail und den
+  CSV-Export: Epochalnote je Quartal (Drittel) → sonstige Leistungen (Ø der gerundeten
+  Epochalnoten, Drittel) → schriftliche Leistungen (Drittel) → Zeugnisnote (Zeugnisskala).
+  Keine dieser Rechnungen in einer View nachbauen.
+  `Calc.zeugnisErgebnis(res)` ist die ältere, quartalsbezogene Variante – sie wird von der
+  Notenübersicht nicht mehr benutzt.
 - **Kategorien** tragen `anzeige: "note" | "fehlendeHA"`. `fehlendeHA` heißt: die Spalte
   zeigt die Anzahl der `keinehausaufgabe`-Ereignisse und die Kategorie fällt in
   `Calc.berechneSchueler` aus der Gewichtung (Feld `zaehltInNote` je Kategorie-Ergebnis).
+- **Kategorien tragen zusätzlich `quelle: "manuell" | "mitarbeit"`.** „mitarbeit" heißt:
+  die Noten kommen ausschließlich aus „Quartal abschließen". Aus dem Mitarbeitsbereich
+  erscheint in der Notenübersicht **nur diese fertige Note** – kein Zwischenstand, keine
+  automatisch erzeugten Einzelnoten. Daran hängt auch, wann die Epochalnote entsteht
+  (`Calc.mitarbeitVorhanden`): Solange für ein Quartal keine Mitarbeitsnote vorliegt, ist
+  `epochal[i].offen === true` und die Epochalnote bleibt `null`. Klassen **ohne** eine
+  Kategorie mit `quelle: "mitarbeit"` arbeiten ohne Mitarbeitsnote – dort ist die
+  Epochalnote sofort fertig, sonst käme sie nie zustande.
 - **Anteile:** Hauptfach 50/50, Nebenfach 30/70 (Defaults in `settings.anteile`, pro Klasse
   überschreibbar).
+- **Eine Spalte = eine Leistung:** Store `leistungen` ({klasseId, kategorieId, quartal,
+  titel, datum}) ist die Spalte der Notenübersicht; die Kategorie liefert nur noch
+  Gewicht und Gruppe. In einer Zelle (Leistung × Schüler/in) steht **genau eine Note** –
+  durchgesetzt von `Store.Noten.setzeZelle(leistung, schuelerId, wert)` (wert `null`
+  löscht). Titel, Datum, Quartal und Kategorie einer Note folgen immer ihrer Leistung;
+  Noten nie mit `Store.Noten.save` direkt an der Spalte vorbei anlegen. Für automatisch
+  erzeugte Noten (Quartalsabschluss, HA-Note 6) gibt es `Store.leistungFuer`.
+- **Zeitraum der Notenübersicht ist das Halbjahr** (`state.notenHalbjahr`,
+  `halbjahrFilter` / `halbjahrTabsHTML` in views.core.js) – die Quartale erscheinen darin
+  als Epochalnoten. Mitarbeit/Tracker bleiben quartalsweise (`quartalFilter`).
+  Das Quartal einer Note kommt aus ihrer Spalte, **nicht** aus `settings.aktuellesQuartal` –
+  sonst wandern Noten beim Erfassen ins falsche Halbjahr.
 - **Notentabelle = Spaltenmodell:** Kopf und Datenzellen entstehen aus einer Liste von
-  Spalten-Deskriptoren (`halbjahrSpalten` / `jahresSpalten` in `views.home-klasse.js`),
-  jeder mit `id`, Farbgruppe (`grp`) und `zelle(sp, ctx)`. Neue Spalten dort ergänzen,
-  nicht im HTML-String. Die per Ziehen gesetzte Reihenfolge liegt **nur** in
+  Spalten-Deskriptoren (`halbjahrSpalten` in `views.home-klasse.js`), jeder mit `id`,
+  Farbgruppe (`grp`) und `zelle(sp, ctx)`. Neue Spalten dort ergänzen, nicht im
+  HTML-String. Reihenfolge: schriftliche Leistungen · je Quartal (sonstige Leistungen,
+  HA-Zählung, Epochalnote) · Schriftlich · Sonstige · Zeugnisnote (+ Jahr im 2. HJ).
+- **Inline-Eingabe:** `notenEingabe` in `views.home-klasse.js` macht die Zelle zum
+  Eingabefeld (Enter = nächste Zeile, Tab = nächste Spalte, Esc = abbrechen). Nach dem
+  Speichern wird **nur die betroffene Zeile** neu gerechnet (`notenKtx` + `zeilenKontext`),
+  kein `render()` – sonst springt der Fokus. `notenKtx` hält den Renderkontext zwischen
+  `TabNoten` und `mountNotenTabelle`. Die per Ziehen gesetzte Reihenfolge liegt **nur** in
   `state.notenSpalten` (`{ key, ids }`) – bewusst nicht in IndexedDB, damit beim Neuladen
   der Default gilt. Passt die Spaltenmenge nicht zur gemerkten Liste, greift der Default.
   Das Ziehen selbst ist Pointer-Events-Code (`spaltenZiehen`), weil iPad-Safari kein
-  HTML5-Drag&Drop kennt; sortiert wird erst beim Loslassen. Für iPad: `touch-action:
+  HTML5-Drag&Drop kennt; sortiert wird erst beim Loslassen. Ein reiner Tipp auf den Kopf
+  ruft den Callback `beimTippen` (Spalte bearbeiten) – ein normales `click`-Event kommt auf
+  iOS nicht an, weil `pointerdown` `preventDefault()` macht. Für iPad: `touch-action:
   none` auf `th.zieh`, `preventDefault()` im `pointerdown` und Move/Up-Listener auf
   `document`, damit iOS den Drag nicht per `pointercancel` abwürgt.
 - **Reihenfolge der Schüler/innen:** `settings.schuelerSortierung`
@@ -169,10 +208,10 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
 - **Sonstige Leistungen quartalsweise:** Bei Halbjahr-/Jahr-Filter rechnet
   `Calc.berechneSchueler` die sonstige Gruppe als Mittel der
   Quartals-Durchschnitte (Q1+Q2 je 50 % fürs 1. HJ; fehlende Quartale werden
-  robust übersprungen, vorhandene zählen 100 %). Die Quartals-Ergebnisse liegen
-  in `res.sonstige.quartale` – die Jahr-Ansicht der Notenübersicht zeigt daraus
-  die Spalten „Sonst. 1. Q–4. Q" (`jahresSpalten`). Schriftlich läuft
-  unverändert über den ganzen Zeitraum.
+  robust übersprungen, vorhandene zählen 100 %); die Quartals-Ergebnisse liegen
+  in `res.sonstige.quartale`. Die Notenübersicht nutzt diesen Weg **nicht** direkt,
+  sondern `Calc.halbjahrErgebnis` – dort werden die *gerundeten* Epochalnoten
+  gemittelt. Schriftlich läuft unverändert über den ganzen Zeitraum.
 - **Stunden (Store `stunden`) sind die Erfassungseinheit des Trackers:** Beim Start
   wird eine Stunde angelegt (`Store.neueStunde` aus `Calc.trackerSession`,
   Einzel-/Doppelstunde) oder die offene Stunde von heute fortgesetzt
@@ -211,13 +250,17 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
   6 und die Meldungspunkte der Stunde entfallen; die HA-Zählung
   (`keinehausaufgabe`) bleibt davon unberührt.
 - **HA-Modus:** `settings.haModus` (`"punkte"` = Punkteabzug in der Mitarbeit,
-  bisheriges Verhalten | `"note6"` = vergessene HA geben keine Punkte;
-  `Store.haNote6Pruefen` erzeugt bei jeder 3. je Quartal automatisch eine Note
-  6 in „Mündliche Mitarbeit", Aufruf im Tracker-Modus „Keine HA"). Select in
-  den Einstellungen.
+  bisheriges Verhalten | `"note6"` = vergessene HA geben keine Punkte; je drei
+  vergessener HA im Zeitraum hängt `Calc.auswertungMitarbeit` stattdessen eine
+  zusätzliche Stundennote 6 an (`haNoten`), die den Notenvorschlag drückt und mit dem
+  Quartalsabschluss in der Mitarbeitsnote landet). `Store.haNote6Pruefen` **schreibt
+  nichts mehr**, es meldet dem Tracker nur die volle Dreiergruppe für den Toast –
+  eine eigene Notenspalte darf dabei nicht entstehen. Select in den Einstellungen.
 - **Quartal abschließen:** Button im Mitarbeit-Tab (nur bei konkretem Quartal),
   Dialog `quartalAbschliessenDialog` mit pro Schüler editierbaren
-  Notenvorschlägen und Ziel-Kategorie (Default „Mündliche Mitarbeit"). Vor dem
+  Notenvorschlägen (vorbelegt mit dem auf eine Note gerundeten Ø, nicht mit dem rohen
+  Dezimalwert) und Ziel-Kategorie (Default „Mündliche Mitarbeit", wird dabei auf
+  `quelle: "mitarbeit"` gesetzt). Vor dem
   Löschen CSV-Export der Noten (`CSV.exportQuartalNoten`) und Ereignisse
   (`CSV.exportEreignisse`); der Übertrag legt die Noten mit Quartal an und
   löscht Ereignisse + Stunden des Quartals (Abwesenheiten bleiben).
@@ -280,9 +323,11 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
 - **`render()` nach Mutation vergessen** → UI zeigt alten Stand.
 - Änderungen an `calc.js` können weitreichende Folgen haben (Gesamtnote!) –
   Berechnung im Schüler-Detail / Besprechungsmodus gegenprüfen.
-- **Quartal-Tagging vergessen:** Neue Datensätze (Noten, Ereignisse, Stunden)
-  müssen `quartal` bekommen – über die Factorys (`neueNote`, `neuesEreignis`,
-  `neueStunde`) bzw. aus `settings.aktuellesQuartal`. Ohne `quartal` landen sie
+- **Note ohne Spalte angelegt:** Noten ohne `leistungId` tauchen in der Notenübersicht
+  nicht auf. Immer über `Store.Noten.setzeZelle` bzw. `Store.leistungFuer` gehen.
+- **Quartal-Tagging vergessen:** Neue Datensätze (Ereignisse, Stunden) müssen `quartal`
+  bekommen – über die Factorys (`neuesEreignis`, `neueStunde`) bzw. aus
+  `settings.aktuellesQuartal`; bei Noten liefert es die Leistung. Ohne `quartal` landen sie
   in jeder Quartals-Filterung (Kompatibilitäts-Regel) und verfälschen alle
   Quartale. `halbjahr` wird nur noch abgeleitet mitgeschrieben.
 - **Schwellen-Bedeutung geändert:** `mitarbeitSchwellen` gelten seit dem

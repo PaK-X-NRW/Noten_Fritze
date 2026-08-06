@@ -159,7 +159,8 @@
       if (selQ) selQ.addEventListener("change", async () => {
         s.aktuellesQuartal = parseInt(selQ.value, 10) || 1;
         await Store.saveSettings(s);
-        state.notenQuartal = ""; state.auswertungQuartal = ""; // Filter-Defaults neu ziehen
+        // Filter-Defaults neu ziehen (Notenübersicht folgt dem Halbjahr)
+        state.notenHalbjahr = ""; state.auswertungQuartal = "";
         UI.toast("Quartal gespeichert");
       });
       const selHa = UI.$("#f-haModus");

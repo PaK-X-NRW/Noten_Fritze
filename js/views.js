@@ -8,7 +8,7 @@
 
   const { state, go, render } = global.Views;
   const {
-    klasseDialog, splitsDialog, schuelerDialog, kategorieDialog, cellDialog,
+    klasseDialog, splitsDialog, schuelerDialog, kategorieDialog, leistungDialog,
     studentDetailDialog, seatAssignDialog, importStudentsDialog, backupImportDialog,
     schwellenDialog, mitarbeitHerleitungDialog, quartalAbschliessenDialog, klassenImportDialog,
     trackerStartDialog, trackerModusToggle, trackerModusEnde, trackerModusTap,
@@ -60,21 +60,23 @@
       }
     },
 
-    "edit-cell": async (el) => cellDialog(await Store.Klassen.get(state.klasseId), el.getAttribute("data-sid"), el.getAttribute("data-cid")),
+    "add-leistung": async () => leistungDialog(await Store.Klassen.get(state.klasseId), null),
     "student-detail": async (el) => studentDetailDialog(await Store.Klassen.get(state.klasseId), el.getAttribute("data-sid")),
 
     "export-noten": async () => {
       const k = await Store.Klassen.get(state.klasseId);
-      const [s, kt, n, ev] = await Promise.all([
-        Store.Schueler.byKlasse(k.id), Store.Kategorien.byKlasse(k.id),
-        Store.Noten.byKlasse(k.id), Store.Ereignisse.byKlasse(k.id)
+      const [s, kt, n] = await Promise.all([
+        Store.Schueler.byKlasse(k.id), Store.Kategorien.byKlasse(k.id), Store.Noten.byKlasse(k.id)
       ]);
-      exportToast(await CSV.exportNoten(k, s, kt, n, state.settings, ev), "Noten-CSV");
+      exportToast(await CSV.exportNoten(k, s, kt, n, state.settings), "Noten-CSV");
     },
     "export-einzelnoten": async () => {
       const k = await Store.Klassen.get(state.klasseId);
-      const [s, kt, n] = await Promise.all([Store.Schueler.byKlasse(k.id), Store.Kategorien.byKlasse(k.id), Store.Noten.byKlasse(k.id)]);
-      exportToast(await CSV.exportEinzelnoten(k, s, kt, n), "Einzelnoten-CSV");
+      const [s, kt, n, l] = await Promise.all([
+        Store.Schueler.byKlasse(k.id), Store.Kategorien.byKlasse(k.id),
+        Store.Noten.byKlasse(k.id), Store.Leistungen.byKlasse(k.id)
+      ]);
+      exportToast(await CSV.exportEinzelnoten(k, s, kt, n, l), "Einzelnoten-CSV");
     },
     "export-events": async () => {
       const k = await Store.Klassen.get(state.klasseId);
@@ -133,7 +135,7 @@
     "ausw-range": (el) => { state.auswertungRange = el.getAttribute("data-range"); render(); },
     "edit-schwellen": async () => schwellenDialog(await Store.Klassen.get(state.klasseId)),
     "ausw-herleitung": async (el) => mitarbeitHerleitungDialog(el.getAttribute("data-sid")),
-    "noten-hj": (el) => { state.notenQuartal = el.getAttribute("data-hj"); render(); },
+    "noten-hj": (el) => { state.notenHalbjahr = el.getAttribute("data-hj"); render(); },
     "noten-spalten-reset": () => { state.notenSpalten = null; render(); },
     "ausw-hj": (el) => { state.auswertungQuartal = el.getAttribute("data-hj"); render(); },
 

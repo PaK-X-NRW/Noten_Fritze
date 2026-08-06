@@ -6,7 +6,7 @@
   "use strict";
 
   const {
-    state, go, render, quartalFilter, breakdownHTML,
+    state, go, render, quartalFilter, halbjahrFilter, breakdownHTML,
     schwellenFelderHTML, schwellenAusFormular, auswertungKontext
   } = global.Views;
 
@@ -216,7 +216,12 @@
       UI.field("Anzeige in der Notenübersicht", "anzeige", data.anzeige || "note", { type: "select", options: [
         { value: "note", label: "Note (zählt in die Gesamtnote)" },
         { value: "fehlendeHA", label: "Anzahl vergessener Hausaufgaben (zählt nicht)" }
-      ], hint: "Bei der Zählung wird die Gewichtung ignoriert; die Zahl kommt aus dem Tracker." });
+      ], hint: "Bei der Zählung wird die Gewichtung ignoriert; die Zahl kommt aus dem Tracker." }) +
+      UI.field("Herkunft der Noten", "quelle", data.quelle || "manuell", { type: "select", options: [
+        { value: "manuell", label: "Von Hand in der Notenübersicht" },
+        { value: "mitarbeit", label: "Mitarbeitsnote (aus „Quartal abschließen“)" }
+      ], hint: "Bei „Mitarbeitsnote“ bleibt die Epochalnote eines Quartals leer, " +
+        "bis die Note aus dem Mitarbeit-Tab übertragen wurde." });
     UI.modal({ title: isNew ? "Neue Kategorie" : "Kategorie bearbeiten", bodyHTML: body, buttons: [
       { label: "Abbrechen" },
       { label: isNew ? "Anlegen" : "Speichern", className: "primary", onClick: async (close, box) => {
@@ -226,6 +231,7 @@
         Object.assign(data, {
           name: v.name.trim(), art: v.art,
           anzeige: v.anzeige === "fehlendeHA" ? "fehlendeHA" : "note",
+          quelle: v.quelle === "mitarbeit" ? "mitarbeit" : "manuell",
           gewichtung: Math.max(0, parseFloat(String(v.gewichtung).replace(",", ".")) || 0)
         });
         await Store.Kategorien.save(data); close(); render();
@@ -233,76 +239,91 @@
     ]});
   }
 
-  // ---- Zelle: Einzelnoten erfassen ----------------------------------------
-  async function cellDialog(k, sid, cid) {
-    const mss = Calc.istMSS(k);
-    const s = await Store.Schueler.get(sid);
-    const c = await Store.Kategorien.get(cid);
-    const alle = await Store.Noten.byKlasse(k.id);
-    let noten = alle.filter((n) => n.schuelerId === sid && n.kategorieId === cid)
-      .sort((a, b) => (a.datum < b.datum ? -1 : 1));
-
-    function listHTML() {
-      if (!noten.length) return '<p class="muted">Noch keine Noten.</p>';
-      return noten.map((n) =>
-        '<div class="line" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line)">' +
-          '<span class="note-badge" style="background:' + Calc.noteFarbe(n.wert, mss) + '">' + Calc.formatNote(n.wert) + "</span>" +
-          '<span class="grow">' + UI.esc(n.titel || "") + ' <span class="muted">' + UI.esc(n.datum) +
-            (n.quartal ? " · " + n.quartal + ". Q" : (n.halbjahr ? " · " + n.halbjahr + ". HJ" : "")) + "</span></span>" +
-          '<button class="iconbtn plain danger-text" data-del="' + n.id + '">🗑</button>' +
-        "</div>"
-      ).join("");
+  // ---- Spalte (Leistung) anlegen/bearbeiten --------------------------------
+  // Eine Leistung ist genau eine Spalte der Notenübersicht; ihr Quartal
+  // entscheidet, in welche Epochalnote sie einfließt. Neue Spalten liegen
+  // voreingestellt im ersten Quartal des angezeigten Halbjahres – Noten
+  // können so nicht versehentlich im anderen Halbjahr landen.
+  async function leistungDialog(k, leistungId) {
+    const kats = await Store.Kategorien.byKlasse(k.id);
+    const benutzbar = kats.filter((c) => (c.anzeige || "note") === "note");
+    if (!benutzbar.length) {
+      UI.toast("Erst eine Kategorie anlegen (z. B. „Klassenarbeit“)");
+      return;
     }
+    const hj = halbjahrFilter();
+    const isNew = !leistungId;
+    const data = isNew
+      ? Store.neueLeistung(k.id, { kategorieId: benutzbar[0].id, quartal: hj === 2 ? 3 : 1 })
+      : await Store.Leistungen.get(leistungId);
+    if (!data) { UI.toast("Spalte nicht gefunden"); return; }
 
     const body =
-      '<p class="muted">' + UI.esc(UI.vollerName(s)) + " · " + UI.esc(c.name) + "</p>" +
-      '<div id="note-list">' + listHTML() + "</div>" +
-      '<div class="spacer"></div>' +
-      '<div class="form-row" style="align-items:flex-end">' +
-        '<div class="field grow" style="margin:0"><label>Neue ' + (mss ? "Punktzahl" : "Note") + '</label><input id="new-note" inputmode="' +
-          (mss ? "numeric" : "decimal") + '" placeholder="' + (mss ? "0 bis 15" : "z. B. 2 oder 2,3 oder 2+") + '"></div>' +
-        '<div class="field" style="margin:0;flex:1"><label>Titel (optional)</label><input id="new-title" placeholder="' + UI.esc(c.name) + '"></div>' +
+      UI.field("Bezeichnung", "titel", data.titel, {
+        placeholder: "z. B. 2. Klassenarbeit", autofocus: true,
+        hint: "Steht als Spaltenkopf über der Note."
+      }) +
+      '<div class="form-row">' +
+        UI.field("Kategorie", "kategorieId", data.kategorieId, { type: "select",
+          options: benutzbar.map((c) => ({
+            value: c.id,
+            label: c.name + " (" + (c.art === "schriftlich" ? "schriftlich" : "sonstige") + ", Gew " + c.gewichtung + ")"
+          })),
+          hint: "Liefert Gewicht und Gruppe." }) +
+        UI.field("Quartal", "quartal", data.quartal, { type: "select",
+          options: [1, 2, 3, 4].map((q) => ({
+            value: q,
+            label: q + ". Quartal (" + Store.halbjahrAusQuartal(q) + ". Halbjahr)"
+          })),
+          hint: "Bestimmt die Epochalnote." }) +
       "</div>" +
-      '<button class="btn primary" id="add-note" style="width:100%">Note hinzufügen</button>';
+      UI.field("Datum", "datum", data.datum, { type: "date" });
 
-    const m = UI.modal({ title: "Noten erfassen", bodyHTML: body, dismissible: true,
-      buttons: [{ label: "Fertig", className: "primary" }],
-      onClose: () => render()
-    });
+    const buttons = [{ label: "Abbrechen" }];
+    if (!isNew) {
+      buttons.push({ label: "Spalte löschen", className: "danger", onClick: async (close) => {
+        const ok = await UI.confirmDialog("Spalte löschen?",
+          "Die Spalte „" + (data.titel || "ohne Titel") + "“ und alle darin erfassten Noten werden gelöscht.");
+        if (!ok) return;
+        await Store.Leistungen.remove(data.id);
+        close(); render();
+      }});
+    }
+    buttons.push({ label: isNew ? "Anlegen" : "Speichern", className: "primary", onClick: async (close, box) => {
+      const v = UI.formValues(box);
+      const quartal = parseInt(v.quartal, 10) || 1;
+      Object.assign(data, {
+        titel: v.titel.trim(),
+        kategorieId: v.kategorieId,
+        quartal,
+        datum: v.datum || Store.datumLokal()
+      });
+      await Store.Leistungen.save(data);
+      // Noten der Spalte folgen ihr (Quartal/Kategorie/Datum sind Spalten-Sache)
+      const noten = await DB.getAllByIndex("noten", "leistungId", data.id);
+      noten.forEach((n) => {
+        n.kategorieId = data.kategorieId;
+        n.quartal = quartal;
+        n.halbjahr = Store.halbjahrAusQuartal(quartal);
+        n.titel = data.titel;
+        n.datum = data.datum;
+      });
+      if (noten.length) await DB.bulkPut("noten", noten);
+      // Beim Anlegen ins Halbjahr der neuen Spalte wechseln, damit sie sichtbar ist
+      state.notenHalbjahr = String(Store.halbjahrAusQuartal(quartal));
+      close(); render();
+    }});
 
-    const box = m.box;
-    function refresh() { box.querySelector("#note-list").innerHTML = listHTML(); wireDeletes(); }
-    function wireDeletes() {
-      UI.$all("[data-del]", box).forEach((b) => b.addEventListener("click", async () => {
-        const id = b.getAttribute("data-del");
-        await Store.Noten.remove(id);
-        noten = noten.filter((n) => n.id !== id);
-        refresh();
-      }));
-    }
-    async function addNote() {
-      const inp = box.querySelector("#new-note");
-      const val = Calc.parseNote(inp.value, mss);
-      if (val === null) { UI.toast(mss ? "Bitte gültige Punktzahl 0–15 eingeben" : "Bitte gültige Note 1–6 eingeben"); inp.focus(); return; }
-      const titel = box.querySelector("#new-title").value.trim();
-      const quartal = parseInt(state.settings.aktuellesQuartal, 10) || 1;
-      const n = Store.neueNote({ klasseId: k.id, schuelerId: sid, kategorieId: cid, wert: val, titel,
-        quartal, halbjahr: Store.halbjahrAusQuartal(quartal) });
-      await Store.Noten.save(n);
-      noten.push(n);
-      inp.value = ""; box.querySelector("#new-title").value = "";
-      refresh(); inp.focus();
-    }
-    box.querySelector("#add-note").addEventListener("click", addNote);
-    box.querySelector("#new-note").addEventListener("keydown", (e) => { if (e.key === "Enter") addNote(); });
-    wireDeletes();
+    UI.modal({ title: isNew ? "Neue Spalte" : "Spalte bearbeiten", bodyHTML: body, buttons });
   }
 
   async function studentDetailDialog(k, sid) {
     const s = await Store.Schueler.get(sid);
     const [kats, notenAll] = await Promise.all([Store.Kategorien.byKlasse(k.id), Store.Noten.byKlasse(k.id)]);
-    const res = Calc.berechneSchueler(kats, notenAll.filter((n) => n.schuelerId === sid), k, state.settings.rundung, quartalFilter("notenQuartal"));
-    UI.modal({ title: UI.vollerName(s), bodyHTML: breakdownHTML(res, Calc.istMSS(k)), buttons: [{ label: "Schließen", className: "primary" }] });
+    const hjErg = Calc.halbjahrErgebnis(kats, notenAll.filter((n) => n.schuelerId === sid),
+      k, halbjahrFilter(), Calc.istMSS(k));
+    UI.modal({ title: UI.vollerName(s), bodyHTML: breakdownHTML(hjErg, Calc.istMSS(k)),
+      buttons: [{ label: "Schließen", className: "primary" }] });
   }
 
   // ---- Sitzplatz zuweisen --------------------------------------------------
@@ -418,15 +439,18 @@
         '<td class="num">' + (hatV
           ? '<span class="note-badge" style="background:' + Calc.noteFarbe(vorschlag) + '">' + Calc.formatNote(vorschlag, 1) + "</span>"
           : "–") + "</td>" +
-        '<td><input data-sid="' + s.id + '" inputmode="' + (mss ? "numeric" : "decimal") + '" style="width:90px" value="' +
-          (mss ? "" : (hatV ? Calc.formatNote(vorschlag, 1) : "")) + '" placeholder="' + (mss ? "0–15" : "–") + '"></td>' +
+        // Vorgeschlagen wird eine echte Note (2+, 3, 4-), nicht der rohe Ø –
+        // sonst stünde in der Notenübersicht eine Dezimalzahl wie „2,8".
+        '<td><input data-sid="' + s.id + '" inputmode="' + (mss ? "numeric" : "text") + '" style="width:90px" value="' +
+          (mss ? "" : (hatV ? Calc.formatTendenz(Calc.tendenznote(vorschlag, false), false) : "")) + '" placeholder="' + (mss ? "0–15" : "–") + '"></td>' +
       "</tr>";
     }).join("");
 
     const body =
       '<p class="muted">' + (mss
         ? "MSS-Punkte (0–15) für das " + q + ". Quartal eintragen. Die Stundennoten-Ø dient nur zur Orientierung."
-        : "Mitarbeits-Vorschläge des " + q + ". Quartals als Noten übertragen. Tendenzen wie 2+ oder 3- sind erlaubt.") +
+        : "Mitarbeits-Vorschläge des " + q + ". Quartals als Noten übertragen. Vorbelegt ist der auf " +
+          "eine Note gerundete Ø (2+, 3, 4-); die Spalte „Vorschlag“ zeigt den genauen Wert.") +
         " Leer lassen = kein Übertrag für diese/n Schüler/in.</p>" +
       katSelect +
       '<div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">' + (mss ? "Stundennoten-Ø" : "Vorschlag") + '</th><th>' +
@@ -477,23 +501,30 @@
             { okLabel: "Übertragen & löschen" });
           if (!ok) return;
 
-          // Ziel-Kategorie: gewählte oder neu angelegte „Mündliche Mitarbeit“
+          // Ziel-Kategorie: gewählte oder neu angelegte „Mündliche Mitarbeit“.
+          // Sie wird als Mitarbeits-Kategorie markiert – daran erkennt die
+          // Notenübersicht, dass die Epochalnote eines Quartals erst mit dieser
+          // Note zustande kommt.
           let kategorieId = kategorieWahl;
           if (!kategorieId) {
             const kat = Store.neueKategorie(k.id, {
               name: "Mündliche Mitarbeit", art: "sonstige", gewichtung: 2,
-              anzeige: "note", sortIndex: kategorien.length
+              anzeige: "note", quelle: "mitarbeit", sortIndex: kategorien.length
             });
             await Store.Kategorien.save(kat);
             kategorieId = kat.id;
+          } else {
+            const kat = kategorien.find((c) => c.id === kategorieId);
+            if (kat && kat.quelle !== "mitarbeit") {
+              kat.quelle = "mitarbeit";
+              await Store.Kategorien.save(kat);
+            }
           }
-          const datum = Store.datumLokal();
+          // Alle übertragenen Noten landen in einer gemeinsamen Spalte des Quartals
+          const leistung = await Store.leistungFuer(k.id, kategorieId, q,
+            "Mitarbeit " + q + ". Quartal", Store.datumLokal());
           for (const e of eintraege) {
-            await Store.Noten.save(Store.neueNote({
-              klasseId: k.id, schuelerId: e.schuelerId, kategorieId, wert: e.wert,
-              titel: "Mündliche Mitarbeit " + q + ". Quartal",
-              quartal: q, halbjahr: Store.halbjahrAusQuartal(q), datum
-            }));
+            await Store.Noten.setzeZelle(leistung, e.schuelerId, e.wert);
           }
           const [ereignisse, stunden] = await Promise.all([
             Store.Ereignisse.byKlasse(k.id), Store.Stunden.byKlasse(k.id)
@@ -558,7 +589,7 @@
   }
 
   Object.assign(global.Views, {
-    klasseDialog, splitsDialog, schuelerDialog, kategorieDialog, cellDialog,
+    klasseDialog, splitsDialog, schuelerDialog, kategorieDialog, leistungDialog,
     studentDetailDialog, seatAssignDialog, importStudentsDialog, backupImportDialog,
     schwellenDialog, mitarbeitHerleitungDialog,
     quartalAbschliessenDialog, klassenImportDialog

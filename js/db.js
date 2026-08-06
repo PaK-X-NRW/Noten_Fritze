@@ -9,7 +9,9 @@
   const DB_NAME = "noten-fritze";
   // v2: neuer Store "abwesenheiten" (Schüler tageweise als abwesend markieren)
   // v3: neuer Store "stunden" (Unterrichtsstunden) + Index "stundeId" auf ereignisse
-  const DB_VERSION = 3;
+  // v4: neuer Store "leistungen" (eine Spalte der Notenübersicht) + Index
+  //     "leistungId" auf noten
+  const DB_VERSION = 4;
 
   // Definition der Object-Stores + Indizes. Zentral, damit Migrationen
   // (spätere DB_VERSION-Erhöhungen) übersichtlich bleiben.
@@ -17,10 +19,18 @@
     klassen:      { keyPath: "id", indexes: [{ name: "updatedAt", keyPath: "updatedAt" }] },
     schueler:     { keyPath: "id", indexes: [{ name: "klasseId", keyPath: "klasseId" }] },
     kategorien:   { keyPath: "id", indexes: [{ name: "klasseId", keyPath: "klasseId" }] },
+    // Leistungen: je eine Spalte der Notenübersicht („2. Klassenarbeit",
+    // „HÜ 10.09."). Gehört zu einer Kategorie und einem Quartal; je Schüler/in
+    // steht darin genau eine Note.
+    leistungen:   { keyPath: "id", indexes: [
+                      { name: "klasseId", keyPath: "klasseId" },
+                      { name: "kategorieId", keyPath: "kategorieId" }
+                    ] },
     noten:        { keyPath: "id", indexes: [
                       { name: "klasseId", keyPath: "klasseId" },
                       { name: "schuelerId", keyPath: "schuelerId" },
-                      { name: "kategorieId", keyPath: "kategorieId" }
+                      { name: "kategorieId", keyPath: "kategorieId" },
+                      { name: "leistungId", keyPath: "leistungId" }
                     ] },
     sitzplaene:   { keyPath: "klasseId", indexes: [] },
     ereignisse:   { keyPath: "id", indexes: [

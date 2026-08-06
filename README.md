@@ -73,11 +73,18 @@ schueler       { id, klasseId, vorname, nachname, bemerkung, sortIndex, ... }
                  (sortIndex = manuelle Reihenfolge; angezeigt wird je nach
                   settings.schuelerSortierung alphabetisch oder manuell)
 kategorien     { id, klasseId, name, art('schriftlich'|'sonstige'),
-                 gewichtung, anzeige('note'|'fehlendeHA'), sortIndex }
-noten          { id, klasseId, schuelerId, kategorieId, wert(1..6, oder 0..15
-                 MSS-Punkte bei Klassenstufe >= 11, s. Calc.istMSS),
+                 gewichtung, anzeige('note'|'fehlendeHA'),
+                 quelle('manuell'|'mitarbeit'), sortIndex }
+                 (quelle 'mitarbeit' = wird über „Quartal abschließen“ gefüllt)
+leistungen     { id, klasseId, kategorieId, quartal(1..4), titel, datum(YYYY-MM-DD),
+                 sortIndex, createdAt }
+                 (= eine Spalte der Notenübersicht, z. B. „2. Klassenarbeit“;
+                  je Schüler/in steht darin genau eine Note)
+noten          { id, klasseId, schuelerId, kategorieId, leistungId, wert(1..6,
+                 oder 0..15 MSS-Punkte bei Klassenstufe >= 11, s. Calc.istMSS),
                  titel, datum(YYYY-MM-DD), quartal(1..4), halbjahr(1|2, abgeleitet),
                  createdAt }
+                 (titel/datum/quartal folgen immer der Leistung)
 sitzplaene     { klasseId, rows, cols, seats:[{id,row,col,schuelerId}] }
 ereignisse     { id, klasseId, schuelerId, stundeId, typ, punkte, timestamp,
                  quartal(1..4), halbjahr(1|2, abgeleitet), notiz }
@@ -95,9 +102,11 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
 ```
 
 - **Integrität:** Löschen einer Klasse/eines Schülers löscht kaskadierend alle
-  abhängigen Datensätze (Noten, Ereignisse, Stunden, Abwesenheiten, Sitzplatz-Zuweisung).
+  abhängigen Datensätze (Leistungen, Noten, Ereignisse, Stunden, Abwesenheiten,
+  Sitzplatz-Zuweisung); das Löschen einer Kategorie oder einer Spalte nimmt die
+  darin erfassten Noten mit.
 - **App-Version:** `APP_VERSION` in `js/version.js` (Schema `MAJOR.MINOR.PATCH`,
-  aktuell **1.6.0**) ist die sichtbare Programmversion: angezeigt unter
+  aktuell **1.7.1**) ist die sichtbare Programmversion: angezeigt unter
   Einstellungen → Über, Name des Service-Worker-Caches, Feld `appVersion` im
   JSON-Backup. Sie wird von Hand gepflegt und ist unabhängig von den beiden
   internen Zählern unten.
@@ -109,14 +118,34 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
   Neue Felder bekommen immer Defaults, damit alte Datensätze nicht crashen.
   Zusätzlich JSON-Voll-Backup als Sicherung.
 
-## 4. Rechenlogik – gewichtete Gesamtnote
+## 4. Rechenlogik – von der Einzelnote zur Zeugnisnote
 
-Zwei-Ebenen-Gewichtung (passend zur Hauptfach/Nebenfach-Unterscheidung):
+Die Notenübersicht zeigt immer **ein Halbjahr**; die beiden Quartale darin
+stecken als Epochalnoten in der Tabelle. Die Kette (`Calc.halbjahrErgebnis`):
 
-1. **Kategorie-Ø:** Durchschnitt der Einzelnoten je Kategorie (leere ignoriert).
-2. **Gruppen-Ø:** je Art-Gruppe („schriftlich“, „sonstige“) gewichteter Mittelwert
-   der Kategorie-Durchschnitte über deren `gewichtung`.
-3. **Gesamtnote:** `anteilSchriftlich %` · Ø_schriftlich + `anteilSonstige %` · Ø_sonstige.
+1. **Spalte (Leistung):** genau eine Note je Schüler/in, z. B. „2. Klassenarbeit“.
+   Ihre Kategorie liefert das Gewicht, ihr Quartal die Zuordnung.
+2. **Epochalnote je Quartal:** gewichteter Ø aller sonstigen Kategorien des
+   Quartals, gerundet auf **Drittel** (x,0 · x,3 · x,7). Sie entsteht erst, wenn
+   die **Mitarbeitsnote** des Quartals vorliegt – vorher steht dort „⋯“ (siehe
+   „Mitarbeit in der Notenübersicht“ unten).
+3. **Sonstige Leistungen (Halbjahr):** Ø der beiden – bereits gerundeten –
+   Epochalnoten, wieder auf Drittel gerundet. Fehlt ein Quartal, zählt das
+   vorhandene zu 100 %.
+4. **Schriftliche Leistungen (Halbjahr):** gewichteter Ø aller schriftlichen
+   Kategorien über das ganze Halbjahr, auf Drittel gerundet.
+5. **Zeugnisnote:** `anteilSchriftlich %` · schriftlich + `anteilSonstige %` ·
+   sonstige, auf die Zeugnisskala gerundet (ganze Note, einzige Tendenz 4-).
+6. **Jahresnote** (nur im 2. Halbjahr): aus beiden Halbjahres-Zeugnisnoten.
+
+Innerhalb einer Gruppe gilt weiter die Zwei-Ebenen-Gewichtung: erst der
+Kategorie-Ø (Durchschnitt der Einzelnoten), dann der über `gewichtung`
+gewichtete Mittelwert der Kategorien.
+
+**Drittelrundung:** Liegt ein Wert genau zwischen zwei Stufen, gewinnt die
+**schlechtere** Note (2,15 → 2,3 = „2-“, 3,5 → 3,7 = „4+“). Angezeigt werden
+Zwischennoten immer als Tendenz (`2+`, `3`, `4-`), nicht als Dezimalzahl;
+nur Werte außerhalb der Drittelskala fallen auf die Dezimaldarstellung zurück.
 
 **Robustheit:** Fehlt eine ganze Gruppe (keine Noten), zählt die vorhandene Gruppe
 zu 100 %. Kategorien ohne Noten fallen aus der Gewichtung heraus, statt als „0“ zu
@@ -125,10 +154,10 @@ verfälschen. Fehlt alles, ist die Gesamtnote „–“.
 **Standard-Anteile:** Hauptfach 50 % schriftlich / 50 % sonstige, Nebenfach 30 % / 70 %
 (pro Klasse über „Anteile ändern“ anpassbar).
 
-**Rundung** (Einstellung): eine Nachkommastelle (Standard), zwei Nachkommastellen
-oder ganze Note. Noteneingabe akzeptiert `2`, `2,3`, `2.3`, `2+` (→ 1,7), `2-` (→ 2,3).
+**Noteneingabe** akzeptiert `2`, `2,3`, `2.3`, `2+` (→ 1,7), `2-` (→ 2,3); die
+Einstellung „Rundung“ betrifft nur noch die Mitarbeits-Auswertung.
 Die Aufschlüsselung ist im **Besprechungsmodus** und im Schüler-Detail transparent
-sichtbar (Kategorie-Ø, Gewichte, Gruppen-Ø, Gesamt, Zeugnisnote).
+sichtbar (Kategorie-Ø, Gewichte, Epochalnoten, Teilnoten roh und gerundet, Zeugnisnote).
 
 ### Zeugnisskala
 
@@ -161,16 +190,36 @@ abschließen" trägt die Lehrkraft den tatsächlichen MSS-Punktwert für
 Kursklassen deshalb selbst ein; der 1–6-Ø der Stundennoten dient dort nur noch
 als Orientierung, ohne automatische Umrechnung.
 
-**Quartale:** Jede Note (und jedes Mitarbeits-Ereignis, jede Stunde) gehört zu einem
-der vier Quartale (1. Q: Aug–Okt, 2. Q: Nov–Jan, 3. Q: Feb–Apr, 4. Q: Mai–Jul) –
-beim Anlegen aus der Einstellung „Aktuelles Quartal“ übernommen. Noten-Tab,
-Besprechungsmodus und Mitarbeits-Auswertung können je Quartal oder fürs ganze Jahr
-rechnen (Filter „1. Q · 2. Q · 3. Q · 4. Q · Jahr“). Bei Halbjahres- und
-Jahres-Sicht werden die **sonstigen Leistungen quartalsweise** gemittelt (1. HJ =
-Ø aus 1. Q und 2. Q zu je 50 %, fehlende Quartale zählen dann zu 100 %); die
-schriftlichen Leistungen laufen unverändert über den ganzen Zeitraum. Die
-Jahres-Ansicht der Notenübersicht zeigt die Quartals-Ergebnisse als eigene Spalten
-„Sonstige 1. Q–4. Q“.
+**Quartale und Halbjahre:** Jede Spalte (und jedes Mitarbeits-Ereignis, jede
+Stunde) gehört zu einem der vier Quartale (1. Q: Aug–Okt, 2. Q: Nov–Jan,
+3. Q: Feb–Apr, 4. Q: Mai–Jul); je zwei bilden ein Halbjahr.
+
+- **Notenübersicht und Besprechungsmodus** arbeiten mit dem Filter
+  „1. Halbjahr · 2. Halbjahr“. Das Quartal einer Note kommt **aus ihrer Spalte**,
+  nicht aus der Einstellung „Aktuelles Quartal“ – eine im 1. Halbjahr eingetragene
+  Note kann also nicht im anderen Halbjahr landen.
+- **Mitarbeits-Auswertung** bleibt beim Filter „1. Q · 2. Q · 3. Q · 4. Q · Jahr“,
+  weil Stunden und Ereignisse quartalsweise abgeschlossen werden.
+- Neue Spalten liegen voreingestellt im ersten Quartal des angezeigten Halbjahres;
+  Ereignisse und Stunden übernehmen weiterhin die Einstellung „Aktuelles Quartal“.
+
+### Mitarbeit in der Notenübersicht
+
+Aus dem Mitarbeitsbereich erscheint in der Notenübersicht **nur die fertige
+Mitarbeitsnote** – eine Spalte je Quartal, die beim „Quartal abschließen“ entsteht.
+Vorbelegt wird sie mit dem auf eine Note gerundeten Ø der Stundennoten (`3+`, nicht
+`2,8`); ändern lässt sie sich danach direkt in der Tabelle wie jede andere Note.
+
+- Die Ziel-Kategorie des Abschlusses ist als **Mitarbeits-Kategorie** markiert
+  (`quelle: 'mitarbeit'`, im Kategorie-Dialog umstellbar). Solange für ein Quartal
+  keine solche Note vorliegt, bleibt dessen **Epochalnote leer** („⋯“) – ein
+  Zwischenstand aus Tests und HÜs allein soll nicht wie ein Ergebnis aussehen.
+  Klassen ohne Mitarbeits-Kategorie rechnen die Epochalnote sofort.
+- Vergessene Hausaufgaben erscheinen weiter als reine **Zählspalte** je Quartal
+  (zählt nicht in die Note).
+- Im HA-Modus „note6“ erzeugt jede 3. vergessene HA **keine eigene Notenspalte** mehr,
+  sondern eine zusätzliche Stundennote 6 im Notenvorschlag – sie wirkt also über die
+  Mitarbeitsnote beim Quartalsabschluss.
 
 ## 5. Mitarbeits-Tracker & Punktesystem
 
@@ -253,8 +302,8 @@ Format: UTF-8 **mit BOM** (Umlaute in Numbers/Excel korrekt), Trennzeichen `,`,
 robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisch.
 
 - **Schülerliste** (`schueler_<Klasse>.csv`): `Vorname, Nachname, Bemerkung`
-- **Noten (breit)** (`noten_<Klasse>.csv`): `Vorname, Nachname, <Kategorie> (Ø)…, Sonstige 1. Q…4. Q, Schriftlich, Sonstige, Gesamtnote, Zeugnisnote`
-- **Einzelnoten (lang)** (`einzelnoten_<Klasse>.csv`): `Vorname, Nachname, Kategorie, Art, Titel, Note, Datum, Quartal`
+- **Noten (breit)** (`noten_<Klasse>.csv`): je Halbjahr `Epochalnote 1, Epochalnote 2, Schriftliche Leistungen, Sonstige Leistungen, Zeugnisnote`, dahinter die `Zeugnisnote Jahr`
+- **Einzelnoten (lang)** (`einzelnoten_<Klasse>.csv`): `Vorname, Nachname, Spalte, Kategorie, Art, Note, Datum, Quartal`
 - **Mitarbeit** (`mitarbeit_<Klasse>.csv`): `Vorname, Nachname, Ereignistyp, Punkte, Zeitpunkt`
 - **Quartalsabschluss** (`mitarbeit_q<N>_<Klasse>.csv`): `Vorname, Nachname, Note, Quartal` – die übertragenen Mitarbeitsnoten beim „Quartal abschließen“.
 - **MSS-Klassen** (Klassenstufe ≥ 11): Die Spalten „Note“/„Zeugnisnote“ heißen in
@@ -287,20 +336,29 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   Die Reihenfolge der Schüler/innen ist in den Einstellungen umschaltbar
   (alphabetisch nach Nachname – Voreinstellung – oder manuell per ▲/▼); sie gilt
   für alle Ansichten und Exporte.
-- **Noten** – Quartal-Ansicht: Matrix Schüler × Kategorie (schriftliche zuerst) mit
-  farbigen Ø-Badges, dahinter je eine gerundete Sammelspalte **Schriftlich** und
-  **Sonstige** sowie **Gesamt** und **Zeugnis**. Die drei Spaltengruppen (schriftlich ·
-  sonstige · Zeugnis) sind farbig hinterlegt, die Namensspalte bleibt beim
-  horizontalen Scrollen stehen. Spaltenköpfe lassen sich seitlich ziehen, um die
-  Spalten umzusortieren (Farbe bleibt an der Spalte); rechts gibt es genug
-  Scroll-Spielraum, um auch die letzten Spalten direkt neben die Namen zu holen.
-  Die Reihenfolge gilt nur für die laufende Sitzung – nach dem Neuladen steht wieder
-  der Default. Zelle antippen → Einzelnoten erfassen;
-  Namen antippen → Berechnung. Jahres-Ansicht: keine Einzelleistungen, sondern zuerst
-  die Quartals-Spalten **Sonstige 1. Q–4. Q**, danach beide Halbjahre nebeneinander
-  (schriftlich · sonstige · Zeugnis je HJ) plus Jahres-Zeugnisnote.
-  Kategorien mit Anzeige „vergessene Hausaufgaben“ zeigen dort statt einer Note die Anzahl
-  aus dem Tracker und zählen nicht in die Gesamtnote.
+- **Noten** – zwei Ansichten: **1. Halbjahr** und **2. Halbjahr**. Aufbau der Spalten:
+
+  | Name | schriftliche Leistungen | 1. Quartal | Epochalnote 1 | 2. Quartal | Epochalnote 2 | Schriftliche Leistungen | Sonstige Leistungen | Zeugnisnote |
+  |---|---|---|---|---|---|---|---|---|
+
+  Im 2. Halbjahr steht rechts zusätzlich die **Zeugnisnote Jahr**. Jede
+  Einzelleistung („2. Klassenarbeit“, „HÜ 10.09.“) ist eine eigene Spalte mit
+  **genau einer Note** je Schüler/in; angezeigt wird alles als Tendenz (`2+`, `3`,
+  `4-`), nicht als Dezimalzahl.
+  **Eingabe wie in einer Tabellenkalkulation:** Zelle antippen → tippen →
+  **Enter** springt eine Zeile tiefer, **Tab** eine Spalte weiter, **Esc** bricht ab;
+  ein leeres Feld löscht die Note. Die Zeile wird sofort neu gerechnet.
+  „＋ Spalte“ legt eine neue Leistung an (Bezeichnung, Kategorie, Quartal, Datum) –
+  voreingestellt im angezeigten Halbjahr. Ein Tipp auf den Spaltenkopf bearbeitet
+  oder löscht die Spalte, ein Tipp auf den Namen zeigt die komplette Herleitung.
+  Die drei Spaltengruppen (schriftlich · sonstige · Zeugnis) sind farbig hinterlegt,
+  die Namensspalte bleibt beim horizontalen Scrollen stehen. Spaltenköpfe lassen
+  sich seitlich ziehen, um die Spalten umzusortieren (Farbe bleibt an der Spalte);
+  rechts gibt es genug Scroll-Spielraum, um auch die letzten Spalten direkt neben
+  die Namen zu holen. Die Reihenfolge gilt nur für die laufende Sitzung – nach dem
+  Neuladen steht wieder der Default.
+  Kategorien mit Anzeige „vergessene Hausaufgaben“ bekommen je Quartal eine Spalte
+  mit der Anzahl aus dem Tracker und zählen nicht in die Note.
 - **Sitzplan** – Raster (Reihen/Spalten frei), Plätze antippen zum Zuweisen,
   „Automatisch belegen“, Abwesenheits-Toggle (🤒) je Platz.
 - **Tracker** – Start-Dialog (Stunde fortsetzen / Einzel- / Doppelstunde), Restzeit
@@ -309,7 +367,8 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   Wortmeldung, Gute/Sehr gute Meldung, Störung), Zähler je Typ für die Stunde,
   Undo, Heatmap-Hintergrund + Legende, kompakte Kacheln bei breiten Plänen.
 - **Besprechungsmodus** – ein/e Schüler/in einzeln, groß; nur deren Daten sichtbar
-  (Datenschutz bei der Notenbesprechung), Vor/Zurück, Quartal-Filter.
+  (Datenschutz bei der Notenbesprechung), Vor/Zurück, Halbjahr-Filter; zeigt
+  die Zeugnisnote groß und darunter die komplette Herleitung Schritt für Schritt.
 - **Einstellungen** – Rundung, aktuelles Quartal, Reihenfolge der Schüler/innen,
   Wertung vergessener Hausaufgaben (HA-Modus),
   Stundenplan (10 Stunden,
@@ -319,16 +378,16 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
 ## 8. MVP-Funktionsumfang
 
 **Enthalten (funktionsfähig):**
-Klassen/Schüler/Kategorien CRUD · Einzelnoten & gewichtete Gesamtnote ·
-Quartale (1.–4. Q + Jahr) für Noten & Mitarbeit, sonstige Leistungen quartalsweise
-gemittelt · Sitzplan-Editor ·
+Klassen/Schüler/Kategorien CRUD · Notenübersicht je Halbjahr mit einer Spalte
+je Leistung und Excel-artiger Eingabe · Epochalnoten je Quartal, Drittelrundung
+und Zeugnis-/Jahresnote · Quartale (1.–4. Q) für die Mitarbeit · Sitzplan-Editor ·
 Tracker mit Stunden (anlegen/fortsetzen/beenden), Stundenplan/Restzeit
 (Einzel-/Doppelstunde), Piktogramm-Buttons, Tap/Undo/Heatmap, kompakte Kacheln,
 Modi für Abwesend/Leistungsverweigerung/Keine HA/Heatmap ·
 Abwesenheiten (tageweise, beeinflusst Heatmap & Mitarbeitsnote) ·
 Mitarbeits-Auswertung nach dem Stundennoten-Modell + Notenvorschlag mit sichtbarer
 Herleitung · Quartal abschließen (Übertrag als Noten, CSV-Sicherung) ·
-HA-Modus wählbar (Punkteabzug oder Note 6 ab der 3.) ·
+HA-Modus wählbar (Punkteabzug oder Note 6 ab der 3., wirkt über den Notenvorschlag) ·
 Notenschwellen global und je Klasse editierbar · Besprechungsmodus ·
 MSS-Punkte-Skala (0–15) für Klassenstufe ab 11, umschaltbar je Klasse ·
 CSV-Export (5 Arten) mit Export-Ordner/Teilen-Blatt · CSV-Import Schüler ·

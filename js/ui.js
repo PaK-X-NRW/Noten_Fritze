@@ -140,6 +140,12 @@
     return "vor " + Math.floor(tage / 365) + " J.";
   }
 
+  // "2025-09-15" -> "15.09." (kurz genug für Spaltenköpfe)
+  function datumKurz(iso) {
+    const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m ? m[3] + "." + m[2] + "." : "";
+  }
+
   function initialen(s) {
     return ((s.vorname || "").slice(0, 1) + (s.nachname || "").slice(0, 1)).toUpperCase() || "?";
   }
@@ -151,6 +157,6 @@
     esc, fromHTML, $, $all,
     toast, hideToast, modal, confirmDialog,
     field, formValues,
-    relZeit, initialen, vollerName
+    relZeit, datumKurz, initialen, vollerName
   };
 })(window);

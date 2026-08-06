@@ -392,9 +392,10 @@
       if (!t.typeCounts[sid]) t.typeCounts[sid] = {};
       t.typeCounts[sid][typ] = (t.typeCounts[sid][typ] || 0) + 1;
       UI.toast(name + "keine Hausaufgaben");
-      // Im Modus „note6“ zieht jede 3. vergessene HA des Quartals eine Note 6 nach sich.
+      // Im Modus „note6“ zählt jede 3. vergessene HA des Quartals als Note 6
+      // im Notenvorschlag – übertragen wird sie mit dem Quartalsabschluss.
       const note6 = await Store.haNote6Pruefen(state.klasseId, sid, e.quartal);
-      if (note6) UI.toast("3× Hausaufgaben vergessen – Note 6 in Mündliche Mitarbeit eingetragen");
+      if (note6) UI.toast("3× Hausaufgaben vergessen – zählt als Note 6 in der Mitarbeit");
     }
     await refreshTrackerSeat(sid);
   }

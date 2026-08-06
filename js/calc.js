@@ -4,6 +4,9 @@
      Zeitraum-Filter: Quartal (1–4) | "hj1" | "hj2" | null (Jahr), die Gruppe
      „sonstige" wird bei Halbjahr/Jahr quartalsweise gemittelt
    - Notenparser/-formatierung (deutsche Tendenzen 2+, 2, 2-)
+   - Zeugnis-Kette eines Halbjahres (halbjahrErgebnis): Epochalnote je Quartal
+     -> sonstige Leistungen -> Zeugnisnote; Zwischennoten auf Drittel
+     (x,0 | x,3 | x,7), Anzeige als Tendenz
    - Mitarbeits-Auswertung nach dem Stundennoten-Modell (Notenvorschlag = Ø
      der Stundennoten, Verweigerung = glatte 6)
    - Heatmap-Farbe (grün = aktiv, rot = lange nicht beteiligt)
@@ -88,6 +91,51 @@
     return String(Math.round(n));
   }
 
+  // ---- Drittelnoten (x,0 | x,3 | x,7) --------------------------------------
+  // Alle Zwischennoten der Notenübersicht (schriftliche Leistungen, Epochalnote
+  // je Quartal, sonstige Leistungen des Halbjahres) laufen auf der Drittelskala:
+  // 1 · 1- · 2+ · 2 · 2- · 3+ … Liegt ein Wert genau zwischen zwei Stufen,
+  // gewinnt die SCHLECHTERE Note (2,15 -> 2,3 = "2-", 3,5 -> 3,7 = "4+").
+  // Gerechnet wird in Tausendsteln, damit "genau in der Mitte" nicht an
+  // Fließkomma-Ungenauigkeit scheitert (2,15 - 2,0 ist binär nicht exakt 0,15).
+  const TENDENZ_STUFEN = (function () {
+    const liste = [];
+    for (let ganz = 1; ganz <= 6; ganz++) {
+      liste.push(ganz * 1000);
+      if (ganz < 6) { liste.push(ganz * 1000 + 300); liste.push(ganz * 1000 + 700); }
+    }
+    return liste;
+  })();
+
+  // mss=true: MSS-Punkte kennen keine Tendenzen -> ganze Punkte; bei x,5
+  // ebenfalls zur schlechteren, also kleineren Punktzahl.
+  function tendenznote(wert, mss) {
+    if (wert === null || wert === undefined || isNaN(wert)) return null;
+    const w = clampNote(Number(wert), mss);
+    if (mss) return Math.ceil(w - 0.5);
+    const w1000 = Math.round(w * 1000);
+    let beste = TENDENZ_STUFEN[0], abstand = Infinity;
+    for (const stufe of TENDENZ_STUFEN) {
+      const d = Math.abs(w1000 - stufe);
+      if (d <= abstand) { abstand = d; beste = stufe; }   // Gleichstand: die spätere = schlechtere Stufe
+    }
+    return beste / 1000;
+  }
+
+  // Anzeige einer Drittelnote als deutsche Tendenz: 1,7 -> "2+", 2 -> "2",
+  // 2,3 -> "2-". Krumme Werte fallen auf die Dezimaldarstellung zurück.
+  function formatTendenz(n, mss) {
+    if (n === null || n === undefined || isNaN(n)) return "–";
+    if (mss) return String(Math.round(n));
+    const zehntel = Math.round(n * 10);
+    const ganz = Math.floor(zehntel / 10);
+    const rest = zehntel - ganz * 10;
+    if (rest === 0) return String(ganz);
+    if (rest === 3) return ganz + "-";
+    if (rest === 7) return (ganz + 1) + "+";
+    return formatNote(n, 1);
+  }
+
   // Liegt ein Wert exakt auf einer Grenze, ist die Rundung nicht eindeutig.
   function istGrenzwert(wert) {
     return ZEUGNIS_GRENZEN.some((g) => Math.abs(wert - g) < EPS);
@@ -120,6 +168,89 @@
   function jahresnote(hj1, hj2, mss) {
     if (hj1 === null || hj1 === undefined || hj2 === null || hj2 === undefined) return null;
     return zeugnisnote(hj1 * 0.49 + hj2 * 0.51, mss);
+  }
+
+  // Effektive Anteile schriftlich/sonstige einer Klasse. Fehlt eine der beiden
+  // Seiten, zählt die andere 100 % (gleiche Regel wie in berechneSchueler).
+  function anteile(klasse, hasS, hasO) {
+    const aS = (klasse.anteilSchriftlich != null ? klasse.anteilSchriftlich : 50);
+    const aO = (klasse.anteilSonstige != null ? klasse.anteilSonstige : 50);
+    if (hasS && hasO) {
+      const summe = aS + aO || 1;
+      return { s: aS / summe, o: aO / summe };
+    }
+    return { s: hasS ? 1 : 0, o: hasO ? 1 : 0 };
+  }
+
+  // ---- Halbjahres-Kette ----------------------------------------------------
+  // Ein Quartal gilt für die Epochalnote als abgeschlossen, sobald die
+  // Mitarbeitsnote vorliegt – also eine Note in einer Kategorie mit
+  // quelle "mitarbeit" (die schreibt „Quartal abschließen" im Mitarbeit-Tab).
+  // Klassen ohne eine solche Kategorie arbeiten ohne Mitarbeitsnote; dort ist
+  // die Epochalnote sofort fertig, sonst käme sie nie zustande.
+  function mitarbeitVorhanden(kategorien, notenFuerSchueler, quartal) {
+    const ids = kategorien
+      .filter((c) => c.quelle === "mitarbeit" && c.art !== "schriftlich" && (c.anzeige || "note") === "note")
+      .map((c) => c.id);
+    if (!ids.length) return true;
+    return notenFuerSchueler.some((n) =>
+      ids.indexOf(n.kategorieId) !== -1 &&
+      (n.quartal || quartal) === quartal &&
+      n.wert !== null && n.wert !== undefined && !isNaN(n.wert));
+  }
+
+  // Die komplette Rechnung eines Halbjahres, so wie sie in der Notenübersicht
+  // Spalte für Spalte sichtbar ist (hj = 1 | 2):
+  //   1. Epochalnote je Quartal = gewichteter Ø der sonstigen Kategorien des
+  //      Quartals, gerundet auf Drittel (x,0 | x,3 | x,7)
+  //   2. Sonstige Leistungen HJ = Ø der vorhandenen (gerundeten!) Epochalnoten,
+  //      wieder auf Drittel gerundet
+  //   3. Schriftliche Leistungen HJ = gewichteter Ø aller schriftlichen
+  //      Kategorien über das ganze Halbjahr, auf Drittel gerundet
+  //   4. Zeugnisnote HJ = Anteile der Klasse aus 2. und 3., auf die
+  //      Zeugnisskala (ganze Note, einzige Tendenz 4-)
+  // Gerechnet wird bewusst mit den gerundeten Zwischennoten; nur wenn die
+  // Zeugnisnote genau auf einer Grenze landet, entscheiden die ungerundeten
+  // Werte (gleiche Regel wie in zeugnisErgebnis).
+  function halbjahrErgebnis(kategorien, notenFuerSchueler, klasse, hj, mss) {
+    const quartale = hj === 2 ? [3, 4] : [1, 2];
+    const epochal = quartale.map((q) => {
+      const res = berechneSchueler(kategorien, notenFuerSchueler, klasse, "keine", q);
+      // Ohne Mitarbeitsnote ist das Quartal noch nicht abgeschlossen: die
+      // Epochalnote bleibt leer, statt einen Zwischenstand wie ein Ergebnis
+      // aussehen zu lassen. `roh` bleibt für die Herleitung erhalten.
+      const offen = !mitarbeitVorhanden(kategorien, notenFuerSchueler, q);
+      return {
+        quartal: q, offen, roh: res.sonstige.schnitt,
+        note: offen ? null : tendenznote(res.sonstige.schnitt, mss),
+        res
+      };
+    });
+    const vorhanden = epochal.filter((e) => e.note !== null);
+    const sonstigeRoh = vorhanden.length
+      ? vorhanden.reduce((a, e) => a + e.note, 0) / vorhanden.length
+      : null;
+    const sonstige = tendenznote(sonstigeRoh, mss);
+
+    const res = berechneSchueler(kategorien, notenFuerSchueler, klasse, "keine", hj === 2 ? "hj2" : "hj1");
+    const schriftlichRoh = res.schriftlich.schnitt;
+    const schriftlich = tendenznote(schriftlichRoh, mss);
+
+    const ant = anteile(klasse, schriftlich !== null, sonstige !== null);
+    let zeugnis = null, zeugnisRoh = null;
+    if (schriftlich !== null || sonstige !== null) {
+      zeugnisRoh = (schriftlich || 0) * ant.s + (sonstige || 0) * ant.o;
+      const roh = (schriftlichRoh || 0) * ant.s + (sonstigeRoh || 0) * ant.o;
+      zeugnis = (!mss && istGrenzwert(zeugnisRoh)) ? zeugnisnote(roh, mss) : zeugnisnote(zeugnisRoh, mss);
+    }
+    return {
+      hj, quartale, epochal,
+      schriftlichRoh, schriftlich,
+      sonstigeRoh, sonstige,
+      zeugnisRoh, zeugnis,
+      effAnteilS: ant.s, effAnteilO: ant.o,
+      res
+    };
   }
 
   // ---- Notenberechnung -----------------------------------------------------
@@ -263,8 +394,11 @@
   // Stundennote glatt auf 6 (Meldungspunkte dieser Stunde entfallen).
   // Der Notenvorschlag ist der Ø aller Stundennoten (1 NK).
   // Im haModus "note6" fließen „keinehausaufgabe"-Punkte NICHT in die
-  // Stundennoten ein (sie erzeugen stattdessen jede 3. eine Note 6, s.
-  // Store.haNote6Pruefen); im Aggregat-Feld `punkte` bleiben sie enthalten –
+  // Stundennoten ein; stattdessen kommt je drei vergessener Hausaufgaben eine
+  // zusätzliche Stundennote 6 dazu (Feld `haNoten`), die den Notenvorschlag
+  // drückt und mit dem Quartalsabschluss in der Mitarbeitsnote landet – in der
+  // Notenübersicht taucht sie bewusst nicht als eigene Spalte auf.
+  // Im Aggregat-Feld `punkte` bleiben die HA-Punkte enthalten –
   // `punkte` ist die reine Info-Summe aller gezählten Event-Punkte (ohne
   // Verwerfung durch Verweigerung oder haModus).
   //   ereignisse: Array {schuelerId, stundeId, typ, punkte, timestamp}
@@ -364,6 +498,15 @@
           });
         });
       }
+      // haModus "note6": je drei vergessene Hausaufgaben im Zeitraum eine
+      // zusätzliche Note 6 im Notenvorschlag. Sie erscheint bewusst nicht als
+      // eigene Spalte in der Notenübersicht – dort steht aus dem
+      // Mitarbeitsbereich nur die fertige Mitarbeitsnote (s. Store.haNote6Pruefen).
+      s.haNoten = haZaehltPunkte ? 0 : Math.floor((s.typen.keinehausaufgabe || 0) / 3);
+      for (let i = 0; i < s.haNoten; i++) {
+        stundenNoten.push({ stundeId: null, datum: null, note: 6, punkte: 0, verweigerung: false, haNote: true });
+      }
+
       s.stundenGezaehlt = gezaehlt;
       s.stundenMitEreignis = Object.keys(s.stundenIds).length;
       s.aktiveTage = Object.keys(s.tage).length;
@@ -493,6 +636,7 @@
     parseNote, formatNote, clampNote, rundeGesamt,
     berechneSchueler, quartaleVonFilter, noteFarbe,
     zeugnisnote, formatZeugnisnote, zeugnisErgebnis, jahresnote,
+    tendenznote, formatTendenz, halbjahrErgebnis, mitarbeitVorhanden,
     auswertungMitarbeit, punkteZuNote, schwellenFuer, heatFarbe,
     tagVonTs,
     heatPunkteAktuell, heatFarbeDurchPunkte,

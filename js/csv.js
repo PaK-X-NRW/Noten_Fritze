@@ -125,17 +125,23 @@
     return await speichern("schueler_" + safe(klasse.name) + ".csv", toCSV(rows), "text/csv");
   }
 
-  // ---- Export: Noten einer Klasse -----------------------------------------
-  // Breites Format: je Schüler eine Zeile, je Kategorie Ø + Quartals-Spalten
-  // der sonstigen Leistungen + Gesamtnote.
-  // ereignisse werden für Kategorien mit anzeige="fehlendeHA" gebraucht
-  // (dort steht die Anzahl vergessener Hausaufgaben statt eines Ø).
-  async function exportNoten(klasse, schuelerListe, kategorien, notenAll, settings, ereignisse) {
+  // ---- Export: Zeugnisnoten einer Klasse ----------------------------------
+  // Je Schüler/in eine Zeile mit der kompletten Kette beider Halbjahre, so wie
+  // sie in der Notenübersicht steht: Epochalnoten, schriftliche und sonstige
+  // Leistungen, Zeugnisnote je Halbjahr und die Jahresnote. Zwischennoten als
+  // Tendenz (2+, 3, 4-), Zeugnisnoten auf der Zeugnisskala.
+  async function exportNoten(klasse, schuelerListe, kategorien, notenAll, settings) {
     const mss = Calc.istMSS(klasse);
+    const t = (v) => Calc.formatTendenz(v, mss);
+    const zn = (v) => Calc.formatZeugnisnote(v, mss);
     const kopf = ["Vorname", "Nachname"];
-    kategorien.forEach((k) => kopf.push(k.name + (k.anzeige === "fehlendeHA" ? " (Anzahl)" : " (Ø)")));
-    kopf.push("Sonstige 1. Q", "Sonstige 2. Q", "Sonstige 3. Q", "Sonstige 4. Q");
-    kopf.push("Schriftlich", "Sonstige", "Gesamtnote", mss ? "Zeugnispunkte" : "Zeugnisnote");
+    [1, 2].forEach((hj) => {
+      kopf.push(
+        hj + ". HJ Epochalnote 1", hj + ". HJ Epochalnote 2",
+        hj + ". HJ Schriftliche Leistungen", hj + ". HJ Sonstige Leistungen",
+        hj + ". HJ " + (mss ? "Zeugnispunkte" : "Zeugnisnote"));
+    });
+    kopf.push(mss ? "Zeugnispunkte Jahr" : "Zeugnisnote Jahr");
     const rows = [kopf];
 
     const notenBySchueler = {};
@@ -143,40 +149,31 @@
 
     schuelerListe.forEach((s) => {
       const noten = notenBySchueler[s.id] || [];
-      const res = Calc.berechneSchueler(kategorien, noten, klasse, settings.rundung);
-      const z = Calc.zeugnisErgebnis(res, mss);
       const zeile = [s.vorname, s.nachname];
-      kategorien.forEach((k) => {
-        if (k.anzeige === "fehlendeHA") {
-          zeile.push(String((ereignisse || []).filter((e) => e.schuelerId === s.id && e.typ === "keinehausaufgabe").length));
-          return;
-        }
-        const ke = res.kategorien.find((x) => x.id === k.id);
-        zeile.push(ke && ke.schnitt !== null ? n(ke.schnitt) : "");
+      const erg = [1, 2].map((hj) => Calc.halbjahrErgebnis(kategorien, noten, klasse, hj, mss));
+      erg.forEach((e) => {
+        zeile.push(t(e.epochal[0].note), t(e.epochal[1].note), t(e.schriftlich), t(e.sonstige), zn(e.zeugnis));
       });
-      // Sonstige-Zeugnisnote je Quartal (aus dem Quartals-Schnitt)
-      [1, 2, 3, 4].forEach((q) => {
-        const zq = Calc.zeugnisErgebnis(Calc.berechneSchueler(kategorien, noten, klasse, settings.rundung, q), mss);
-        zeile.push(Calc.formatZeugnisnote(zq.sonstige, mss));
-      });
-      zeile.push(Calc.formatZeugnisnote(z.schriftlich, mss), Calc.formatZeugnisnote(z.sonstige, mss));
-      zeile.push(res.gesamt !== null ? n(res.gesamt) : "");
-      zeile.push(Calc.formatZeugnisnote(z.zeugnis, mss));
+      zeile.push(zn(Calc.jahresnote(erg[0].zeugnis, erg[1].zeugnis, mss)));
       rows.push(zeile);
     });
     return await speichern("noten_" + safe(klasse.name) + ".csv", toCSV(rows), "text/csv");
   }
 
   // ---- Export: Einzelnoten (Langformat) ------------------------------------
-  async function exportEinzelnoten(klasse, schuelerListe, kategorien, notenAll) {
+  // Eine Zeile je erfasster Note, mit ihrer Spalte (Leistung) als Bezeichnung.
+  async function exportEinzelnoten(klasse, schuelerListe, kategorien, notenAll, leistungen) {
     const mss = Calc.istMSS(klasse);
     const sMap = {}; schuelerListe.forEach((s) => (sMap[s.id] = s));
     const kMap = {}; kategorien.forEach((k) => (kMap[k.id] = k));
-    const rows = [["Vorname", "Nachname", "Kategorie", "Art", "Titel", mss ? "Punkte" : "Note", "Datum", "Quartal"]];
+    const lMap = {}; (leistungen || []).forEach((l) => (lMap[l.id] = l));
+    const rows = [["Vorname", "Nachname", "Spalte", "Kategorie", "Art", mss ? "Punkte" : "Note", "Datum", "Quartal"]];
     notenAll.forEach((no) => {
       const s = sMap[no.schuelerId], k = kMap[no.kategorieId];
       if (!s || !k) return;
-      rows.push([s.vorname, s.nachname, k.name, k.art, no.titel, n(no.wert), no.datum, no.quartal || no.halbjahr || ""]);
+      const l = lMap[no.leistungId];
+      rows.push([s.vorname, s.nachname, (l && l.titel) || no.titel || k.name, k.name, k.art,
+        Calc.formatTendenz(no.wert, mss), (l && l.datum) || no.datum, no.quartal || no.halbjahr || ""]);
     });
     return await speichern("einzelnoten_" + safe(klasse.name) + ".csv", toCSV(rows), "text/csv");
   }
