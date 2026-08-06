@@ -1,8 +1,17 @@
 /* =========================================================================
-   store.js – Domänenschicht über der DB
-   Definiert das Datenmodell, sinnvolle Defaults, Einstellungen sowie
-   Repository-Funktionen je Entität. Erzeugt außerdem Demo-Daten und enthält
-   den Klassen-Export/-Import sowie den HA-Modus (Note 6 bei 3× vergessen).
+   store.js – Domänenschicht über der DB (Kern)
+   Definiert das Datenmodell und die Repository-Funktionen je Entität
+   (Klassen, Schüler, Kategorien, Leistungen/Spalten, Noten, Sitzplan,
+   Ereignisse, Stunden, Abwesenheiten) sowie die Ereignistypen, die
+   Heatmap-Punkte und die Quartals-/Halbjahres-Helfer.
+
+   Der Store ist auf mehrere Dateien verteilt, die sich denselben Namespace
+   teilen (Ladereihenfolge siehe index.html):
+     store.js               – diese Datei: legt window.Store an
+     store.einstellungen.js – Standardwerte und App-Einstellungen
+     store.migrationen.js   – Daten-Migrationen (schemaVersion)
+     store.transfer.js      – Backup und Klassen-Export/-Import
+     store.demo.js          – Demo-Daten beim ersten Start
    ========================================================================= */
 (function (global) {
   "use strict";
@@ -13,6 +22,12 @@
     return "id-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
   }
   const now = () => Date.now();
+
+  // Einstellungen und Standardwerte liegen in store.einstellungen.js, das erst
+  // nach dieser Datei geladen wird. Beide werden ausschließlich zur Laufzeit
+  // gebraucht, deshalb hier über den Namespace holen statt beim Laden.
+  const getSettings = () => global.Store.getSettings();
+  const standardEinstellungen = () => global.Store.DEFAULT_SETTINGS;
 
   // ---- Ereignis-Typen (Mitarbeit) ------------------------------------------
   // Reihenfolge = Anzeige-Reihenfolge im Tracker.
@@ -38,7 +53,7 @@
   function normalisiereSchuelerHeat(s, settings) {
     if (!s) return s;
     const heatStart = Math.max(0, Math.min(HEAT_POINTS_MAX,
-      Number(settings && settings.heatStartWert != null ? settings.heatStartWert : DEFAULT_SETTINGS.heatStartWert) || 0));
+      Number(settings && settings.heatStartWert != null ? settings.heatStartWert : standardEinstellungen().heatStartWert) || 0));
     if (s.heatPoints === null || s.heatPoints === undefined || isNaN(Number(s.heatPoints))) {
       s.heatPoints = heatStart;
     } else {
@@ -90,295 +105,6 @@
     return (m >= 8 || m <= 1) ? 1 : 2;
   }
 
-  // ---- Standard-Einstellungen ----------------------------------------------
-  function hhmmZuMinuten(v) {
-    const p = String(v || "").split(":");
-    return (parseInt(p[0], 10) || 0) * 60 + (parseInt(p[1], 10) || 0);
-  }
-  function minZuHHMM(min) {
-    return ("0" + (Math.floor(min / 60) % 24)).slice(-2) + ":" + ("0" + (min % 60)).slice(-2);
-  }
-
-  // Default-Stundenplan: 10 Stunden à 45 Min ab 08:00 – gilt jeden Schultag
-  // gleich (5-Min-Pausen, nach der 2. Stunde 20 Min).
-  function defaultStundenplan() {
-    const starts = ["08:00", "08:50", "09:55", "10:45", "11:35", "12:25", "13:15", "14:05", "14:55", "15:45"];
-    return starts.map((start, i) => ({ nr: i + 1, start, ende: minZuHHMM(hhmmZuMinuten(start) + 45) }));
-  }
-
-  // Bringt einen Stundenplan auf genau 10 Einträge { nr, start, ende }:
-  // ungültige Einträge raus, fehlende Stunden ans Ende gehängt
-  // (letzte Stunde + 5 Min Pause, 45 Min).
-  function stundenplanNormalisieren(liste) {
-    const plan = (Array.isArray(liste) ? liste : [])
-      .filter((h) => h && h.start && h.ende)
-      .slice(0, 10)
-      .map((h, i) => ({ nr: i + 1, start: h.start, ende: h.ende }));
-    while (plan.length < 10) {
-      const letzte = plan[plan.length - 1];
-      const startMin = letzte ? hhmmZuMinuten(letzte.ende) + 5 : 8 * 60;
-      plan.push({ nr: plan.length + 1, start: minZuHHMM(startMin), ende: minZuHHMM(startMin + 45) });
-    }
-    return plan;
-  }
-
-  // Bringt eine Schwellen-Liste in eine gültige Form: unbrauchbare Einträge
-  // raus, Noten auf 1..5 begrenzt, absteigend nach abPunkte sortiert
-  // (Calc.punkteZuNote nimmt die erste passende Schwelle).
-  function schwellenNormalisieren(liste) {
-    const clean = (Array.isArray(liste) ? liste : [])
-      .map((s) => ({
-        abPunkte: Math.round((parseFloat(String(s && s.abPunkte).replace(",", ".")) || 0) * 100) / 100,
-        note: Math.max(1, Math.min(5, parseInt(s && s.note, 10) || 0))
-      }))
-      .filter((s) => s.note >= 1);
-    clean.sort((a, b) => b.abPunkte - a.abPunkte);
-    return clean;
-  }
-
-  const DEFAULT_SETTINGS = {
-    key: "app",
-    schemaVersion: 8,
-    // Aktuelles Quartal (1–4) – neue Noten/Ereignisse/Stunden werden damit getaggt
-    aktuellesQuartal: 1,
-    // Vergessene Hausaufgaben werten:
-    // "punkte" = vergessene HA geben Minuspunkte in der Mitarbeit
-    // "note6"  = jede 3. vergessene HA je Quartal erzeugt automatisch eine
-    //            Note 6 in „Mündliche Mitarbeit", HA geben dann keine Punkte
-    haModus: "punkte",
-    // Legacy-Feld: nicht mehr im UI, wird aus dem Quartal abgeleitet
-    aktuellesHalbjahr: 1,
-    // Stundenplan: flache Liste von genau 10 { nr, start: "HH:MM", ende: "HH:MM" },
-    // gilt für jeden Schultag gleich (kein Wochenplan mehr).
-    stundenplan: defaultStundenplan(),
-    // Rundung der Gesamtnote: "keine" (2 NK), "eine" (1 NK), "ganze" (ganze Note)
-    rundung: "eine",
-    // Reihenfolge der Schüler/innen in allen Listen:
-    // "nachname" = alphabetisch (Nachname, dann Vorname), "manuell" = per ▲/▼ gepflegter sortIndex
-    schuelerSortierung: "nachname",
-    // Punkte je Ereignistyp (überschreibbar)
-    mitarbeitPunkte: EVENT_TYPES.reduce((m, t) => (m[t.id] = t.defaultPunkte, m), {}),
-    // Schwellen: Ø Punkte pro gehaltener Stunde -> Vorschlag Mitarbeitsnote.
-    // Startwerte, gedacht zum Nachjustieren (global und je Klasse editierbar).
-    mitarbeitSchwellen: [
-      { abPunkte: 2.0, note: 1 },
-      { abPunkte: 1.3, note: 2 },
-      { abPunkte: 0.7, note: 3 },
-      { abPunkte: 0.2, note: 4 },
-      { abPunkte: -0.5, note: 5 }
-      // darunter: 6
-    ],
-    // Heatmap-Erfassungspunkte je Ereignistyp
-    heatPunkteEinfach: 1,
-    heatPunkteGut: 2,
-    heatPunkteSehrGut: 3,
-    // Heatmap-Startwert beim Anlegen / Initialisieren von Schülerdaten
-    heatStartWert: 50,
-    // Heatmap-Verfall: Y Punkte pro X Minuten
-    heatVerfallPunkte: 1,
-    heatVerfallMinuten: 5,
-    // Default-Anteile schriftlich/sonstige je Fachtyp (in %)
-    anteile: {
-      hauptfach: { schriftlich: 50, sonstige: 50 },
-      nebenfach: { schriftlich: 30, sonstige: 70 }
-    }
-  };
-
-  // ---- Einstellungen -------------------------------------------------------
-  async function getSettings() {
-    let s = await DB.get("einstellungen", "app");
-    const quartalFehlt = !s || !s.aktuellesQuartal;
-    if (!s) {
-      s = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
-      await DB.put("einstellungen", s);
-    }
-    // Fehlende Felder aus Defaults ergänzen (Vorwärtskompatibilität)
-    s = Object.assign(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), s);
-    if (s.heatPunktVerfallProMinuten && !s.heatVerfallMinuten) {
-      s.heatVerfallMinuten = s.heatPunktVerfallProMinuten;
-    }
-    // Altes Format (Wochenplan als Objekt je Wochentag) in die flache
-    // 10-Stunden-Liste überführen: Montagsliste als Basis, sonst Default.
-    if (!Array.isArray(s.stundenplan)) {
-      const alt = s.stundenplan || {};
-      const ersterTag = Object.keys(alt).sort()[0];
-      s.stundenplan = ersterTag ? alt[ersterTag] : null;
-    }
-    s.stundenplan = stundenplanNormalisieren(s.stundenplan);
-    s.mitarbeitSchwellen = schwellenNormalisieren(s.mitarbeitSchwellen);
-    if (!s.mitarbeitSchwellen.length) {
-      s.mitarbeitSchwellen = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.mitarbeitSchwellen));
-    }
-    // Aktuelles Quartal: fehlt es oder ist es ungültig, aus dem heutigen
-    // Datum ableiten.
-    if (quartalFehlt || s.aktuellesQuartal < 1 || s.aktuellesQuartal > 4) {
-      s.aktuellesQuartal = quartalAusDatum(datumLokal());
-    }
-    return s;
-  }
-  async function saveSettings(s) {
-    s.key = "app";
-    return DB.put("einstellungen", s);
-  }
-
-  // ---- Daten-Migrationen (schemaVersion) -------------------------------------
-  // Zweistufiges Migrationskonzept:
-  //   DB_VERSION (db.js)   = Struktur der Object-Stores (Stores/Indizes, additiv)
-  //   SCHEMA_VERSION (hier) = Form der Datensätze (neue Felder, Defaults)
-  // MIGRATION_STEPS: Schlüssel = Ziel-Version. Jede Funktion führt genau den
-  // Schritt von (Version - 1) auf (Version) aus. Neue Versionen werden hinten
-  // angehängt – die Kette läuft kaskadiert v1 -> v2 -> v3 ... und wird einmalig
-  // beim App-Start (app.js, vor dem ersten Render) ausgeführt.
-  // Regel: Neue Felder bekommen immer Defaults (Factorys + getSettings-Merge),
-  // damit auch nicht migrierte/alte Datensätze ohne das Feld funktionieren.
-  const SCHEMA_VERSION = 11;
-  const MIGRATION_STEPS = {
-    // v1 -> v2: Noten und Ereignisse erhalten ein Halbjahr (1 | 2),
-    // aus dem Datum abgeleitet (Aug–Jan = 1. HJ, Feb–Jul = 2. HJ).
-    2: async () => {
-      const noten = await DB.getAll("noten");
-      noten.forEach((n) => { if (!n.halbjahr) n.halbjahr = halbjahrAusDatum(n.datum); });
-      await DB.bulkPut("noten", noten);
-      const ereignisse = await DB.getAll("ereignisse");
-      ereignisse.forEach((e) => {
-        if (!e.halbjahr) e.halbjahr = halbjahrAusDatum(new Date(e.timestamp).toISOString().slice(0, 10));
-      });
-      await DB.bulkPut("ereignisse", ereignisse);
-    },
-    // v2 -> v3: Stundenplan in den Einstellungen. Der Default kommt über den
-    // getSettings-Merge dazu; dieser Schritt persistiert die Einstellungen
-    // inkl. Stundenplan (und dokumentiert den Versionsschritt).
-    3: async () => {
-      await saveSettings(await getSettings());
-    },
-    // v3 -> v4: Stundenplan wird flach (10 Stunden, jeden Schultag gleich)
-    // statt Wochenplan je Wochentag. Die Konvertierung steckt in getSettings
-    // (Montagsliste als Basis); dieser Schritt persistiert das Ergebnis.
-    4: async () => {
-      await saveSettings(await getSettings());
-    },
-    // v4 -> v5: Unterrichtsstunden werden eine eigene Entität. Bestehende
-    // Ereignisse werden je (Klasse, Kalendertag) zu einer bereits beendeten
-    // Stunde zusammengefasst, damit die Auswertung weiter rechnen kann.
-    5: async () => {
-      const ereignisse = await DB.getAll("ereignisse");
-      const gruppen = {};
-      ereignisse.forEach((e) => {
-        const datum = datumLokal(new Date(e.timestamp));
-        const key = e.klasseId + "|" + datum;
-        if (!gruppen[key]) gruppen[key] = { klasseId: e.klasseId, datum, liste: [] };
-        gruppen[key].liste.push(e);
-      });
-      const stunden = Object.keys(gruppen).map((key) => {
-        const g = gruppen[key];
-        const zeiten = g.liste.map((e) => e.timestamp);
-        const start = Math.min.apply(null, zeiten);
-        const ende = Math.max.apply(null, zeiten);
-        const st = neueStunde(g.klasseId, {
-          startTs: start, endeTs: ende,
-          dauerMin: Math.max(1, Math.round((ende - start) / 60000)),
-          quelle: "migriert"
-        }, halbjahrAusDatum(g.datum));
-        st.datum = g.datum;
-        st.status = "beendet";
-        st.beendetAt = ende;
-        g.liste.forEach((e) => { e.stundeId = st.id; });
-        return st;
-      });
-      await DB.bulkPut("stunden", stunden);
-      await DB.bulkPut("ereignisse", ereignisse);
-    },
-    // v5 -> v6: Kategorien bekommen das Feld `anzeige` (Note oder Zählung
-    // fehlender Hausaufgaben); Nebenfächer rechnen jetzt 30 % schriftlich /
-    // 70 % sonstige statt 40/60.
-    6: async () => {
-      const kategorien = await DB.getAll("kategorien");
-      kategorien.forEach((c) => { if (!c.anzeige) c.anzeige = "note"; });
-      await DB.bulkPut("kategorien", kategorien);
-      const klassen = await DB.getAll("klassen");
-      klassen.forEach((k) => {
-        if (k.typ === "nebenfach") {
-          k.anteilSchriftlich = DEFAULT_SETTINGS.anteile.nebenfach.schriftlich;
-          k.anteilSonstige = DEFAULT_SETTINGS.anteile.nebenfach.sonstige;
-          k.updatedAt = now();
-        }
-      });
-      await DB.bulkPut("klassen", klassen);
-    },
-    // v6 -> v7: Die Reihenfolge der Schüler/innen ist einstellbar und steht
-    // standardmäßig auf alphabetisch (Nachname). Der Default kommt über den
-    // getSettings-Merge; dieser Schritt schreibt ihn fest. Der bisherige
-    // sortIndex bleibt erhalten – Umschalten auf "manuell" stellt ihn wieder her.
-    7: async () => {
-      await saveSettings(await getSettings());
-    },
-    // v7 -> v8: Quartale (1–4) auf Noten, Ereignissen und Stunden (aus dem
-    // Datum abgeleitet); neues Setting aktuellesQuartal (aus dem heutigen
-    // Datum) und haModus ("punkte" = bisherige Punktewertung).
-    8: async () => {
-      const noten = await DB.getAll("noten");
-      noten.forEach((n) => { if (!n.quartal) n.quartal = quartalAusDatum(n.datum); });
-      await DB.bulkPut("noten", noten);
-      const ereignisse = await DB.getAll("ereignisse");
-      ereignisse.forEach((e) => {
-        if (!e.quartal) e.quartal = quartalAusDatum(datumLokal(new Date(e.timestamp)));
-      });
-      await DB.bulkPut("ereignisse", ereignisse);
-      const stunden = await DB.getAll("stunden");
-      stunden.forEach((st) => { if (!st.quartal) st.quartal = quartalAusDatum(st.datum); });
-      await DB.bulkPut("stunden", stunden);
-      const s = await getSettings();
-      s.aktuellesQuartal = quartalAusDatum(datumLokal());
-      s.haModus = "punkte";
-      await saveSettings(s);
-    },
-    // v8 -> v9: Klassen bekommen eine Klassenstufe (5-13); ab 11 gelten
-    // MSS-Punkte (0-15) statt Schulnoten (siehe Calc.istMSS).
-    9: async () => {
-      const klassen = await DB.getAll("klassen");
-      klassen.forEach((k) => { if (k.klassenstufe === undefined) k.klassenstufe = null; });
-      await DB.bulkPut("klassen", klassen);
-    },
-    // v9 -> v10: Spaltenmodell. Jede Note gehört jetzt zu einer Leistung –
-    // das ist eine Spalte der Notenübersicht („2. Klassenarbeit", „HÜ 10.09."),
-    // in der je Schüler/in genau eine Note steht. Bestandsnoten werden nach
-    // Kategorie/Quartal/Titel/Datum zu Spalten zusammengefasst; hat ein/e
-    // Schüler/in dort mehrere Noten, entstehen entsprechend viele Spalten.
-    10: async () => {
-      const noten = await DB.getAll("noten");
-      if (!noten.length) return;
-      const neu = leistungenAusNoten(noten);
-      if (neu.length) await DB.bulkPut("leistungen", neu);
-      await DB.bulkPut("noten", noten);
-    },
-    // v10 -> v11: Kategorien bekommen eine Herkunft (`quelle`). Kategorien, die
-    // bisher schon Ziel des Quartalsabschlusses waren, werden als
-    // „mitarbeit" markiert – erkennbar am Namen, so wie es der Abschluss und
-    // der HA-Modus bisher auch getan haben.
-    11: async () => {
-      const kategorien = await DB.getAll("kategorien");
-      kategorien.forEach((c) => {
-        if (c.quelle) return;
-        const name = String(c.name || "").toLowerCase();
-        c.quelle = (c.art === "sonstige" && (c.anzeige || "note") === "note" && name.indexOf("mitarbeit") !== -1)
-          ? "mitarbeit" : "manuell";
-      });
-      await DB.bulkPut("kategorien", kategorien);
-    }
-  };
-  async function migrateSchema() {
-    const s = await getSettings();
-    let v = parseInt(s.schemaVersion, 10) || 1;
-    while (v < SCHEMA_VERSION) {
-      v++;
-      if (MIGRATION_STEPS[v]) await MIGRATION_STEPS[v]();
-    }
-    if (s.schemaVersion !== SCHEMA_VERSION) {
-      s.schemaVersion = SCHEMA_VERSION;
-      await saveSettings(s);
-    }
-    return s;
-  }
 
   // ---- Klassen -------------------------------------------------------------
   function neueKlasse(data) {
@@ -433,7 +159,7 @@
       nachname: "",
       bemerkung: "",
       sortIndex: t,
-      heatPoints: DEFAULT_SETTINGS.heatStartWert,
+      heatPoints: standardEinstellungen().heatStartWert,
       heatLastDecayAt: t,
       createdAt: t,
       updatedAt: t
@@ -799,43 +525,6 @@
     }
   };
 
-  // ---- Backup (Gesamt-Export/Import als JSON) ------------------------------
-  async function exportAll() {
-    const [klassen, schueler, kategorien, leistungen, noten, sitzplaene, ereignisse, abwesenheiten, stunden, settings] = await Promise.all([
-      DB.getAll("klassen"), DB.getAll("schueler"), DB.getAll("kategorien"),
-      DB.getAll("leistungen"),
-      DB.getAll("noten"), DB.getAll("sitzplaene"), DB.getAll("ereignisse"),
-      DB.getAll("abwesenheiten"), DB.getAll("stunden"), getSettings()
-    ]);
-    return {
-      app: "noten-fritze", appVersion: APP_VERSION,
-      schemaVersion: DB.DB_VERSION, exportedAt: new Date().toISOString(),
-      data: { klassen, schueler, kategorien, leistungen, noten, sitzplaene, ereignisse, abwesenheiten, stunden, settings }
-    };
-  }
-  async function importAll(backup, { replace }) {
-    if (!backup || !backup.data) throw new Error("Ungültiges Backup-Format.");
-    if (replace) await DB.clearAll();
-    const d = backup.data;
-    await DB.bulkPut("klassen", d.klassen || []);
-    const settings = await getSettings();
-    await DB.bulkPut("schueler", (d.schueler || []).map((s) => normalisiereSchuelerHeat(s, settings)));
-    await DB.bulkPut("kategorien", d.kategorien || []);
-    // Backup aus einer älteren Version: Spalten aus den Noten ableiten
-    const noten = (d.noten || []).map((n) => Object.assign({}, n));
-    const leistungen = (d.leistungen || []).slice();
-    if (!leistungen.length && noten.some((n) => !n.leistungId)) {
-      leistungenAusNoten(noten).forEach((l) => leistungen.push(l));
-    }
-    await DB.bulkPut("leistungen", leistungen);
-    await DB.bulkPut("noten", noten);
-    await DB.bulkPut("sitzplaene", d.sitzplaene || []);
-    await DB.bulkPut("ereignisse", d.ereignisse || []);
-    await DB.bulkPut("abwesenheiten", d.abwesenheiten || []);
-    await DB.bulkPut("stunden", d.stunden || []);
-    if (d.settings) await saveSettings(d.settings);
-  }
-
   // ---- HA-Modus „note6": automatische Note 6 --------------------------------
   // Meldet, ob mit der gerade erfassten vergessenen Hausaufgabe eine volle
   // Dreiergruppe (3., 6., 9. …) im Quartal erreicht ist. Nur relevant, wenn
@@ -856,343 +545,23 @@
     return anzahl > 0 && anzahl % 3 === 0;
   }
 
-  // ---- Klassen-Export/-Import (einzelne Klasse als JSON) -------------------
-  // Alle Datensätze einer Klasse (z. B. zur Übergabe an Kolleg/innen).
-  async function exportKlasse(klasseId) {
-    const [klasse, schueler, kategorien, leistungen, noten, ereignisse, stunden, abwesenheiten, sitzplan] = await Promise.all([
-      Klassen.get(klasseId),
-      DB.getAllByIndex("schueler", "klasseId", klasseId),
-      DB.getAllByIndex("kategorien", "klasseId", klasseId),
-      DB.getAllByIndex("leistungen", "klasseId", klasseId),
-      DB.getAllByIndex("noten", "klasseId", klasseId),
-      DB.getAllByIndex("ereignisse", "klasseId", klasseId),
-      DB.getAllByIndex("stunden", "klasseId", klasseId),
-      DB.getAllByIndex("abwesenheiten", "klasseId", klasseId),
-      DB.get("sitzplaene", klasseId)
-    ]);
-    return {
-      app: "noten-fritze-klasse", appVersion: APP_VERSION,
-      exportedAt: new Date().toISOString(),
-      data: {
-        klasse, schueler, kategorien, leistungen, noten, ereignisse, stunden, abwesenheiten,
-        sitzplan: sitzplan || null
-      }
-    };
-  }
-  // modus "ersetzen": vorhandene Klasse mit gleicher ID kaskadierend löschen,
-  //   dann die Datensätze unverändert einfügen (ID unbekannt -> einfach importieren).
-  // modus "kopie":   alle IDs neu vergeben und Referenzen ummappen,
-  //   Name wird um „ (Kopie)" ergänzt.
-  // Rückgabe: die importierte Klasse.
-  async function importKlasse(payload, { modus }) {
-    if (!payload || payload.app !== "noten-fritze-klasse" || !payload.data || !payload.data.klasse) {
-      throw new Error("Ungültiges Klassen-Export-Format.");
-    }
-    const d = payload.data;
-    let klasse = d.klasse;
-    let schueler = d.schueler || [];
-    let kategorien = d.kategorien || [];
-    let leistungen = d.leistungen || [];
-    let noten = d.noten || [];
-    let ereignisse = d.ereignisse || [];
-    let stunden = d.stunden || [];
-    let abwesenheiten = d.abwesenheiten || [];
-    let sitzplan = d.sitzplan || null;
-
-    // Export aus einer älteren Version (vor dem Spaltenmodell): Spalten aus
-    // den Noten ableiten, sonst wären sie in der Notenübersicht unsichtbar.
-    if (!leistungen.length && noten.some((n) => !n.leistungId)) {
-      noten = noten.map((n) => Object.assign({}, n));
-      leistungen = leistungenAusNoten(noten);
-    }
-
-    if (modus === "kopie") {
-      const klasseIdNeu = uid();
-      const schuelerMap = {}, kategorienMap = {}, stundenMap = {}, leistungenMap = {};
-      schueler.forEach((s) => { schuelerMap[s.id] = uid(); });
-      kategorien.forEach((c) => { kategorienMap[c.id] = uid(); });
-      stunden.forEach((st) => { stundenMap[st.id] = uid(); });
-      leistungen.forEach((l) => { leistungenMap[l.id] = uid(); });
-      klasse = Object.assign({}, klasse, { id: klasseIdNeu, name: (klasse.name || "") + " (Kopie)" });
-      schueler = schueler.map((s) => Object.assign({}, s, { id: schuelerMap[s.id], klasseId: klasseIdNeu }));
-      kategorien = kategorien.map((c) => Object.assign({}, c, { id: kategorienMap[c.id], klasseId: klasseIdNeu }));
-      leistungen = leistungen.map((l) => Object.assign({}, l, {
-        id: leistungenMap[l.id], klasseId: klasseIdNeu,
-        kategorieId: kategorienMap[l.kategorieId] || l.kategorieId
-      }));
-      noten = noten.map((n) => Object.assign({}, n, {
-        id: uid(), klasseId: klasseIdNeu,
-        schuelerId: schuelerMap[n.schuelerId] || n.schuelerId,
-        kategorieId: kategorienMap[n.kategorieId] || n.kategorieId,
-        leistungId: leistungenMap[n.leistungId] || n.leistungId
-      }));
-      ereignisse = ereignisse.map((e) => Object.assign({}, e, {
-        id: uid(), klasseId: klasseIdNeu,
-        schuelerId: schuelerMap[e.schuelerId] || e.schuelerId,
-        stundeId: stundenMap[e.stundeId] || e.stundeId
-      }));
-      stunden = stunden.map((st) => Object.assign({}, st, { id: stundenMap[st.id], klasseId: klasseIdNeu }));
-      abwesenheiten = abwesenheiten.map((a) => {
-        const sid = schuelerMap[a.schuelerId] || a.schuelerId;
-        return Object.assign({}, a, { id: sid + "_" + a.datum, klasseId: klasseIdNeu, schuelerId: sid });
-      });
-      if (sitzplan) {
-        sitzplan = Object.assign({}, sitzplan, {
-          klasseId: klasseIdNeu,
-          seats: (sitzplan.seats || []).map((seat) => Object.assign({}, seat, {
-            schuelerId: seat.schuelerId ? (schuelerMap[seat.schuelerId] || null) : null
-          }))
-        });
-      }
-    } else if (modus === "ersetzen") {
-      if (await Klassen.get(klasse.id)) await Klassen.remove(klasse.id); // Kaskade
-    }
-
-    const settings = await getSettings();
-    await Klassen.save(klasse);
-    await DB.bulkPut("schueler", schueler.map((s) => normalisiereSchuelerHeat(s, settings)));
-    await DB.bulkPut("kategorien", kategorien);
-    await DB.bulkPut("leistungen", leistungen);
-    await DB.bulkPut("noten", noten);
-    await DB.bulkPut("ereignisse", ereignisse);
-    await DB.bulkPut("stunden", stunden);
-    await DB.bulkPut("abwesenheiten", abwesenheiten);
-    if (sitzplan) await DB.put("sitzplaene", sitzplan);
-    return klasse;
-  }
-
-  // ---- Demo-Daten ----------------------------------------------------------
-  // „Stand Ende Schuljahr": Das Schuljahr 2025/26 ist gerade zu Ende (heute:
-  // Anfang August 2026). Das 1. Quartal ist bereits abgeschlossen – dafür
-  // gibt es keine Stunden/Ereignisse mehr, sondern übertragene ganze Noten in
-  // „Mündliche Mitarbeit". Q2–Q4 laufen mit Stunden und Ereignissen. Feste
-  // Leistungsprofile (stark/mittel/schwach) und ein Pseudozufall mit festem
-  // Startwert sorgen für plausible, reproduzierbare Teststände.
-  async function seedDemoData() {
-    const klassen = await Klassen.all();
-    if (klassen.length > 0) return false; // Nur wenn leer
-
-    // Reproduzierbarer Pseudozufall (LCG mit festem Startwert)
-    let seed = 20260801;
-    function zufall() {
-      seed = (seed * 1103515245 + 12345) % 2147483648;
-      return seed / 2147483648;
-    }
-
-    const k = neueKlasse({
-      name: "8b", schuljahr: "2025/26", fach: "Mathematik", typ: "hauptfach",
-      anteilSchriftlich: 50, anteilSonstige: 50,
-      notizen: "Demo-Klasse. Kann gefahrlos gelöscht werden."
-    });
-    await Klassen.save(k);
-
-    const namen = [
-      ["Anna", "Bauer"], ["Ben", "Fischer"], ["Clara", "Weber"], ["David", "Wagner"],
-      ["Emma", "Becker"], ["Finn", "Schulz"], ["Greta", "Hoffmann"], ["Hannes", "Koch"],
-      ["Ida", "Richter"], ["Jonas", "Klein"], ["Klara", "Wolf"], ["Leon", "Neumann"],
-      ["Maja", "Brandt"], ["Noah", "Schäfer"]
-    ];
-    // Feste Leistungsprofile, zyklisch je Index zugeteilt
-    const PROFILE = ["stark", "mittel", "schwach"];
-    const profilVon = (i) => PROFILE[i % PROFILE.length];
-    const schuelerListe = namen.map((n, i) => neuerSchueler(k.id, { vorname: n[0], nachname: n[1], sortIndex: i }));
-    await DB.bulkPut("schueler", schuelerListe);
-
-    // Notenwert um die Profil-Basis (stark ~1,8 / mittel ~2,8 / schwach ~4,0),
-    // auf die Drittelskala gerundet – erfasst werden immer echte Noten (2+, 3, 4-).
-    function profilNote(profil) {
-      const basis = profil === "stark" ? 1.8 : profil === "mittel" ? 2.8 : 4.0;
-      return Calc.tendenznote(basis + (zufall() - 0.5) * 1.6);
-    }
-    // Übertragene Mündlich-Note fürs abgeschlossene 1. Quartal (ganze Note):
-    // stark 1–2, mittel 2–3, schwach 4–5
-    function q1Note(profil) {
-      const von = profil === "stark" ? 1 : profil === "mittel" ? 2 : 4;
-      return von + Math.round(zufall());
-    }
-
-    const kats = [
-      neueKategorie(k.id, { name: "Klassenarbeit", art: "schriftlich", gewichtung: 2, sortIndex: 0 }),
-      neueKategorie(k.id, { name: "Test",          art: "schriftlich", gewichtung: 1, sortIndex: 1 }),
-      // Wird über „Quartal abschließen“ gefüllt – daran hängt die Epochalnote
-      neueKategorie(k.id, { name: "Mündliche Mitarbeit", art: "sonstige", gewichtung: 2, sortIndex: 2, quelle: "mitarbeit" }),
-      // Hausaufgaben werden nicht benotet – die Spalte zählt nur die vergessenen
-      neueKategorie(k.id, { name: "Hausaufgaben", art: "sonstige", gewichtung: 1, sortIndex: 3, anzeige: "fehlendeHA" })
-    ];
-    await DB.bulkPut("kategorien", kats);
-
-    const settings = await getSettings();
-
-    // Stunden des Schuljahrs 2025/26: jeden Dienstag und Donnerstag vom
-    // 12.08.2025 bis 09.07.2026, je 45 Min ab 09:00, alle beendet. Schulwochen
-    // sind grob zusammengefasst (keine Ferienlogik). Fürs 1. Quartal gibt es
-    // keine Stunden – es ist bereits abgeschlossen und übertragen.
-    const stunden = [];
-    const ende = new Date(2026, 6, 9);
-    for (let d = new Date(2025, 7, 12); d <= ende; d.setDate(d.getDate() + 1)) {
-      const wt = d.getDay();
-      if (wt !== 2 && wt !== 4) continue; // nur Dienstag + Donnerstag
-      const datum = datumLokal(d);
-      if (quartalAusDatum(datum) === 1) continue; // Q1 abgeschlossen: keine Stunden
-      const startD = new Date(d);
-      startD.setHours(9, 0, 0, 0);
-      const st = neueStunde(k.id, {
-        startTs: startD.getTime(), endeTs: startD.getTime() + 45 * 60000,
-        dauerMin: 45, quelle: "fallback", stundeNr: 2
-      });
-      st.status = "beendet";
-      st.beendetAt = st.endeTs;
-      stunden.push(st);
-    }
-    await DB.bulkPut("stunden", stunden);
-    const quartalStunden = {};
-    stunden.forEach((st) => {
-      (quartalStunden[st.quartal] = quartalStunden[st.quartal] || []).push(st);
-    });
-
-    // Vereinzelte Abwesenheiten (einzelne Tage bei vier Schülern)
-    const abwesenheiten = [];
-    const abwesendSet = {};
-    [[3, 5], [6, 20], [9, 40], [12, 60]].forEach((paar) => {
-      const s = schuelerListe[paar[0]], st = stunden[paar[1]];
-      if (!s || !st) return;
-      abwesenheiten.push({
-        id: s.id + "_" + st.datum, klasseId: k.id,
-        schuelerId: s.id, datum: st.datum, createdAt: now()
-      });
-      abwesendSet[s.id + "|" + st.datum] = true;
-    });
-    await DB.bulkPut("abwesenheiten", abwesenheiten);
-
-    // Mitarbeitsereignisse: pro Schüler und Stunde 0–3 Ereignisse, die
-    // Typ-Verteilung hängt vom Leistungsprofil ab (stark häufiger positiv,
-    // schwach öfter Störung/vergessene HA). Timestamps innerhalb der Stunde.
-    function ereignisTyp(profil) {
-      const r = zufall();
-      if (profil === "stark") {
-        if (r < 0.5) return "einfach";
-        if (r < 0.8) return "gut";
-        if (r < 0.95) return "sehrgut";
-        return "stoerung";
-      }
-      if (profil === "mittel") {
-        if (r < 0.55) return "einfach";
-        if (r < 0.8) return "gut";
-        if (r < 0.88) return "sehrgut";
-        if (r < 0.96) return "stoerung";
-        return "keinehausaufgabe";
-      }
-      if (r < 0.4) return "einfach";
-      if (r < 0.6) return "gut";
-      if (r < 0.8) return "stoerung";
-      return "keinehausaufgabe";
-    }
-    const ereignisse = [];
-    schuelerListe.forEach((s, idx) => {
-      const profil = profilVon(idx);
-      stunden.forEach((st) => {
-        if (abwesendSet[s.id + "|" + st.datum]) return;
-        const anzahl = Math.floor(zufall() * 4); // 0–3
-        for (let i = 0; i < anzahl; i++) {
-          const typ = ereignisTyp(profil);
-          const e = neuesEreignis(k.id, s.id, typ, settings.mitarbeitPunkte[typ], st.id);
-          e.timestamp = st.startTs + Math.floor(zufall() * 40) * 60000 + idx * 1000;
-          e.quartal = st.quartal;
-          e.halbjahr = st.halbjahr;
-          ereignisse.push(e);
-        }
-      });
-    });
-
-    // Drei Schüler (schwache Profile) bekommen garantiert in jedem laufenden
-    // Quartal mind. 3 vergessene HA – damit lässt sich der HA-Modus „note6"
-    // (jede 3. vergessene HA = Note 6) testen.
-    [2, 5, 8].forEach((sIdx) => {
-      const s = schuelerListe[sIdx];
-      [2, 3, 4].forEach((q) => {
-        (quartalStunden[q] || []).slice(0, 3).forEach((st, i) => {
-          const e = neuesEreignis(k.id, s.id, "keinehausaufgabe", settings.mitarbeitPunkte.keinehausaufgabe, st.id);
-          e.timestamp = st.startTs + (i + 2) * 60000 + sIdx * 1000;
-          e.quartal = st.quartal;
-          e.halbjahr = st.halbjahr;
-          ereignisse.push(e);
-        });
-      });
-    });
-
-    // Zwei Leistungsverweigerungen bei zwei Schülern in verschiedenen Quartalen
-    [[1, 2], [7, 3]].forEach((paar) => {
-      const st = (quartalStunden[paar[1]] || [])[10];
-      if (!st) return;
-      const e = neuesEreignis(k.id, schuelerListe[paar[0]].id, "verweigerung", 0, st.id);
-      e.timestamp = st.startTs + 20 * 60000 + paar[0] * 1000;
-      e.quartal = st.quartal;
-      e.halbjahr = st.halbjahr;
-      ereignisse.push(e);
-    });
-    await DB.bulkPut("ereignisse", ereignisse);
-
-    // Spalten (Leistungen) über das ganze Schuljahr verteilt; je Spalte
-    // bekommt jede/r Schüler/in genau eine Note (profilbasiert).
-    const spalten = [];
-    let spaltenNr = 0;
-    function demoSpalte(kategorie, titel, datum) {
-      const l = neueLeistung(k.id, {
-        kategorieId: kategorie.id, titel, datum, sortIndex: spaltenNr++
-      });
-      spalten.push(l);
-      return l;
-    }
-    const kaSpalten = ["2025-09-15", "2025-12-08", "2026-03-09", "2026-06-15"]
-      .map((datum, i) => demoSpalte(kats[0], "Klassenarbeit " + (i + 1), datum));
-    const testSpalten = ["2025-10-13", "2026-01-26", "2026-04-20", "2026-06-29"]
-      .map((datum, i) => demoSpalte(kats[1], "Test " + (i + 1), datum));
-    // 1. Quartal ist abgeschlossen: die mündliche Note wurde bereits als
-    // ganze Note in „Mündliche Mitarbeit" übertragen.
-    const muendlichQ1 = demoSpalte(kats[2], "Mitarbeit 1. Quartal", "2025-10-20");
-    await DB.bulkPut("leistungen", spalten);
-
-    const noten = [];
-    function demoNote(leistung, s, wert) {
-      noten.push(neueNote({
-        klasseId: k.id, schuelerId: s.id, kategorieId: leistung.kategorieId,
-        leistungId: leistung.id, wert, titel: leistung.titel,
-        datum: leistung.datum, quartal: leistung.quartal
-      }));
-    }
-    schuelerListe.forEach((s, idx) => {
-      const profil = profilVon(idx);
-      kaSpalten.forEach((l) => demoNote(l, s, profilNote(profil)));
-      testSpalten.forEach((l) => demoNote(l, s, profilNote(profil)));
-      demoNote(muendlichQ1, s, q1Note(profil));
-    });
-    await DB.bulkPut("noten", noten);
-
-    // Sitzplan füllen (3 Reihen × 5 Plätze, der letzte Platz bleibt frei)
-    const plan = neuerSitzplan(k.id, 3, 5);
-    schuelerListe.forEach((s, i) => { if (plan.seats[i]) plan.seats[i].schuelerId = s.id; });
-    await Sitzplan.save(plan);
-
-    return true;
-  }
-
+  // Die übrigen Store-Teile hängen sich per Object.assign an diesen Namespace
+  // (store.einstellungen.js, store.migrationen.js, store.transfer.js,
+  // store.demo.js) – siehe Kopfkommentar.
   global.Store = {
     uid, now,
-    EVENT_TYPES, EVENT_TYPE_MAP, KACHEL_EVENT_TYPES, DEFAULT_SETTINGS,
-    SCHEMA_VERSION, migrateSchema, halbjahrAusDatum, quartalAusDatum, halbjahrAusQuartal,
-    getSettings, saveSettings, schwellenNormalisieren,
+    EVENT_TYPES, EVENT_TYPE_MAP, KACHEL_EVENT_TYPES,
+    halbjahrAusDatum, quartalAusDatum, halbjahrAusQuartal, datumLokal,
     Klassen, neueKlasse,
     Schueler, neuerSchueler,
     Kategorien, neueKategorie,
-    Leistungen, neueLeistung, leistungFuer,
+    Leistungen, neueLeistung, leistungFuer, leistungenAusNoten,
     Noten, neueNote,
     Sitzplan, neuerSitzplan,
     Ereignisse, neuesEreignis,
     Stunden, neueStunde,
-    Abwesenheiten, datumLokal,
+    Abwesenheiten,
     addHeatPoints, currentHeatPoints, normalisiereSchuelerHeat,
-    defaultStundenplan,
-    exportAll, importAll, exportKlasse, importKlasse, haNote6Pruefen,
-    seedDemoData
+    haNote6Pruefen
   };
 })(window);

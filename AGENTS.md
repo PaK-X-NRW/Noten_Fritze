@@ -4,6 +4,9 @@ Diese Datei ist die **verbindliche Arbeitsanleitung** für alle KI-Agenten und
 Coding-Assistenten (Claude, Codex, Kimi, Cursor, Copilot o. ä.), die an diesem
 Repository arbeiten. Bitte vollständig lesen, bevor du Code änderst.
 
+Besonders wichtig: **Abschnitt 8 – erst planen und zustimmen lassen, dann bauen;
+im Zweifel fragen statt annehmen.**
+
 ---
 
 ## 1. Was ist Noten-Fritze?
@@ -43,7 +46,11 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 |---|---|---|
 | `js/version.js` | `APP_VERSION` | App-Version `MAJOR.MINOR.PATCH` (Single Source of Truth) |
 | `js/db.js` | `DB` | Generischer IndexedDB-Wrapper (Promises, Schema-Versionierung) |
-| `js/store.js` | `Store` | Domänenmodell, Repositories, Defaults, Ereignistypen, Demo-Daten |
+| `js/store.js` | `Store` | Store-Kern: Ereignistypen, Quartals-/Heat-Helfer, Repositories je Entität (inkl. Leistungen) |
+| `js/store.einstellungen.js` | `Store` | `DEFAULT_SETTINGS`, Stundenplan/Schwellen, `getSettings`/`saveSettings` |
+| `js/store.migrationen.js` | `Store` | `SCHEMA_VERSION`, `MIGRATION_STEPS`, `migrateSchema` |
+| `js/store.transfer.js` | `Store` | Backup (`exportAll`/`importAll`) und Klassen-Export/-Import |
+| `js/store.demo.js` | `Store` | Demo-Daten (`seedDemoData`) beim ersten Start |
 | `js/calc.js` | `Calc` | Reine Rechenlogik (Noten, Mitarbeit, Heatmap) – **frei von DOM/DB** |
 | `js/csv.js` | `CSV` | CSV-Export/Import (UTF-8 mit BOM) |
 | `js/ui.js` | `UI` | UI-Bausteine: Modal, Toast, Formfelder, `esc`, `$`/`$all` |
@@ -68,6 +75,16 @@ Wichtige Muster:
   `views.js` (Dispatcher) lädt **zuletzt** und destrukturiert alles, was die
   Action-Map braucht – aufgerufen wird erst zur Laufzeit per Klick.
   `render()` löst die Views über die Registry auf (`api.ViewHome()`).
+- Der **Store** ist nach demselben Muster aufgeteilt: `store.js` legt
+  `window.Store` an (Ereignistypen, Datums-/Quartals-Helfer, Repositories), die
+  Module `store.*.js` hängen sich per `Object.assign(global.Store, { ... })` an
+  und holen sich den Kern per `const { ... } = global.Store;` am Dateianfang.
+  Ausnahme in die andere Richtung: `store.js` braucht `getSettings` und
+  `DEFAULT_SETTINGS` aus `store.einstellungen.js`, das erst danach lädt –
+  deshalb greift es dort **zur Laufzeit** über `global.Store` zu (kleine Shims
+  am Dateianfang). `store.demo.js` lädt zuletzt, weil es alles andere benutzt.
+  `leistungenAusNoten` ist deshalb öffentlich: Migration und beide Importe
+  leiten damit Spalten aus Noten ohne `leistungId` ab.
 - Jede Datei beginnt mit einem **Header-Kommentarblock** (`/* ===...`), der
   Zweck und Inhalt beschreibt. Bei neuen Dateien dieses Format übernehmen.
 - HTML wird als String gebaut. **Nutzerdaten immer mit `UI.esc()` escapen**,
@@ -95,8 +112,9 @@ IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
   1. **Struktur** (Stores/Indizes): `DB_VERSION` in `db.js` erhöhen, Store in
      `STORES` ergänzen – `onupgradeneeded` legt Fehlendes additiv an.
      Bestehende Stores nie zerstörerisch umbauen; Daten der Nutzer sind heilig.
-  2. **Datenform** (neue/geänderte Felder): `SCHEMA_VERSION` in `store.js`
-     erhöhen und einen Schritt in `MIGRATION_STEPS` (Schlüssel = Ziel-Version)
+  2. **Datenform** (neue/geänderte Felder): `SCHEMA_VERSION` in
+     `store.migrationen.js` erhöhen und dort einen Schritt in
+     `MIGRATION_STEPS` (Schlüssel = Ziel-Version)
      ergänzen. `migrateSchema()` läuft beim App-Start kaskadiert
      (v1→v2→v3 …; aktueller Stand **11** – Spaltenmodell: Store `leistungen`
      und `leistungId` auf den Noten, `quelle` auf den Kategorien). Neue Felder bekommen zusätzlich immer Defaults
@@ -305,6 +323,48 @@ nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
   dass keine Fehler beim Laden auftreten.
 
 ## 8. Kommunikation & Konventionen im Repo
+
+### Erst planen, dann bauen
+
+Beginne **jede** Aufgabe im **Plan-Modus** (Claude Code: `Umschalt`+`Tab`; andere
+Werkzeuge: ihr jeweiliger Plan-/Architekten-Modus – notfalls schlicht: erst nur
+lesen und antworten, noch nichts schreiben). Ablauf:
+
+1. Die betroffenen Stellen im Code lesen und offene Punkte klären (siehe unten).
+2. Den Plan **in Alltagssprache** vorlegen: Was ändert sich in der App? Welche
+   Dateien werden angefasst? Was passiert mit vorhandenen Daten? In welcher
+   Reihenfolge gehst du vor? Wo bist du unsicher?
+3. **Auf ausdrückliche Zustimmung warten.** Erst danach Dateien ändern.
+
+Einzige Ausnahme: winzige, offensichtliche Korrekturen (z. B. Tippfehler in
+einem UI-Text). Im Zweifel trotzdem lieber vorher fragen.
+
+### Fragen statt Annahmen
+
+Die Person, für die du hier arbeitest, ist **Lehrkraft, kein Entwickler**. Daraus
+folgt für jede Aufgabe:
+
+- **Im Zweifel fragen, nicht raten.** Sobald ein Auftrag mehrdeutig ist, mehrere
+  Umsetzungen plausibel sind oder du eine fachliche Annahme treffen müsstest
+  (welche Kategorie? welches Quartal? was passiert mit vorhandenen Daten?):
+  erst fragen, dann bauen. Eine Rückfrage kostet Minuten, eine falsche Annahme
+  im Zweifel einen Notenbestand.
+- **Konkret fragen** – in kleinen Häppchen, mit Auswahlmöglichkeiten („A oder B?“)
+  statt offener Fragen, und jeweils mit einem Satz dazu, was der Unterschied im
+  Schulalltag praktisch bedeutet.
+- **Ohne Fachjargon antworten.** Änderungen aus Sicht der App beschreiben (was
+  ändert sich auf dem Bildschirm, wo klickt man, was passiert mit bisherigen
+  Daten), nicht aus Sicht des Codes. Unvermeidbare Fachbegriffe in einem
+  Halbsatz erklären.
+- **Vor größeren Umbauten oder Löschungen** kurz das Vorhaben beschreiben und
+  Zustimmung abwarten.
+- **Verifikation als Klickpfad** angeben („Klasse 8b öffnen → Reiter Mitarbeit →
+  …“) und auf ein nötiges Neuladen der App hinweisen (Service-Worker-Cache,
+  Abschnitt 5).
+- **Ehrlich berichten**, was du geprüft hast und was nicht – lieber ein klarer
+  Hinweis als ein zu optimistisches „fertig“.
+
+### Sprache & Dokumentation
 
 - **Sprache:** UI-Texte, Code-Kommentare und Commit-Messages auf Deutsch,
   passend zum bestehenden Ton (sachlich, kurz).

@@ -36,7 +36,11 @@ Sie können die App als PWA installieren („Zum Home-Bildschirm hinzufügen") u
 - **Schichten:**
   - `version.js` – App-Version (`MAJOR.MINOR.PATCH`, eine Stelle für alles)
   - `db.js` – generischer IndexedDB-Wrapper (Promises, Schema-Versionierung)
-  - `store.js` – Domänenmodell, Repositories, Defaults, Demo-Daten
+  - `store.js` – Domänenmodell und Repositories (Kern des Namespace `Store`)
+  - `store.einstellungen.js` – Standardwerte und App-Einstellungen
+  - `store.migrationen.js` – Daten-Migrationen (`schemaVersion`)
+  - `store.transfer.js` – Backup und Klassen-Export/-Import
+  - `store.demo.js` – Demo-Daten beim ersten Start
   - `calc.js` – reine Rechenlogik (Noten, Mitarbeit, Farben) – frei von DOM/DB
   - `csv.js` – CSV-Export/Import
   - `ui.js` – UI-Bausteine (Modal, Toast, Formfelder)
@@ -106,14 +110,14 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
   Sitzplatz-Zuweisung); das Löschen einer Kategorie oder einer Spalte nimmt die
   darin erfassten Noten mit.
 - **App-Version:** `APP_VERSION` in `js/version.js` (Schema `MAJOR.MINOR.PATCH`,
-  aktuell **1.7.1**) ist die sichtbare Programmversion: angezeigt unter
+  aktuell **1.7.3**) ist die sichtbare Programmversion: angezeigt unter
   Einstellungen → Über, Name des Service-Worker-Caches, Feld `appVersion` im
   JSON-Backup. Sie wird von Hand gepflegt und ist unabhängig von den beiden
   internen Zählern unten.
 - **Versionierbarkeit der Daten (zweistufig):** `DB_VERSION` + `onupgradeneeded` in `db.js`
   versioniert die **Struktur** (Stores/Indizes, additiv). Zusätzlich versioniert
   `schemaVersion` im einstellungen-Store die **Datenform**: eine kaskadierte
-  Migrations-Pipeline in `store.js` (`MIGRATION_STEPS`, Schlüssel = Ziel-Version)
+  Migrations-Pipeline in `store.migrationen.js` (`MIGRATION_STEPS`, Schlüssel = Ziel-Version)
   transformiert Datensätze beim App-Start Schritt für Schritt (v1→v2→v3 …).
   Neue Felder bekommen immer Defaults, damit alte Datensätze nicht crashen.
   Zusätzlich JSON-Voll-Backup als Sicherung.
@@ -411,7 +415,11 @@ Noten_Fritze/
 ├─ icons/icon.svg           App-Icon
 └─ js/
    ├─ db.js                 IndexedDB-Wrapper
-   ├─ store.js              Datenmodell, Repos, Demo-Daten
+   ├─ store.js              Datenmodell + Repositories (Store-Kern)
+   ├─ store.einstellungen.js Standardwerte + App-Einstellungen
+   ├─ store.migrationen.js  Daten-Migrationen (schemaVersion)
+   ├─ store.transfer.js     Backup + Klassen-Export/-Import
+   ├─ store.demo.js         Demo-Daten beim ersten Start
    ├─ calc.js               Noten-/Mitarbeitslogik
    ├─ csv.js                CSV-Export/Import
    ├─ ui.js                 Modal/Toast/Formfelder
