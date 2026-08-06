@@ -1,0 +1,12 @@
+# Dateien, die nur auf dem eigenen Rechner entstehen und nicht ins Projekt
+# gehören. Sie bleiben lokal erhalten, tauchen aber nicht mehr als
+# „nicht eingecheckt" auf und können nicht versehentlich veröffentlicht werden.
+
+# Visual Studio – interner Arbeitsordner (Fenster-Layout, Suchindex,
+# Copilot-Chatverläufe). Achtung: gehört in einem öffentlichen Projekt
+# keinesfalls hochgeladen.
+.vs/
+
+# Übersetzungsausgaben des .NET-Projekts
+obj/
+bin/
