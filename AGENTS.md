@@ -138,6 +138,15 @@ Zweifel die PATCH-Stelle (`1.5.0` → `1.5.1`). Sonst bekommen installierte PWAs
 die Änderung nie zu sehen; das ist die häufigste Ursache für „mein Fix kommt
 nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
 
+Damit das greift, registriert `app.js` den Service Worker mit
+`{ updateViaCache: "none" }`. Ohne diese Option holt der Browser die per
+`importScripts` geladene `version.js` bei der Update-Prüfung aus dem HTTP-Cache
+(GitHub Pages liefert `max-age=600`) und übersieht den Versionssprung –
+`service-worker.js` selbst ändert sich bei einem reinen Release ja nicht.
+Die Option deshalb nicht entfernen. Übernimmt ein neuer Service Worker die
+Seite, zeigt `app.js` den Toast „Neue Version verfügbar" mit „Neu laden";
+beim allerersten Start erscheint er bewusst nicht.
+
 ## 6. Fachlogik – wo was hingehört
 
 - **Berechnungen immer in `calc.js`** (rein, testbar, ohne DOM/DB-Zugriff):

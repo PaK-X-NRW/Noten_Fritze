@@ -35,9 +35,15 @@
       u.addEventListener("click", () => { hideToast(); opts.undo(); });
       el.appendChild(u);
     }
+    // Frei beschriftete Aktion (z. B. „Neu laden“) – gleiche Optik wie „Rückgängig“
+    if (opts.aktion) {
+      const a = fromHTML('<span class="undo">' + esc(opts.aktion.label) + "</span>");
+      a.addEventListener("click", () => { hideToast(); opts.aktion.onClick(); });
+      el.appendChild(a);
+    }
     root.appendChild(el);
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(hideToast, opts.duration || (opts.undo ? 5000 : 2600));
+    toastTimer = setTimeout(hideToast, opts.duration || (opts.undo || opts.aktion ? 5000 : 2600));
   }
   function hideToast() { document.getElementById("toast-root").innerHTML = ""; }
 

@@ -5,6 +5,9 @@
    ========================================================================= */
 // Cache-Name = App-Version (js/version.js). Damit reicht das Erhöhen von
 // APP_VERSION, um installierten PWAs eine neue App-Shell auszuliefern.
+// Das funktioniert nur zusammen mit `updateViaCache: "none"` bei der
+// Registrierung in js/app.js – sonst kommt die hier importierte version.js
+// bei der Update-Prüfung aus dem HTTP-Cache und der Sprung bleibt unbemerkt.
 importScripts("./js/version.js");
 const CACHE = "noten-fritze-" + self.APP_VERSION;
 const ASSETS = [
