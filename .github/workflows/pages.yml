@@ -1,0 +1,48 @@
+# =========================================================================
+# pages.yml – Veröffentlichung auf GitHub Pages
+#
+# Die App ist reines HTML/CSS/JS ohne Build-Schritt (siehe AGENTS.md, 2.1).
+# Dieser Workflow baut deshalb nichts: Er lädt den Stand von `main` unverändert
+# hoch und veröffentlicht ihn. Kein Jekyll, keine Abhängigkeiten, keine
+# Umbenennung von Dateien – was im Repository liegt, liegt danach auf der Seite.
+#
+# Die Domain (CNAME) und das Zertifikat verwaltet GitHub weiterhin in den
+# Repository-Einstellungen; die Datei `CNAME` wandert einfach mit hoch.
+# =========================================================================
+name: Seite veröffentlichen
+
+on:
+  push:
+    branches: [main]
+  # Erlaubt das Auslösen von Hand im Reiter "Actions".
+  workflow_dispatch:
+
+# Rechte, die das Veröffentlichen braucht – bewusst so eng wie möglich.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Nie zwei Veröffentlichungen gleichzeitig; laufende nicht abbrechen.
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Repository auschecken
+        uses: actions/checkout@v4
+
+      - name: Dateien als Paket schnüren
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Paket veröffentlichen
+        id: deployment
+        uses: actions/deploy-pages@v4
