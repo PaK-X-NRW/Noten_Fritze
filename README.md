@@ -15,6 +15,9 @@ Tablet-first, optimiert für das **iPad im Querformat**, offline nutzbar als PWA
 **Wichtig:** Alle Daten bleiben auf Ihrem Gerät! Die App speichert nichts in der Cloud. 
 Sie können die App als PWA installieren („Zum Home-Bildschirm hinzufügen") und nutzen sie offline.
 
+Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Workflow
+`.github/workflows/pages.yml`, der die Dateien unverändert hochlädt (kein Build, kein Jekyll).
+
 ---
 
 ## 1. Architektur & Begründung
