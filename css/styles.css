@@ -336,8 +336,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 }
 @keyframes sheet-up { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
 .modal h2 { margin: 0 0 16px; }
-.modal .actions { display: flex; gap: 10px; margin-top: 18px; }
-.modal .actions .btn { flex: 1; }
+.modal .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+/* Breite nach Beschriftung: passen nicht alle Knöpfe in eine Zeile, brechen sie um */
+.modal .actions .btn { flex: 1 1 auto; }
 @media (min-width: 700px) {
   .modal-backdrop { align-items: center; }
   .modal { border-radius: 20px; }
