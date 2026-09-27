@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#2f6f5e" />
+  <title>Noten-Fritze – Noten und Mitarbeit lokal auf dem iPad</title>
+  <meta name="description" content="Kostenlose Noten- und Mitarbeitsverwaltung für Lehrkräfte: Notenübersicht, Mitarbeits-Tracker mit Sitzplan, Besprechungsmodus. 100 % lokal im Browser – ohne Cloud, ohne Konto, offline nutzbar." />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Noten-Fritze – Noten und Mitarbeit lokal auf dem iPad" />
+  <meta property="og:description" content="Kostenlose Noten- und Mitarbeitsverwaltung für Lehrkräfte. Alle Daten bleiben auf dem eigenen Gerät." />
+  <meta property="og:image" content="https://noten-fritze.patrick-knapp.de/img/tracker.jpg" />
+  <meta property="og:url" content="https://noten-fritze.patrick-knapp.de/info.html" />
+  <link rel="canonical" href="https://noten-fritze.patrick-knapp.de/info.html" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon.svg" />
+  <!-- info.html – Infoseite für Lehrkräfte: Funktionen, Kurzanleitung,
+       Hinweise, Datenschutzerklärung, Kontakt und Lizenz. Bewusst ohne
+       Scripts und externe Ressourcen (nur Links). -->
+  <style>
+    :root {
+      --bg: #f4f6f5; --surface: #ffffff; --line: #dce2e0;
+      --text: #1f2a27; --text-muted: #6b7a75;
+      --accent: #2f6f5e; --accent-dark: #245546; --accent-soft: #e3efeb;
+      --warn-soft: #fdf5e9; --warn: #b9770e;
+      --radius: 16px; --shadow: 0 2px 10px rgba(31, 42, 39, 0.08);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 17px; line-height: 1.55; -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent-dark); }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 0 20px; }
+    header.hero { background: var(--accent); color: #fff; padding: 48px 0 40px; }
+    .hero .brand { display: flex; align-items: center; gap: 14px; }
+    .hero .brand img { width: 56px; height: 56px; border-radius: 14px; background: #fff; }
+    .hero h1 { margin: 0; font-size: 34px; line-height: 1.15; }
+    .hero p.lead { font-size: 20px; margin: 18px 0 26px; max-width: 700px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 24px;
+      border-radius: 12px; font-weight: 700; text-decoration: none; font-size: 18px;
+    }
+    .btn.primary { background: #fff; color: var(--accent-dark); }
+    .btn.ghost { color: #fff; border: 2px solid rgba(255,255,255,.6); margin-left: 8px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; padding: 0; list-style: none; }
+    .badges li { background: rgba(255,255,255,.15); border-radius: 999px; padding: 6px 14px; font-size: 15px; }
+    nav.toc { background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
+    nav.toc .wrap { display: flex; gap: 6px; overflow-x: auto; padding-top: 10px; padding-bottom: 10px; }
+    nav.toc a { white-space: nowrap; text-decoration: none; padding: 6px 12px; border-radius: 999px; font-weight: 600; font-size: 15px; }
+    nav.toc a:hover { background: var(--accent-soft); }
+    section { padding: 40px 0 8px; }
+    section h2 { font-size: 26px; margin: 0 0 16px; }
+    section h3 { font-size: 19px; margin: 24px 0 6px; }
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 18px; }
+    @media (max-width: 440px) { .features { grid-template-columns: 1fr; } }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 18px 20px; }
+    .card h3 { margin-top: 0; }
+    .card p { margin: 6px 0 0; }
+    figure { margin: 0 0 12px; }
+    figure img { width: 100%; height: auto; display: block; border-radius: 10px; border: 1px solid var(--line); }
+    figcaption { font-size: 14px; color: var(--text-muted); margin-top: 6px; }
+    ol.steps { padding-left: 0; list-style: none; counter-reset: s; }
+    ol.steps li { counter-increment: s; position: relative; padding: 12px 0 12px 52px; border-bottom: 1px solid var(--line); }
+    ol.steps li::before {
+      content: counter(s); position: absolute; left: 0; top: 10px; width: 36px; height: 36px; border-radius: 50%;
+      background: var(--accent-soft); color: var(--accent-dark); font-weight: 700; display: flex; align-items: center; justify-content: center;
+    }
+    .note { background: var(--warn-soft); border-left: 4px solid var(--warn); border-radius: 10px; padding: 14px 18px; margin: 14px 0; }
+    .muted { color: var(--text-muted); }
+    kbd, .ui { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; font-size: 15px; font-family: inherit; white-space: nowrap; }
+    footer { margin-top: 48px; padding: 24px 0 40px; border-top: 1px solid var(--line); font-size: 15px; }
+    @media (max-width: 600px) {
+      .hero h1 { font-size: 28px; }
+      .btn.ghost { margin: 10px 0 0; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="wrap">
+      <div class="brand"><img src="icons/icon.svg" alt="" /><h1>Noten-Fritze</h1></div>
+      <p class="lead">Noten und mündliche Mitarbeit erfassen – direkt im Unterricht, auf dem iPad.
+        Alle Daten bleiben auf deinem Gerät: ohne Cloud, ohne Konto, kostenlos.</p>
+      <a class="btn primary" href="./">▶︎ App starten</a>
+      <a class="btn ghost" href="#start">Erste Schritte</a>
+      <ul class="badges">
+        <li>100 % lokal gespeichert</li>
+        <li>offline nutzbar</li>
+        <li>für das iPad im Querformat</li>
+        <li>Schulnoten und MSS-Punkte</li>
+        <li>kostenlos &amp; quelloffen</li>
+      </ul>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Inhalt">
+    <div class="wrap">
+      <a href="#funktionen">Funktionen</a>
+      <a href="#start">Erste Schritte</a>
+      <a href="#hinweise">Wichtige Hinweise</a>
+      <a href="#datenschutz">Datenschutz</a>
+      <a href="#kontakt">Kontakt &amp; Lizenz</a>
+    </div>
+  </nav>
+
+  <main class="wrap">
+    <!-- ================= Funktionen ================= -->
+    <section id="funktionen">
+      <h2>Funktionen im Überblick</h2>
+      <div class="features">
+        <div class="card">
+          <figure><img src="img/tracker.jpg" alt="Mitarbeits-Tracker mit Schülerkacheln im Sitzplan" loading="lazy" /></figure>
+          <h3>Mitarbeits-Tracker</h3>
+          <p>Jede Schülerin, jeder Schüler als Kachel im Sitzplan. Ein Tipp erfasst eine Wortmeldung
+            (★ / ★★ / ★★★) oder Störung (⚡). Die Heatmap zeigt auf einen Blick, wer sich lange nicht
+            gemeldet hat. Dazu Modi für Abwesend, Leistungsverweigerung und fehlende Hausaufgaben,
+            Restzeit der Stunde laut Stundenplan und Rückgängig – auch für einzelne ältere Einträge.</p>
+        </div>
+        <div class="card">
+          <figure><img src="img/noten.jpg" alt="Notenübersicht eines Halbjahres" loading="lazy" /></figure>
+          <h3>Notenübersicht je Halbjahr</h3>
+          <p>Eine Spalte je Leistung, Eingabe wie in einer Tabelle mit Nummernpad. Epochalnoten je
+            Quartal, schriftliche und sonstige Leistungen, Zeugnisnote und Jahresnote werden automatisch
+            berechnet – angezeigt als Tendenz (2+, 3, 4-). Ab Klassenstufe 11 mit MSS-Punkten (0–15).</p>
+        </div>
+        <div class="card">
+          <figure><img src="img/sitzplan.jpg" alt="Sitzplan-Editor mit mehreren Räumen" loading="lazy" /></figure>
+          <h3>Sitzpläne für jeden Raum</h3>
+          <p>Raster frei wählbar, Plätze antippen und belegen. Mehrere Sitzpläne je Klasse – etwa
+            Klassenraum und Fachraum; beim Start der Stunde wählst du den Raum.</p>
+        </div>
+        <div class="card">
+          <figure><img src="img/besprechung.jpg" alt="Besprechungsmodus mit Herleitung der Zeugnisnote" loading="lazy" /></figure>
+          <h3>Besprechungsmodus</h3>
+          <p>Zeigt nur eine Schülerin bzw. einen Schüler – ideal für das Notengespräch, ohne dass
+            andere Noten sichtbar sind. Mit der Herleitung der Zeugnisnote Schritt für Schritt.</p>
+        </div>
+        <div class="card">
+          <h3>Mitarbeitsnote per Knopfdruck</h3>
+          <p>Aus den erfassten Stunden entsteht je Quartal ein Notenvorschlag. Mit
+            <span class="ui">Quartal abschließen</span> prüfst und übernimmst du ihn in die Notenübersicht.</p>
+        </div>
+        <div class="card">
+          <h3>Export &amp; Sicherung</h3>
+          <p>CSV-Export der Noten, Schülerlisten per CSV oder eingefügter Namensliste importieren,
+            einzelne Klassen weitergeben und das komplette Backup als Datei sichern.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Erste Schritte ================= -->
+    <section id="start">
+      <h2>Erste Schritte</h2>
+      <ol class="steps">
+        <li><strong>Als App installieren.</strong> Auf dem iPad in Safari öffnen → Teilen-Symbol →
+          <span class="ui">Zum Home-Bildschirm</span>. Danach startet Noten-Fritze wie eine App und
+          funktioniert auch ohne Internet. Das schützt außerdem deine Daten (siehe Hinweise unten).</li>
+        <li><strong>Erst einmal ausprobieren.</strong> Beim ersten Start gibt es eine Beispielklasse 8b.
+          Unter ⚙️ Einstellungen → <span class="ui">Beispielklassen anlegen</span> kommen zwei Klassen mit
+          einem komplett durchgespielten Schuljahr dazu. Alle Namen sind erfunden.</li>
+        <li><strong>Klasse anlegen.</strong> Startseite → <span class="ui">＋ Klasse</span>. Die Klassenstufe
+          entscheidet, ob mit Schulnoten oder (ab Stufe 11) mit MSS-Punkten gerechnet wird.</li>
+        <li><strong>Schülerinnen und Schüler eintragen.</strong> Reiter <em>Schüler/innen</em> →
+          <span class="ui">＋ Schüler/in</span> oder eine Namensliste bzw. CSV-Datei importieren.</li>
+        <li><strong>Kategorien prüfen.</strong> Im Reiter <em>Kategorien</em> legst du fest, was wie stark
+          zählt (z.&nbsp;B. Klassenarbeiten, Tests, mündliche Mitarbeit).</li>
+        <li><strong>Sitzplan einrichten.</strong> Reiter <em>Sitzplan</em> → Reihen und Spalten wählen,
+          Plätze antippen oder <span class="ui">Automatisch belegen</span>. Für weitere Räume:
+          <span class="ui">＋ Neuer Sitzplan</span>.</li>
+        <li><strong>Im Unterricht.</strong> <span class="ui">▶︎ Tracker starten</span> → Einzel- oder
+          Doppelstunde → Meldungen und Störungen auf den Kacheln antippen. Vertippt?
+          <span class="ui">↶ Rückgängig</span> nimmt den letzten Eintrag zurück; <em>lange drücken</em>
+          (am PC: Rechtsklick) zeigt alle Einträge der Stunde zum gezielten Entfernen.</li>
+        <li><strong>Noten eintragen.</strong> Reiter <em>Noten</em> → <span class="ui">＋ Spalte</span> für
+          jede Leistung, dann die Zellen antippen und über das Nummernpad eintragen.</li>
+        <li><strong>Zum Quartalsende.</strong> Reiter <em>Mitarbeit</em> →
+          <span class="ui">Quartal abschließen</span> → Vorschläge prüfen, bei Bedarf anpassen, übernehmen.</li>
+        <li><strong>Noten besprechen.</strong> In der Klasse oben <span class="ui">Besprechung</span> –
+          eine Person nach der anderen, mit Herleitung.</li>
+        <li><strong>Regelmäßig sichern!</strong> ⚙️ Einstellungen → <span class="ui">Backup exportieren (JSON)</span>.
+          Die Datei an einem sicheren Ort aufbewahren – sie enthält alle Noten.</li>
+      </ol>
+    </section>
+
+    <!-- ================= Hinweise ================= -->
+    <section id="hinweise">
+      <h2>Wichtige Hinweise</h2>
+
+      <h3>Deine Daten liegen nur auf diesem Gerät</h3>
+      <p>Noten-Fritze speichert alles im Browser des Geräts, auf dem du es benutzt. Es gibt keinen
+        Server und keinen Abgleich zwischen Geräten. Wer die Website-Daten des Browsers löscht, das Gerät
+        zurücksetzt oder verliert, verliert auch die Noten – außer es gibt ein Backup.</p>
+      <div class="note"><strong>Backups machen.</strong> Exportiere regelmäßig ein Backup (z.&nbsp;B. am Ende
+        jeder Woche) und bewahre die Datei geschützt auf. Auf dem iPad solltest du Noten-Fritze außerdem
+        <strong>zum Home-Bildschirm hinzufügen</strong>: Safari kann die Daten von Websites, die man längere
+        Zeit nicht besucht hat, automatisch löschen – installierte Web-Apps sind davon ausgenommen.</div>
+
+      <h3>Schülerdaten auf dem eigenen Gerät</h3>
+      <p>Noten sind personenbezogene Daten von Schülerinnen und Schülern. Wer sie auf einem privaten
+        Gerät verarbeitet, braucht dafür in der Regel eine Genehmigung der Schulleitung; die Einzelheiten
+        regelt jedes Bundesland selbst. Bitte kläre das mit deiner Schulleitung bzw. dem oder der
+        Datenschutzbeauftragten. Sichere das Gerät mit einem Code und gib Backup-Dateien nicht unverschlüsselt weiter.</p>
+
+      <h3>Berechnungen ohne Gewähr</h3>
+      <p>Die App rechnet nach festen Regeln (Gewichtung der Kategorien, Drittelnoten, Zeugnisskala).
+        Maßgeblich sind die Vorgaben deiner Schule und deine pädagogische Entscheidung – prüfe Noten
+        deshalb vor der Vergabe.</p>
+    </section>
+
+    <!-- ================= Datenschutz ================= -->
+    <section id="datenschutz">
+      <h2>Datenschutzerklärung</h2>
+
+      <h3>Verantwortlich</h3>
+      <p>Patrick Knapp (privates, unentgeltliches Projekt). Kontakt: siehe <a href="#kontakt">Kontakt</a>.</p>
+
+      <h3>Was die App speichert</h3>
+      <p>Alles, was du in Noten-Fritze eingibst (Klassen, Namen, Noten, Mitarbeit, Einstellungen), wird
+        ausschließlich lokal im Speicher deines Browsers (IndexedDB) auf deinem Gerät abgelegt. Diese Daten
+        werden nicht an mich oder Dritte übertragen. Die App verwendet keine Cookies, kein Tracking, keine
+        Analyse- oder Werbedienste und lädt keine Inhalte von fremden Servern. Damit die App offline
+        funktioniert, speichert der Browser ihre Programmdateien zwischen; darin sind keine
+        personenbezogenen Daten enthalten. Löschen kannst du deine Daten jederzeit unter ⚙️ Einstellungen →
+        <span class="ui">Alle Daten löschen</span> oder über die Website-Daten deines Browsers.</p>
+
+      <h3>Hosting bei GitHub</h3>
+      <p>Die Website wird über GitHub Pages bereitgestellt (GitHub Inc., 88 Colin P. Kelly Jr. Street,
+        San Francisco, CA 94107, USA). Beim Aufruf der Seite verarbeitet GitHub technisch notwendige Daten
+        wie IP-Adresse, Zeitpunkt, aufgerufene Datei und Browserinformationen, um die Seite auszuliefern und
+        abzusichern. Rechtsgrundlage ist Art. 6 Abs. 1 lit. f DSGVO; das berechtigte Interesse liegt in einer
+        sicheren und stabilen Bereitstellung. Dabei können Daten in die USA übermittelt werden; GitHub stützt
+        solche Übermittlungen auf das EU-U.S. Data Privacy Framework bzw. Standardvertragsklauseln. Ich selbst
+        habe keinen Zugriff auf diese Protokolle. Näheres:
+        <a href="https://docs.github.com/de/site-policy/privacy-policies/github-general-privacy-statement" rel="noopener">Datenschutzerklärung von GitHub</a>.</p>
+
+      <h3>Deine Rechte</h3>
+      <p>Du hast das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Widerspruch
+        und Datenübertragbarkeit sowie das Recht auf Beschwerde bei einer Datenschutz-Aufsichtsbehörde –
+        etwa an deinem Wohnort. Zuständig für mich ist der Landesbeauftragte für den Datenschutz und die
+        Informationsfreiheit Rheinland-Pfalz.</p>
+      <p class="muted">Stand: September 2026</p>
+    </section>
+
+    <!-- ================= Kontakt & Lizenz ================= -->
+    <section id="kontakt">
+      <h2>Kontakt &amp; Lizenz</h2>
+      <p>Noten-Fritze ist ein privates Hobbyprojekt von Patrick Knapp – ohne Werbung, ohne Einnahmen,
+        ohne Datenerhebung.</p>
+      <p><strong>Fragen, Fehler, Wünsche:</strong>
+        <a href="https://github.com/PaK-X-NRW/Noten_Fritze/issues" rel="noopener">über GitHub melden</a>
+        (kostenloses GitHub-Konto nötig). Bitte dabei keine echten Schülerdaten posten – die Einträge dort sind öffentlich.</p>
+      <!-- Platz für weitere Kontaktangaben (z. B. Projekt-E-Mail) bzw. ein Impressum. -->
+      <p><strong>Quellcode:</strong> <a href="https://github.com/PaK-X-NRW/Noten_Fritze" rel="noopener">github.com/PaK-X-NRW/Noten_Fritze</a></p>
+      <p><strong>Lizenz:</strong> Noten-Fritze steht unter der <a href="https://github.com/PaK-X-NRW/Noten_Fritze/blob/main/LICENSE" rel="noopener">MIT-Lizenz</a>.
+        Du darfst die Software frei nutzen, verändern und weitergeben. Sie wird ohne jede Gewähr bereitgestellt.</p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <a href="./">▶︎ App starten</a> · <a href="#datenschutz">Datenschutz</a> · <a href="#kontakt">Kontakt</a>
+      <span class="muted"> · © 2026 Patrick Knapp · MIT-Lizenz</span>
+    </div>
+  </footer>
+</body>
+</html>

@@ -138,6 +138,12 @@ Zweifel die PATCH-Stelle (`1.5.0` → `1.5.1`). Sonst bekommen installierte PWAs
 die Änderung nie zu sehen; das ist die häufigste Ursache für „mein Fix kommt
 nicht an". Neue Dateien zusätzlich in `ASSETS` eintragen.
 
+**Infoseite `info.html`** (mit `img/*.jpg`) ist ebenfalls in `ASSETS` und damit
+gecacht: Änderungen dort brauchen genauso einen Versionssprung. Sie enthält die
+Datenschutzerklärung – wer neue Datenflüsse einführt (was Abschnitt 1 ohnehin
+verbietet) oder Funktionen umbenennt, muss Text und Kurzanleitung mitpflegen.
+Screenshots nur mit Beispieldaten (erfundene Namen), nie mit echten Schülerdaten.
+
 Damit das greift, registriert `app.js` den Service Worker mit
 `{ updateViaCache: "none" }`. Ohne diese Option holt der Browser die per
 `importScripts` geladene `version.js` bei der Update-Prüfung aus dem HTTP-Cache

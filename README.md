@@ -12,6 +12,10 @@ Tablet-first, optimiert für das **iPad im Querformat**, offline nutzbar als PWA
 - **http://noten-fritze.patrick-knapp.de** (Domain-Redirect)
 - Gehostet auf GitHub Pages: https://pak-x-nrw.github.io/Noten_Fritze/
 
+**Infoseite für Lehrkräfte** (Funktionen, Anleitung, Datenschutz, Kontakt):
+`info.html` – verlinkt in der App unter Einstellungen → „Hilfe & Rechtliches“.
+Lizenz: MIT (siehe `LICENSE`).
+
 **Wichtig:** Alle Daten bleiben auf Ihrem Gerät! Die App speichert nichts in der Cloud. 
 Sie können die App als PWA installieren („Zum Home-Bildschirm hinzufügen") und nutzen sie offline.
 
@@ -474,6 +478,10 @@ echte PNG-App-Icons (aktuell SVG) · Mehrbenutzer/Sync (nicht vorgesehen, da lok
 ```
 Noten_Fritze/
 ├─ index.html               App-Shell
+├─ info.html                Infoseite für Lehrkräfte: Funktionen, Anleitung, Hinweise,
+│                           Datenschutzerklärung, Kontakt, Lizenz (ohne Scripts)
+├─ img/                     Screenshots für info.html (Beispieldaten, erfundene Namen)
+├─ LICENSE                  MIT-Lizenz
 ├─ manifest.webmanifest     PWA-Manifest
 ├─ service-worker.js        Offline-Cache
 ├─ AGENTS.md                verbindliche Arbeitsanleitung für KI-Assistenten

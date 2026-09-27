@@ -32,6 +32,11 @@ const ASSETS = [
   "./js/views.dialoge.js",
   "./js/views.js",
   "./js/app.js",
+  "./info.html",
+  "./img/tracker.jpg",
+  "./img/noten.jpg",
+  "./img/sitzplan.jpg",
+  "./img/besprechung.jpg",
   "./manifest.webmanifest",
   "./icons/icon.svg"
 ];

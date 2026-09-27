@@ -152,6 +152,13 @@
           '<button class="btn" data-action="seed-beispielklassen">Beispielklassen anlegen</button>' +
         "</div>" +
       "</div>" +
+      '<div class="card"><h2>Hilfe &amp; Rechtliches</h2>' +
+        '<p class="muted">Anleitung, Funktionsübersicht, Datenschutzerklärung, Kontakt und Lizenz findest du auf der Infoseite.</p>' +
+        '<p class="hint">Noten sind personenbezogene Schülerdaten: Für die Nutzung auf einem privaten Gerät ist in der Regel ' +
+          "eine Genehmigung der Schulleitung nötig (Einzelheiten regelt jedes Bundesland). Die Daten liegen nur auf diesem Gerät – " +
+          "exportiere deshalb regelmäßig ein Backup.</p>" +
+        '<div class="btn-row"><a class="btn" href="info.html">Infoseite öffnen</a></div>' +
+      "</div>" +
       '<div class="card"><h2>Über</h2><p class="muted">Noten-Fritze · Version ' + APP_VERSION +
         " · lokale PWA · keine Cloud, keine Konten.</p>" +
         '<p class="hint">DB-Schema ' + DB.DB_VERSION + " · Daten-Version " + Store.SCHEMA_VERSION + ".</p></div>";
