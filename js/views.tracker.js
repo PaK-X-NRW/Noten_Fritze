@@ -116,26 +116,48 @@
     undoLangDruck(document.getElementById("undo-btn"));
   }
 
+  // Die Liste öffnet sich, während der Finger noch liegt. Beim Loslassen (oder
+  // nach Verschieben des Fingers) erzeugt iOS einen Klick an der Fingerposition –
+  // der würde die Liste über den Hintergrund schließen oder ein ✕ treffen. Bis
+  // kurz nach dem Loslassen werden deshalb alle Klicks verschluckt.
+  function klicksSchluckenBisLoslassen() {
+    const schlucken = (ev) => { ev.preventDefault(); ev.stopPropagation(); };
+    // Kein pointercancel: Das meldet iOS schon, sobald sich der Finger bewegt –
+    // das eigentliche Loslassen (touchend) kommt erst danach.
+    const loslassen = ["pointerup", "touchend", "touchcancel"];
+    let ende = null;
+    const freigeben = () => {
+      loslassen.forEach((n) => document.removeEventListener(n, beimLoslassen, true));
+      clearTimeout(ende);
+      setTimeout(() => document.removeEventListener("click", schlucken, true), 400);
+    };
+    const beimLoslassen = () => freigeben();
+    document.addEventListener("click", schlucken, true);
+    loslassen.forEach((n) => document.addEventListener(n, beimLoslassen, true));
+    ende = setTimeout(freigeben, 10000); // Sicherheitsnetz, falls kein Loslassen gemeldet wird
+  }
+
   // Langes Drücken (iPad) bzw. Rechtsklick (PC) auf „Rückgängig" öffnet die
   // Liste der Einträge dieser Stunde; ein kurzer Tipp bleibt „letzten zurücknehmen".
   function undoLangDruck(btn) {
     if (!btn) return;
     let timer = null, ausgeloest = false;
-    const oeffnen = () => {
+    const oeffnen = (fingerLiegt) => {
       clearTimeout(timer);
       if (ausgeloest) return;
       ausgeloest = true;
       global.Views.undoListeDialog();
+      if (fingerLiegt) klicksSchluckenBisLoslassen();
     };
     btn.addEventListener("pointerdown", (ev) => {
       ausgeloest = false;
       clearTimeout(timer);
       if (ev.button !== 0) return; // Rechtsklick läuft über contextmenu
-      timer = setTimeout(oeffnen, 550);
+      timer = setTimeout(() => oeffnen(true), 550);
     });
     ["pointerup", "pointercancel", "pointerleave"].forEach((n) =>
       btn.addEventListener(n, () => clearTimeout(timer)));
-    btn.addEventListener("contextmenu", (ev) => { ev.preventDefault(); oeffnen(); });
+    btn.addEventListener("contextmenu", (ev) => { ev.preventDefault(); oeffnen(false); });
     // Nach dem langen Drücken darf kein Klick folgen: iOS würde ihn sonst an
     // der Fingerposition in die gerade geöffnete Liste setzen.
     btn.addEventListener("touchend", (ev) => { if (ausgeloest) ev.preventDefault(); });
