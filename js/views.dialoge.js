@@ -422,6 +422,47 @@
     if (clr) clr.addEventListener("click", async () => { seat.schuelerId = null; await Store.Sitzplan.save(plan); m.close(); render(); });
   }
 
+  // ---- Sitzpläne (je Raum einer) --------------------------------------------
+  // Neuer Plan: leeres Raster oder Kopie des gerade gezeigten Plans.
+  async function sitzplanNeuDialog(k) {
+    const aktuell = await Store.Sitzplan.get(k.id);
+    const body =
+      UI.field("Name (z. B. Raum)", "name", "", { placeholder: "z. B. Physikraum" }) +
+      UI.field("Anlegen als", "vorlage", "leer", { type: "select", options: [
+        { value: "leer", label: "Leeres Raster" },
+        { value: "kopie", label: "Kopie von „" + aktuell.name + "“" }
+      ] });
+    UI.modal({
+      title: "Neuer Sitzplan", bodyHTML: body,
+      buttons: [
+        { label: "Abbrechen" },
+        { label: "Anlegen", className: "primary", onClick: async (close, box) => {
+          const v = UI.formValues(box);
+          const name = String(v.name || "").trim();
+          if (!name) { UI.toast("Bitte einen Namen eingeben"); return; }
+          await Store.Sitzplan.neu(k.id, name, v.vorlage === "kopie" ? aktuell : null);
+          close(); render();
+        }}
+      ]
+    });
+  }
+  async function sitzplanUmbenennenDialog(k) {
+    const plan = await Store.Sitzplan.get(k.id);
+    UI.modal({
+      title: "Sitzplan umbenennen", bodyHTML: UI.field("Name", "name", plan.name),
+      buttons: [
+        { label: "Abbrechen" },
+        { label: "Speichern", className: "primary", onClick: async (close, box) => {
+          const name = String(UI.formValues(box).name || "").trim();
+          if (!name) { UI.toast("Bitte einen Namen eingeben"); return; }
+          plan.name = name;
+          await Store.Sitzplan.save(plan);
+          close(); render();
+        }}
+      ]
+    });
+  }
+
   // ---- CSV-Import Schüler ---------------------------------------------------
   function importStudentsDialog(k) {
     const body =
@@ -680,7 +721,8 @@
 
   Object.assign(global.Views, {
     klasseDialog, splitsDialog, schuelerDialog, kategorieDialog, leistungDialog,
-    studentDetailDialog, seatAssignDialog, importStudentsDialog, backupImportDialog,
+    studentDetailDialog, seatAssignDialog, sitzplanNeuDialog, sitzplanUmbenennenDialog,
+    importStudentsDialog, backupImportDialog,
     schwellenDialog, mitarbeitHerleitungDialog,
     quartalAbschliessenDialog, klassenImportDialog
   });

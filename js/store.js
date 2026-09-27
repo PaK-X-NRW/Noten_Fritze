@@ -233,13 +233,13 @@
       await DB.delByIndex("noten", "schuelerId", id);
       await DB.delByIndex("ereignisse", "schuelerId", id);
       await DB.delByIndex("abwesenheiten", "schuelerId", id);
-      // Sitzplatz-Zuweisung entfernen
+      // Sitzplatz-Zuweisung in allen Sitzplänen der Klasse entfernen
       const s = await DB.get("schueler", id);
       if (s) {
-        const plan = await DB.get("sitzplaene", s.klasseId);
-        if (plan) {
-          plan.seats.forEach((seat) => { if (seat.schuelerId === id) seat.schuelerId = null; });
-          await DB.put("sitzplaene", plan);
+        const rec = sitzplaeneNormalisieren(await DB.get("sitzplaene", s.klasseId));
+        if (rec) {
+          rec.plaene.forEach((p) => p.seats.forEach((seat) => { if (seat.schuelerId === id) seat.schuelerId = null; }));
+          await DB.put("sitzplaene", rec);
         }
       }
       await DB.del("schueler", id);
@@ -420,21 +420,89 @@
   };
 
   // ---- Sitzplan ------------------------------------------------------------
-  function neuerSitzplan(klasseId, rows, cols) {
+  // Eine Klasse kann mehrere Sitzpläne haben (je Raum einen). Im Store
+  // "sitzplaene" liegt je Klasse EIN Datensatz (Schlüssel klasseId):
+  //   { klasseId, plaene: [{ id, name, klasseId, rows, cols, seats }], aktivId, updatedAt }
+  // aktivId = zuletzt benutzter Plan (Vorauswahl im Reiter und beim Tracker-Start).
+  function neuerSitzplan(klasseId, rows, cols, name) {
     rows = rows || 4; cols = cols || 6;
     const seats = [];
     for (let r = 0; r < rows; r++)
       for (let c = 0; c < cols; c++)
         seats.push({ id: r + "-" + c, row: r, col: c, schuelerId: null });
-    return { klasseId, rows, cols, seats, updatedAt: now() };
+    return { id: uid(), name: name || "Klassenraum", klasseId, rows, cols, seats, updatedAt: now() };
+  }
+  // Bringt einen Datensatz auf die Form mit mehreren Plänen. Ältere Daten
+  // (ein einzelner Plan mit seats direkt am Datensatz) werden zum Plan
+  // „Klassenraum". Rückgabe: normalisierter Datensatz oder null.
+  function sitzplaeneNormalisieren(rec) {
+    if (!rec) return null;
+    if (Array.isArray(rec.plaene) && rec.plaene.length) {
+      rec.plaene.forEach((p) => { p.klasseId = rec.klasseId; if (!p.name) p.name = "Klassenraum"; });
+      if (!rec.plaene.some((p) => p.id === rec.aktivId)) rec.aktivId = rec.plaene[0].id;
+      return rec;
+    }
+    const plan = neuerSitzplan(rec.klasseId, rec.rows, rec.cols, "Klassenraum");
+    if (Array.isArray(rec.seats)) plan.seats = rec.seats;
+    return { klasseId: rec.klasseId, plaene: [plan], aktivId: plan.id, updatedAt: rec.updatedAt || now() };
   }
   const Sitzplan = {
-    async get(klasseId) {
-      let p = await DB.get("sitzplaene", klasseId);
-      if (!p) { p = neuerSitzplan(klasseId); await DB.put("sitzplaene", p); }
-      return p;
+    // Alle Pläne einer Klasse (legt bei Bedarf den ersten an bzw. wandelt alte Daten um).
+    async alle(klasseId) {
+      const rec = await DB.get("sitzplaene", klasseId);
+      if (rec && Array.isArray(rec.plaene) && rec.plaene.length) return sitzplaeneNormalisieren(rec);
+      const neu = rec ? sitzplaeneNormalisieren(rec)
+        : { klasseId, plaene: [neuerSitzplan(klasseId)], aktivId: null, updatedAt: now() };
+      if (!neu.aktivId) neu.aktivId = neu.plaene[0].id;
+      await DB.put("sitzplaene", neu);
+      return neu;
     },
-    save(p) { p.updatedAt = now(); return DB.put("sitzplaene", p); }
+    // Ein Plan: der gewünschte, sonst der zuletzt benutzte, sonst der erste.
+    async get(klasseId, planId) {
+      const rec = await Sitzplan.alle(klasseId);
+      return rec.plaene.find((p) => p.id === planId) ||
+        rec.plaene.find((p) => p.id === rec.aktivId) || rec.plaene[0];
+    },
+    // Speichert einen Plan (ersetzt ihn über seine id oder hängt ihn an).
+    async save(plan) {
+      plan.updatedAt = now();
+      // Noch kein Datensatz: dieser Plan wird der erste (kein zusätzlicher Standardplan).
+      if (!(await DB.get("sitzplaene", plan.klasseId))) {
+        return DB.put("sitzplaene", { klasseId: plan.klasseId, plaene: [plan], aktivId: plan.id, updatedAt: now() });
+      }
+      const rec = await Sitzplan.alle(plan.klasseId);
+      const i = rec.plaene.findIndex((p) => p.id === plan.id);
+      if (i === -1) rec.plaene.push(plan); else rec.plaene[i] = plan;
+      rec.updatedAt = now();
+      return DB.put("sitzplaene", rec);
+    },
+    // Neuer Plan; mit vorlage als Kopie (Raster + Zuweisungen), sonst leer.
+    async neu(klasseId, name, vorlage) {
+      const plan = neuerSitzplan(klasseId, vorlage ? vorlage.rows : null, vorlage ? vorlage.cols : null, name);
+      if (vorlage) plan.seats = vorlage.seats.map((s) => Object.assign({}, s));
+      const rec = await Sitzplan.alle(klasseId);
+      rec.plaene.push(plan);
+      rec.aktivId = plan.id;
+      rec.updatedAt = now();
+      await DB.put("sitzplaene", rec);
+      return plan;
+    },
+    async setAktiv(klasseId, planId) {
+      const rec = await Sitzplan.alle(klasseId);
+      if (rec.aktivId === planId || !rec.plaene.some((p) => p.id === planId)) return;
+      rec.aktivId = planId;
+      return DB.put("sitzplaene", rec);
+    },
+    // Löscht einen Plan; der letzte Plan einer Klasse bleibt immer erhalten.
+    async remove(klasseId, planId) {
+      const rec = await Sitzplan.alle(klasseId);
+      if (rec.plaene.length <= 1) return false;
+      rec.plaene = rec.plaene.filter((p) => p.id !== planId);
+      if (rec.aktivId === planId) rec.aktivId = rec.plaene[0].id;
+      rec.updatedAt = now();
+      await DB.put("sitzplaene", rec);
+      return true;
+    }
   };
 
   // ---- Ereignisse (Mitarbeit) ----------------------------------------------
@@ -585,7 +653,7 @@
     Kategorien, neueKategorie,
     Leistungen, neueLeistung, leistungFuer, leistungenAusNoten,
     Noten, neueNote,
-    Sitzplan, neuerSitzplan,
+    Sitzplan, neuerSitzplan, sitzplaeneNormalisieren,
     Ereignisse, neuesEreignis,
     Stunden, neueStunde,
     Abwesenheiten,

@@ -116,8 +116,8 @@ IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
      `store.migrationen.js` erhöhen und dort einen Schritt in
      `MIGRATION_STEPS` (Schlüssel = Ziel-Version)
      ergänzen. `migrateSchema()` läuft beim App-Start kaskadiert
-     (v1→v2→v3 …; aktueller Stand **13** – v12: neue Notenschwellen auf ganzen
-     Punkten, v13: `abgeschlosseneQuartale` an der Klasse). Neue Felder bekommen zusätzlich immer Defaults
+     (v1→v2→v3 …; aktueller Stand **14** – v12: neue Notenschwellen auf ganzen
+     Punkten, v13: `abgeschlosseneQuartale` an der Klasse, v14: mehrere Sitzpläne je Klasse). Neue Felder bekommen zusätzlich immer Defaults
      (Factorys + `getSettings`-Merge), damit alte Datensätze nicht crashen.
      ⚠️ Ein Schritt, der **Einstellungen** ändert, muss `getSettings()` selbst
      aufrufen und speichern; `migrateSchema` liest die Einstellungen nach den
@@ -275,6 +275,17 @@ beim allerersten Start erscheint er bewusst nicht.
   Moduswechsel (`render()`) Zähler und Undo-Stack verloren. Bei breiten Sitzplänen
   staffeln die Grid-Klassen `kompakt` (≥7 Spalten) / `mini` (≥9 Spalten) die
   Kachelgröße (styles.css).
+- **Mehrere Sitzpläne je Klasse (Räume):** Store `sitzplaene` hält je Klasse **einen**
+  Datensatz `{ klasseId, plaene: [{ id, name, rows, cols, seats }], aktivId }` (Schlüssel
+  bleibt `klasseId`, deshalb kein `DB_VERSION`-Sprung). Zugriff nur über `Store.Sitzplan`:
+  `alle(klasseId)`, `get(klasseId, planId?)` (Fallback: `aktivId`, dann erster Plan),
+  `save(plan)`, `neu(klasseId, name, vorlage?)`, `setAktiv`, `remove` (der letzte Plan
+  bleibt). Ältere Datensätze mit `seats` direkt am Datensatz wandelt
+  `Store.sitzplaeneNormalisieren` zum Plan „Klassenraum“ – benutzt von Migration v14,
+  Klassen-Import und beim Lesen (alte Backups). Die Stunde merkt sich ihren Plan in
+  `stunde.sitzplanId` (Auswahl im Start-Dialog, Umschalter 🏫 `tracker-raum` im Tracker);
+  der Wechsel ändert nur die Anordnung, `state.tracker` bleibt erhalten. Mitarbeit,
+  Heatmap und Noten hängen an den Schüler/innen, nie am Plan.
 - **Abwesenheiten** (Store `abwesenheiten`, Toggle pro Schüler/Tag): eingefrorene
   Heatmap, deaktivierte Ereignis-Buttons, und die Stunden dieses Tages fallen in
   `Calc.auswertungMitarbeit` aus den gezählten Stunden (bringen also weder Punkte
@@ -336,9 +347,9 @@ beim allerersten Start erscheint er bewusst nicht.
   „In Dateien sichern“), 3) klassischer Download als Fallback.
 - **Klassen-Export/-Import:** `Store.exportKlasse` / `Store.importKlasse` (JSON einer
   einzelnen Klasse inkl. Schüler, Kategorien, Noten, Ereignisse, Stunden,
-  Abwesenheiten, Sitzplan). Import bei bestehender Klassen-ID im Modus „ersetzen“
+  Abwesenheiten, alle Sitzpläne). Import bei bestehender Klassen-ID im Modus „ersetzen“
   (kaskadierend löschen, dann importieren) oder „kopie“ (alle IDs neu vergeben,
-  Referenzen inkl. `sitzplan.seats[].schuelerId` ummappen). Buttons „Exportieren“
+  Referenzen inkl. `sitzplan.plaene[].seats[].schuelerId` ummappen). Buttons „Exportieren“
   in der Klassen-Topbar, „Klasse importieren“ auf Home (`klassenImportDialog`).
 - **Klasse löschen:** 🗑-Button direkt auf der Home-Kachel (`delete-class`,
   Bestätigungsdialog, Kaskade via `Store.Klassen.remove`).

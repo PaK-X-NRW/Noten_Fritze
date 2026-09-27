@@ -372,6 +372,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 
 /* ---------- Sitzplan / Tracker ---------- */
 .plan-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: var(--gap); }
+/* Auswahl des Sitzplans (Raum) im Reiter Sitzplan */
+.sitzplan-tabs { margin-bottom: 0; padding-bottom: 0; max-width: 100%; }
 .seatgrid {
   display: grid; gap: 12px;
   grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr));
@@ -537,6 +539,9 @@ body.modus-abwesend .topbar, body.modus-verweigerung .topbar, body.modus-keineha
 .big-grade { font-size: 64px; font-weight: 800; text-align: center; line-height: 1; margin: 10px 0; }
 .disc-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px,1fr)); gap: 10px; }
 .disc-picker .btn { justify-content: flex-start; }
+/* Raumwahl im Tracker: ein Knopf je Sitzplan über die volle Breite, damit lange Namen passen */
+.raum-picker { display: flex; flex-direction: column; gap: 10px; }
+.raum-picker .btn { width: 100%; justify-content: flex-start; white-space: normal; text-align: left; }
 
 /* Breakdown */
 .breakdown .grp { margin-top: 14px; }

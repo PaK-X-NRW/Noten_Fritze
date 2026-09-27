@@ -28,7 +28,9 @@
     // ein bloßes render() (z. B. Moduswechsel) ist kein Einstieg.
     const einstieg = !!state.pendingStunde;
     const stunde = await aktuelleTrackerStunde(k);
-    const plan = await Store.Sitzplan.get(k.id);
+    // Sitzplan (Raum) dieser Stunde; ohne Angabe der zuletzt benutzte
+    const alle = await Store.Sitzplan.alle(k.id);
+    const plan = await Store.Sitzplan.get(k.id, stunde.sitzplanId);
     const t = await trackerZustand(k, stunde, einstieg);
 
     // Legende erklärt Farbe + Kurzlabel der Buttons auf den Kacheln
@@ -50,6 +52,9 @@
       '<div class="title-wrap"><h1 class="main">Mitarbeit · ' + UI.esc(k.name) + "</h1>" +
       '<span class="sub">' + UI.esc(stundeLabel(stunde)) + "</span></div>" +
       '<div class="grow"></div>' +
+      (alle.plaene.length > 1
+        ? '<button class="btn small" data-action="tracker-raum" title="Sitzplan (Raum) wechseln">🏫 ' + UI.esc(plan.name) + "</button>"
+        : "") +
       '<div class="modusbar">' + modusBtns + "</div>" +
       (stunde.endeTs ? '<span class="chip accent" id="tracker-restzeit" style="align-self:center">' + restzeitText() + "</span>" : "") +
       '<button class="btn small" data-action="tracker-undo" id="undo-btn"' + (t.undoStack.length ? "" : " disabled") + ">↶ Rückgängig</button>" +
@@ -66,9 +71,43 @@
       '<div class="tracker-scroll"><div class="seatgrid tracker-grid' +
         (plan.cols >= 9 ? " mini" : plan.cols >= 7 ? " kompakt" : "") +
         '" id="tracker-grid" style="--cols:' + plan.cols + '">' + seats + "</div></div>" +
-      (Object.keys(t.students).length ? "" : '<div class="empty">Kein Sitzplan belegt. Lege im Tab „Sitzplan“ Plätze an.</div>');
+      (Object.keys(t.students).length ? "" : '<div class="empty">Kein Sitzplan belegt. Lege im Tab „Sitzplan“ Plätze an.</div>') +
+      ohnePlatzHinweis(plan, t.students);
 
     return { topbar, body, mount: mountTracker, fullWidth: true };
+  }
+
+  // Wer in diesem Sitzplan keinen Platz hat, taucht im Tracker nicht auf –
+  // deshalb ein Hinweis mit den Namen.
+  function ohnePlatzHinweis(plan, students) {
+    const sitzend = {};
+    plan.seats.forEach((seat) => { if (seat.schuelerId) sitzend[seat.schuelerId] = true; });
+    const fehlen = Object.keys(students).filter((id) => !sitzend[id]);
+    if (!fehlen.length || fehlen.length === Object.keys(students).length) return "";
+    return '<p class="muted">Ohne Platz in „' + UI.esc(plan.name) + '“: ' +
+      fehlen.map((id) => UI.esc(UI.vollerName(students[id]))).join(", ") + "</p>";
+  }
+
+  // Sitzplan (Raum) mitten in der Stunde wechseln. Zähler, Heatmap und
+  // Erfassungen bleiben, nur die Anordnung der Kacheln ändert sich.
+  async function trackerRaumDialog() {
+    const t = state.tracker; if (!t || !t.stunde) return;
+    const alle = await Store.Sitzplan.alle(state.klasseId);
+    const aktuell = (await Store.Sitzplan.get(state.klasseId, t.stunde.sitzplanId)).id;
+    const optionen = alle.plaene.map((p) =>
+      '<button class="btn' + (p.id === aktuell ? " primary" : "") + '" data-pick="' + UI.esc(p.id) + '">' + UI.esc(p.name) + "</button>"
+    ).join("");
+    const m = UI.modal({ title: "Sitzplan wechseln", bodyHTML: '<div class="raum-picker">' + optionen + "</div>",
+      buttons: [{ label: "Abbrechen" }] });
+    UI.$all("[data-pick]", m.box).forEach((b) => b.addEventListener("click", async () => {
+      const id = b.getAttribute("data-pick");
+      m.close();
+      if (id === aktuell) return;
+      t.stunde.sitzplanId = id;
+      await Store.Stunden.save(t.stunde);
+      await Store.Sitzplan.setAktiv(state.klasseId, id);
+      render();
+    }));
   }
 
   function mountTracker() {
@@ -343,7 +382,7 @@
     const t = state.tracker; if (!t) return;
     const seatEl = UI.$('#tracker-grid .seat[data-sid="' + sid + '"]');
     if (!seatEl) return;
-    const plan = await Store.Sitzplan.get(state.klasseId);
+    const plan = await Store.Sitzplan.get(state.klasseId, t.stunde && t.stunde.sitzplanId);
     const seat = plan.seats.find((x) => String(x.id) === String(seatEl.getAttribute("data-seat")));
     if (!seat) return;
     const tmp = document.createElement("div");
@@ -497,29 +536,50 @@
         '</p><p class="muted">Fortsetzen führt die Zählung dieser Stunde weiter. Eine neue Stunde beendet sie.</p>';
     }
 
+    // Raum-Auswahl nur, wenn die Klasse mehrere Sitzpläne hat. Vorbelegt mit
+    // dem Plan der offenen Stunde, sonst dem zuletzt benutzten.
+    const alle = await Store.Sitzplan.alle(state.klasseId);
+    const vorwahl = (offen && alle.plaene.some((p) => p.id === offen.sitzplanId)) ? offen.sitzplanId : alle.aktivId;
+    const raumHTML = alle.plaene.length > 1
+      ? UI.field("Sitzplan (Raum)", "sitzplanId", vorwahl, { type: "select",
+          options: alle.plaene.map((p) => ({ value: p.id, label: p.name })) })
+      : "";
+    const gewaehlt = (box) => {
+      const sel = box && box.querySelector('select[name="sitzplanId"]');
+      return sel ? sel.value : vorwahl;
+    };
+
     const buttons = [];
     if (offen) {
-      buttons.push({ label: "▶︎ Stunde fortsetzen", className: "primary", onClick: (close) => {
-        state.pendingStunde = offen; close(); go("tracker");
+      buttons.push({ label: "▶︎ Stunde fortsetzen", className: "primary", onClick: async (close, box) => {
+        const planId = gewaehlt(box);
+        close();
+        if (offen.sitzplanId !== planId) { offen.sitzplanId = planId; await Store.Stunden.save(offen); }
+        await Store.Sitzplan.setAktiv(state.klasseId, planId);
+        state.pendingStunde = offen; go("tracker");
       }});
     }
-    buttons.push({ label: "Einzelstunde", className: offen ? "" : "primary", onClick: (close) => { close(); stundeStarten(einzel, offen); }});
-    buttons.push({ label: "Doppelstunde", className: offen ? "" : "primary", onClick: (close) => { close(); stundeStarten(doppel, offen); }});
-    buttons.push({ label: "Ohne Zeitangabe", onClick: (close) => { close(); stundeStarten(null, offen); }});
+    buttons.push({ label: "Einzelstunde", className: offen ? "" : "primary", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(einzel, offen, id); }});
+    buttons.push({ label: "Doppelstunde", className: offen ? "" : "primary", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(doppel, offen, id); }});
+    buttons.push({ label: "Ohne Zeitangabe", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(null, offen, id); }});
 
     UI.modal({
       title: "Tracker starten",
-      bodyHTML: offenText + "<p>Wie lange dauert die neue Stunde?</p>" + '<p class="muted">' + info + "</p>",
+      bodyHTML: offenText + raumHTML + "<p>Wie lange dauert die neue Stunde?</p>" + '<p class="muted">' + info + "</p>",
       buttons
     });
   }
 
   // Neue Stunde anlegen (und eine noch offene vorher schließen).
-  async function stundeStarten(session, offen) {
+  async function stundeStarten(session, offen, sitzplanId) {
     if (offen) await Store.Stunden.beenden(offen.id);
     // Neue Stunden tragen das eingestellte Quartal, nicht das aus dem Datum abgeleitete.
     session = Object.assign({}, session, { quartal: parseInt(state.settings.aktuellesQuartal, 10) || 1 });
     const st = Store.neueStunde(state.klasseId, session);
+    if (sitzplanId) {
+      st.sitzplanId = sitzplanId;
+      await Store.Sitzplan.setAktiv(state.klasseId, sitzplanId);
+    }
     await Store.Stunden.save(st);
     state.pendingStunde = st;
     state.trackerModus = null;
@@ -550,7 +610,7 @@
   Object.assign(global.Views, {
     ViewTracker, trackerStartDialog, trackerHeatEditDialog, trackerAbwesendToggle,
     trackerKeineHAToggle, trackerVerweigerungToggle, trackerModusToggle, trackerModusEnde, trackerModusTap,
-    trackerStundeBeenden, trackerVerlassen, trackerHeatAddieren,
+    trackerStundeBeenden, trackerVerlassen, trackerHeatAddieren, trackerRaumDialog,
     stopHeatTimer, renderSeatCounts, syncModusKlasse
   });
 })(window);

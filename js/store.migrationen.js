@@ -9,7 +9,7 @@
 
   const {
     now, datumLokal, halbjahrAusDatum, quartalAusDatum,
-    neueStunde, leistungenAusNoten,
+    neueStunde, leistungenAusNoten, sitzplaeneNormalisieren,
     getSettings, saveSettings, DEFAULT_SETTINGS
   } = global.Store;
 
@@ -23,7 +23,7 @@
   // beim App-Start (app.js, vor dem ersten Render) ausgeführt.
   // Regel: Neue Felder bekommen immer Defaults (Factorys + getSettings-Merge),
   // damit auch nicht migrierte/alte Datensätze ohne das Feld funktionieren.
-  const SCHEMA_VERSION = 13;
+  const SCHEMA_VERSION = 14;
   const MIGRATION_STEPS = {
     // v1 -> v2: Noten und Ereignisse erhalten ein Halbjahr (1 | 2),
     // aus dem Datum abgeleitet (Aug–Jan = 1. HJ, Feb–Jul = 2. HJ).
@@ -200,6 +200,13 @@
         });
       });
       await DB.bulkPut("klassen", klassen);
+    },
+    // v13 -> v14: Mehrere Sitzpläne je Klasse (einer pro Raum). Der bisherige
+    // Sitzplan wird zum Plan „Klassenraum"; Zuweisungen bleiben erhalten.
+    14: async () => {
+      const liste = await DB.getAll("sitzplaene");
+      if (!liste.length) return;
+      await DB.bulkPut("sitzplaene", liste.map(sitzplaeneNormalisieren));
     }
   };
   async function migrateSchema() {

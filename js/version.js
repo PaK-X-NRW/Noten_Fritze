@@ -15,7 +15,7 @@
 (function (global) {
   "use strict";
 
-  global.APP_VERSION = "1.8.3";
+  global.APP_VERSION = "1.9.1";
 
   // `self` statt `window`: Die Datei wird auch vom Service Worker per
   // importScripts geladen, damit Cache-Name und App dieselbe Version nutzen.

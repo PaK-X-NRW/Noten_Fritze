@@ -11,7 +11,7 @@
 
   const {
     uid, Klassen, getSettings, saveSettings,
-    normalisiereSchuelerHeat, leistungenAusNoten
+    normalisiereSchuelerHeat, leistungenAusNoten, sitzplaeneNormalisieren
   } = global.Store;
 
   // ---- Backup (Gesamt-Export/Import als JSON) ------------------------------
@@ -92,7 +92,8 @@
     let ereignisse = d.ereignisse || [];
     let stunden = d.stunden || [];
     let abwesenheiten = d.abwesenheiten || [];
-    let sitzplan = d.sitzplan || null;
+    // Ältere Exporte enthalten nur einen Sitzplan – er wird zum Plan „Klassenraum".
+    let sitzplan = sitzplaeneNormalisieren(d.sitzplan || null);
 
     // Export aus einer älteren Version (vor dem Spaltenmodell): Spalten aus
     // den Noten ableiten, sonst wären sie in der Notenübersicht unsichtbar.
@@ -134,8 +135,11 @@
       if (sitzplan) {
         sitzplan = Object.assign({}, sitzplan, {
           klasseId: klasseIdNeu,
-          seats: (sitzplan.seats || []).map((seat) => Object.assign({}, seat, {
-            schuelerId: seat.schuelerId ? (schuelerMap[seat.schuelerId] || null) : null
+          plaene: sitzplan.plaene.map((p) => Object.assign({}, p, {
+            klasseId: klasseIdNeu,
+            seats: (p.seats || []).map((seat) => Object.assign({}, seat, {
+              schuelerId: seat.schuelerId ? (schuelerMap[seat.schuelerId] || null) : null
+            }))
           }))
         });
       }

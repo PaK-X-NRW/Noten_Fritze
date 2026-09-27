@@ -93,13 +93,16 @@ noten          { id, klasseId, schuelerId, kategorieId, leistungId, wert(1..6,
                  titel, datum(YYYY-MM-DD), quartal(1..4), halbjahr(1|2, abgeleitet),
                  createdAt }
                  (titel/datum/quartal folgen immer der Leistung)
-sitzplaene     { klasseId, rows, cols, seats:[{id,row,col,schuelerId}] }
+sitzplaene     { klasseId, aktivId, plaene:[{ id, name, rows, cols,
+                 seats:[{id,row,col,schuelerId}] }] }  (ein Plan je Raum;
+                 aktivId = zuletzt benutzter Plan)
 ereignisse     { id, klasseId, schuelerId, stundeId, typ, punkte, timestamp,
                  quartal(1..4), halbjahr(1|2, abgeleitet), notiz }
 stunden        { id, klasseId, datum(YYYY-MM-DD), startTs, endeTs, dauerMin, stundeNr,
                  quelle('plan'|'fallback'|'manuell'|'migriert'), quartal(1..4),
                  halbjahr(1|2, abgeleitet),
-                 status('offen'|'beendet'), beendetAt, createdAt, updatedAt }
+                 status('offen'|'beendet'), beendetAt, sitzplanId (Raum der Stunde),
+                 createdAt, updatedAt }
 abwesenheiten  { id(schuelerId_datum), klasseId, schuelerId, datum(YYYY-MM-DD), createdAt }
 einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punkte'|'note6'),
                  stundenplan, rundung, schuelerSortierung('nachname'|'manuell'),
@@ -404,8 +407,12 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   Neuladen steht wieder der Default.
   Kategorien mit Anzeige „vergessene Hausaufgaben“ bekommen je Quartal eine Spalte
   mit der Anzahl aus dem Tracker und zählen nicht in die Note.
-- **Sitzplan** – Raster (Reihen/Spalten frei), Plätze antippen zum Zuweisen,
-  „Automatisch belegen“, Abwesenheits-Toggle (🤒) je Platz.
+- **Sitzplan** – mehrere Sitzpläne je Klasse (einer pro Raum, z. B. „Klassenraum“,
+  „Physikraum“): Auswahlleiste oben, „Neuer Sitzplan“ (leer oder als Kopie),
+  Umbenennen, Löschen. Je Plan Raster (Reihen/Spalten frei), Plätze antippen zum
+  Zuweisen, „Automatisch belegen“, Abwesenheits-Toggle (🤒) je Platz.
+  Beim Tracker-Start wählt man den Raum; im Tracker wechselt der Knopf 🏫 mit dem
+  Raumnamen den Plan mitten in der Stunde (Zähler und Heatmap bleiben).
 - **Tracker** – Start-Dialog (Stunde fortsetzen / Einzel- / Doppelstunde), Restzeit
   und Modi (Abwesend · Verweigerung · Keine HA · Heatmap) in der Topbar, Kacheln je
   Schüler/in mit 4 direkten Ereignis-Buttons als Piktogramme (★/★★/★★★/⚡ =
@@ -456,7 +463,7 @@ Home-Kachel · JSON-Voll-Backup · PWA/Offline · Demo-Daten · Beispielklassen
 Schuljahre als ein Kurs verknüpft und dieselben Personen über die Schuljahre
 hinweg zugeordnet werden (siehe `plan.md`) ·
 Drag&Drop-Sortierung (aktuell ▲▼-Buttons) · Noten-CSV-**Import** (nur Export + Schüler-Import) ·
-mehrere Sitzpläne/Perioden je Klasse · Verwaltungsansicht für vergangene Stunden
+Perioden je Klasse · Verwaltungsansicht für vergangene Stunden
 (nachträglich korrigieren/löschen) · Abwesenheiten je Stunde statt je Tag ·
 echte PNG-App-Icons (aktuell SVG) · Mehrbenutzer/Sync (nicht vorgesehen, da lokal).
 

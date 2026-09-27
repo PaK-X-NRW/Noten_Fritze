@@ -9,10 +9,11 @@
   const { state, go, render } = global.Views;
   const {
     klasseDialog, splitsDialog, schuelerDialog, kategorieDialog, leistungDialog,
-    studentDetailDialog, seatAssignDialog, importStudentsDialog, backupImportDialog,
+    studentDetailDialog, seatAssignDialog, sitzplanNeuDialog, sitzplanUmbenennenDialog,
+    importStudentsDialog, backupImportDialog,
     schwellenDialog, mitarbeitHerleitungDialog, quartalAbschliessenDialog, klassenImportDialog,
     trackerStartDialog, trackerModusToggle, trackerModusEnde, trackerModusTap,
-    trackerStundeBeenden, trackerVerlassen, trackerHeatAddieren, renderSeatCounts
+    trackerStundeBeenden, trackerVerlassen, trackerHeatAddieren, trackerRaumDialog, renderSeatCounts
   } = global.Views;
 
   // =========================================================================
@@ -86,6 +87,15 @@
 
     // Sitzplan
     "seat-assign": (el) => seatAssignDialog2(el.getAttribute("data-seat")),
+    "sitzplan-waehlen": async (el) => { await Store.Sitzplan.setAktiv(state.klasseId, el.getAttribute("data-id")); render(); },
+    "sitzplan-neu": async () => sitzplanNeuDialog(await Store.Klassen.get(state.klasseId)),
+    "sitzplan-umbenennen": async () => sitzplanUmbenennenDialog(await Store.Klassen.get(state.klasseId)),
+    "sitzplan-loeschen": async () => {
+      const plan = await Store.Sitzplan.get(state.klasseId);
+      if (await UI.confirmDialog("Sitzplan löschen?", "Der Sitzplan „" + plan.name + "“ wird gelöscht. Noten und Mitarbeit bleiben unberührt.")) {
+        await Store.Sitzplan.remove(state.klasseId, plan.id); render();
+      }
+    },
     "set-grid": async () => {
       const k = await Store.Klassen.get(state.klasseId);
       const plan = await Store.Sitzplan.get(k.id);
@@ -93,7 +103,8 @@
       const cols = Math.max(1, Math.min(12, parseInt(UI.$("#grid-cols").value, 10) || plan.cols));
       // Neues Raster, bestehende Zuweisungen soweit möglich übernehmen
       const alt = {}; plan.seats.forEach((s) => { alt[s.id] = s.schuelerId; });
-      const np = Store.neuerSitzplan(k.id, rows, cols);
+      const np = Store.neuerSitzplan(k.id, rows, cols, plan.name);
+      np.id = plan.id;
       np.seats.forEach((s) => { if (alt[s.id]) s.schuelerId = alt[s.id]; });
       await Store.Sitzplan.save(np); render();
     },
@@ -121,6 +132,7 @@
     "open-besprechung": () => { state.selectedSchuelerId = null; go("besprechung"); },
     "back-to-class": async () => { if (state.view === "tracker") await trackerVerlassen(); go("klasse"); },
     "tracker-tap": (el) => trackerTap(el),
+    "tracker-raum": () => trackerRaumDialog(),
     "tracker-modus": (el) => trackerModusToggle(el.getAttribute("data-modus")),
     "tracker-modus-ende": () => trackerModusEnde(),
     "tracker-modus-tap": (el) => trackerModusTap(el.getAttribute("data-sid")),

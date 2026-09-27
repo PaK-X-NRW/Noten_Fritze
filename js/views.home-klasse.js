@@ -765,11 +765,14 @@
   }
 
   // ---- Tab: Sitzplan (Editor) ---------------------------------------------
+  // Eine Klasse kann mehrere Sitzpläne haben (je Raum einen); gezeigt wird der
+  // zuletzt benutzte. Alle Buttons unten wirken auf diesen Plan.
   async function TabSitzplan(k) {
-    const [plan, schueler, abwList] = await Promise.all([
-      Store.Sitzplan.get(k.id), Store.Schueler.byKlasse(k.id),
+    const [alle, schueler, abwList] = await Promise.all([
+      Store.Sitzplan.alle(k.id), Store.Schueler.byKlasse(k.id),
       Store.Abwesenheiten.byKlasseUndTag(k.id, Store.datumLokal())
     ]);
+    const plan = alle.plaene.find((p) => p.id === alle.aktivId) || alle.plaene[0];
     const sMap = {}; schueler.forEach((s) => (sMap[s.id] = s));
     const abwMap = {}; abwList.forEach((a) => { abwMap[a.schuelerId] = true; });
     const belegt = plan.seats.filter((x) => x.schuelerId).length;
@@ -786,7 +789,18 @@
       return '<div class="seat empty" data-action="seat-assign" data-seat="' + seat.id + '">＋</div>';
     }).join("");
 
+    const planTabs = alle.plaene.map((p) =>
+      '<button class="tab ' + (p.id === plan.id ? "active" : "") + '" data-action="sitzplan-waehlen" data-id="' + UI.esc(p.id) + '">' +
+        UI.esc(p.name) + "</button>"
+    ).join("");
+
     return (
+      '<div class="plan-toolbar">' +
+        '<div class="tabs sitzplan-tabs">' + planTabs + "</div>" +
+        '<button class="btn" data-action="sitzplan-neu">＋ Neuer Sitzplan</button>' +
+        '<button class="btn" data-action="sitzplan-umbenennen">Umbenennen</button>' +
+        (alle.plaene.length > 1 ? '<button class="btn danger" data-action="sitzplan-loeschen">Löschen</button>' : "") +
+      "</div>" +
       '<div class="plan-toolbar">' +
         '<div class="hstack"><label class="muted">Reihen</label><input id="grid-rows" type="number" inputmode="numeric" min="1" max="12" value="' + plan.rows + '" style="width:80px"></div>' +
         '<div class="hstack"><label class="muted">Spalten</label><input id="grid-cols" type="number" inputmode="numeric" min="1" max="12" value="' + plan.cols + '" style="width:80px"></div>' +
