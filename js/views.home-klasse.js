@@ -37,10 +37,12 @@
       );
     }).join("");
 
-    const body = klassen.length
+    const body = (klassen.length
       ? '<div class="grid cards">' + cards + "</div>"
       : '<div class="empty"><div class="big">🎓</div><p>Noch keine Klassen vorhanden.</p>' +
-        '<button class="btn primary" data-action="add-class">Erste Klasse anlegen</button></div>';
+        '<button class="btn primary" data-action="add-class">Erste Klasse anlegen</button></div>') +
+      // Dezenter Weg zur Infoseite (Anleitung, Datenschutz, Kontakt)
+      '<p class="home-info"><a href="info.html">Was ist Noten-Fritze? · Anleitung · Datenschutz</a></p>';
 
     const topbar =
       '<div class="title-wrap"><h1 class="main">Noten-Fritze</h1>' +

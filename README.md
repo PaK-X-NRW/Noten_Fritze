@@ -1,23 +1,43 @@
 # Noten-Fritze
 
+**Noten und mündliche Mitarbeit erfassen – direkt im Unterricht, auf dem iPad.**
+Kostenlos, ohne Konto, ohne Cloud: Alle Daten bleiben auf deinem Gerät.
+
+### ▶︎ [App starten](https://noten-fritze.patrick-knapp.de/) · 📖 [Anleitung & Funktionen](https://noten-fritze.patrick-knapp.de/info.html)
+
+![Mitarbeits-Tracker: Schülerkacheln im Sitzplan mit Meldungen und Störungen](img/tracker.jpg)
+
+| Notenübersicht je Halbjahr | Besprechungsmodus |
+|---|---|
+| ![Notenübersicht](img/noten.jpg) | ![Besprechungsmodus](img/besprechung.jpg) |
+
+- **Mitarbeits-Tracker** im Sitzplan: Meldungen (★ / ★★ / ★★★) und Störungen (⚡) per Tipp, Heatmap, Rückgängig
+- **Notenübersicht** mit Epochal-, Zeugnis- und Jahresnote, Tendenznoten (2+, 3, 4-), ab Stufe 11 MSS-Punkte
+- **Mehrere Sitzpläne** je Klasse (für verschiedene Räume)
+- **Besprechungsmodus** für Notengespräche – nur eine Person sichtbar, mit Herleitung
+- **Offline nutzbar** als App auf dem Home-Bildschirm, **Backup** als Datei
+
+*Alle Namen in den Bildern sind erfundene Beispieldaten.*
+Fragen, Fehler, Wünsche: [noten-fritze@patrick-knapp.de](mailto:noten-fritze@patrick-knapp.de) oder
+[GitHub-Issues](https://github.com/PaK-X-NRW/Noten_Fritze/issues). Lizenz: [MIT](LICENSE).
+
+---
+
+# Für Entwickler/innen
+
 Lokale Noten- und Mitarbeitsverwaltung für Lehrkräfte an Gymnasien.
 **100 % lokal** im Browser (IndexedDB), **keine Cloud, kein Server, kein Login.**
 Tablet-first, optimiert für das **iPad im Querformat**, offline nutzbar als PWA.
 
----
-
 ## Verfügbarkeit & Hosting
 
-**Die App ist online verfügbar unter:**
-- **http://noten-fritze.patrick-knapp.de** (Domain-Redirect)
+- **https://noten-fritze.patrick-knapp.de** (eigene Domain, zeigt auf GitHub Pages)
 - Gehostet auf GitHub Pages: https://pak-x-nrw.github.io/Noten_Fritze/
-
-**Infoseite für Lehrkräfte** (Funktionen, Anleitung, Datenschutz, Kontakt):
-`info.html` – verlinkt in der App unter Einstellungen → „Hilfe & Rechtliches“.
-Lizenz: MIT (siehe `LICENSE`).
-
-**Wichtig:** Alle Daten bleiben auf Ihrem Gerät! Die App speichert nichts in der Cloud. 
-Sie können die App als PWA installieren („Zum Home-Bildschirm hinzufügen") und nutzen sie offline.
+- **Infoseite für Lehrkräfte** `info.html` (Funktionen, Anleitung, Datenschutzerklärung,
+  Kontakt, Lizenz) – verlinkt auf der App-Startseite und unter Einstellungen →
+  „Hilfe & Rechtliches“. Für Suchmaschinen: `robots.txt`, `sitemap.xml`,
+  Seitenbeschreibung/Vorschau-Tags und strukturierte Daten (JSON-LD) in `info.html`.
+- Lizenz: MIT (siehe `LICENSE`).
 
 Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Workflow
 `.github/workflows/pages.yml`, der die Dateien unverändert hochlädt (kein Build, kein Jekyll).
@@ -482,6 +502,7 @@ Noten_Fritze/
 │                           Datenschutzerklärung, Kontakt, Lizenz (ohne Scripts)
 ├─ img/                     Screenshots für info.html (Beispieldaten, erfundene Namen)
 ├─ LICENSE                  MIT-Lizenz
+├─ robots.txt, sitemap.xml  für Suchmaschinen (Sitemap bei neuen Seiten ergänzen)
 ├─ manifest.webmanifest     PWA-Manifest
 ├─ service-worker.js        Offline-Cache
 ├─ AGENTS.md                verbindliche Arbeitsanleitung für KI-Assistenten

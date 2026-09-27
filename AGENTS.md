@@ -143,6 +143,7 @@ gecacht: Änderungen dort brauchen genauso einen Versionssprung. Sie enthält di
 Datenschutzerklärung – wer neue Datenflüsse einführt (was Abschnitt 1 ohnehin
 verbietet) oder Funktionen umbenennt, muss Text und Kurzanleitung mitpflegen.
 Screenshots nur mit Beispieldaten (erfundene Namen), nie mit echten Schülerdaten.
+Neue öffentliche Seiten zusätzlich in `sitemap.xml` eintragen.
 
 Damit das greift, registriert `app.js` den Service Worker mit
 `{ updateViaCache: "none" }`. Ohne diese Option holt der Browser die per
