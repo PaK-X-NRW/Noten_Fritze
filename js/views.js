@@ -321,6 +321,43 @@
     UI.toast("Rückgängig gemacht");
   }
 
+  // Liste aller Meldungen/Störungen der laufenden Stunde (neueste oben), jede
+  // einzeln entfernbar. Geöffnet über langes Drücken bzw. Rechtsklick auf
+  // „Rückgängig" (views.tracker.js); der kurze Tipp nimmt weiter den letzten zurück.
+  function undoListeDialog() {
+    const t = state.tracker; if (!t) return;
+    const zeilenHTML = () => {
+      if (!t.undoStack.length) return '<p class="muted">Keine Einträge in dieser Stunde.</p>';
+      return t.undoStack.slice().reverse().map((e) => {
+        const typ = Store.EVENT_TYPE_MAP[e.typ] || { label: e.typ, icon: "" };
+        const zeit = new Date(e.timestamp).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+        return '<div class="undo-zeile">' +
+          '<span class="muted">' + zeit + "</span>" +
+          '<span class="nm">' + UI.esc((t.names && t.names[e.schuelerId]) || "?") + "</span>" +
+          '<span><span style="color:' + typ.farbe + '">' + UI.esc(typ.icon || "") + "</span> " + UI.esc(typ.label) + "</span>" +
+          '<button class="iconbtn" data-weg="' + UI.esc(e.id) + '" title="Eintrag entfernen">✕</button>' +
+        "</div>";
+      }).join("");
+    };
+    const m = UI.modal({
+      title: "Einträge dieser Stunde",
+      bodyHTML: '<div class="undo-liste"></div>',
+      buttons: [{ label: "Fertig" }]
+    });
+    const liste = m.box.querySelector(".undo-liste");
+    const zeichnen = () => {
+      liste.innerHTML = zeilenHTML();
+      UI.$all("[data-weg]", liste).forEach((b) => b.addEventListener("click", async () => {
+        const e = t.undoStack.find((x) => x.id === b.getAttribute("data-weg"));
+        if (!e) return;
+        b.disabled = true;
+        await undoEvent(e);
+        zeichnen();
+      }));
+    };
+    zeichnen();
+  }
+
   // ---- Delegation ----------------------------------------------------------
   function initDelegation() {
     document.body.addEventListener("click", (ev) => {
@@ -336,5 +373,5 @@
     });
   }
 
-  Object.assign(global.Views, { initDelegation });
+  Object.assign(global.Views, { initDelegation, undoListeDialog });
 })(window);

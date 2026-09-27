@@ -339,6 +339,12 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .modal .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
 /* Breite nach Beschriftung: passen nicht alle Knöpfe in eine Zeile, brechen sie um */
 .modal .actions .btn { flex: 1 1 auto; }
+/* Rückgängig im Tracker: langes Drücken ohne Textauswahl/Kontextmenü (iOS) */
+#undo-btn { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+/* Liste „Einträge dieser Stunde" */
+.undo-liste { max-height: 55vh; overflow-y: auto; }
+.undo-zeile { display: grid; grid-template-columns: auto 1fr auto auto; gap: 12px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.undo-zeile .nm { font-weight: 600; }
 @media (min-width: 700px) {
   .modal-backdrop { align-items: center; }
   .modal { border-radius: 20px; }

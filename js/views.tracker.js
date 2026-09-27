@@ -57,7 +57,7 @@
         : "") +
       '<div class="modusbar">' + modusBtns + "</div>" +
       (stunde.endeTs ? '<span class="chip accent" id="tracker-restzeit" style="align-self:center">' + restzeitText() + "</span>" : "") +
-      '<button class="btn small" data-action="tracker-undo" id="undo-btn"' + (t.undoStack.length ? "" : " disabled") + ">↶ Rückgängig</button>" +
+      '<button class="btn small" data-action="tracker-undo" id="undo-btn" title="Lang drücken bzw. Rechtsklick: alle Einträge dieser Stunde"' + (t.undoStack.length ? "" : " disabled") + ">↶ Rückgängig</button>" +
       '<button class="btn small" data-action="tracker-stunde-beenden">Stunde beenden</button>';
 
     const body =
@@ -113,6 +113,35 @@
   function mountTracker() {
     syncModusKlasse();
     startHeatTimer();
+    undoLangDruck(document.getElementById("undo-btn"));
+  }
+
+  // Langes Drücken (iPad) bzw. Rechtsklick (PC) auf „Rückgängig" öffnet die
+  // Liste der Einträge dieser Stunde; ein kurzer Tipp bleibt „letzten zurücknehmen".
+  function undoLangDruck(btn) {
+    if (!btn) return;
+    let timer = null, ausgeloest = false;
+    const oeffnen = () => {
+      clearTimeout(timer);
+      if (ausgeloest) return;
+      ausgeloest = true;
+      global.Views.undoListeDialog();
+    };
+    btn.addEventListener("pointerdown", (ev) => {
+      ausgeloest = false;
+      clearTimeout(timer);
+      if (ev.button !== 0) return; // Rechtsklick läuft über contextmenu
+      timer = setTimeout(oeffnen, 550);
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach((n) =>
+      btn.addEventListener(n, () => clearTimeout(timer)));
+    btn.addEventListener("contextmenu", (ev) => { ev.preventDefault(); oeffnen(); });
+    // Nach dem langen Drücken darf kein Klick folgen: iOS würde ihn sonst an
+    // der Fingerposition in die gerade geöffnete Liste setzen.
+    btn.addEventListener("touchend", (ev) => { if (ausgeloest) ev.preventDefault(); });
+    btn.addEventListener("click", (ev) => {
+      if (ausgeloest) { ev.preventDefault(); ev.stopPropagation(); }
+    });
   }
 
   // Ermittelt die Stunde, in der erfasst wird: die vom Start-Dialog übergebene,
@@ -163,9 +192,15 @@
     const abwesend = {};
     abwList.forEach((a) => { abwesend[a.schuelerId] = true; });
 
+    // Rückgängig kennt alle Kachel-Einträge dieser Stunde – auch nach dem
+    // Fortsetzen, nicht nur die seit dem Öffnen des Trackers getippten.
+    const undoStack = ereignisse
+      .filter((e) => Store.EVENT_TYPE_MAP[e.typ] && Store.EVENT_TYPE_MAP[e.typ].aufKachel)
+      .sort((a, b) => a.timestamp - b.timestamp);
+
     state.tracker = {
       klasseId: k.id, stunde, counts, typeCounts, keineHA, verweigerung, names, students,
-      undoStack: [], heatTimer: null, abwesend
+      undoStack, heatTimer: null, abwesend
     };
 
     await heatUhrNachziehen(students);

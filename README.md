@@ -272,7 +272,9 @@ Stundennoten (`3+`, nicht `2,8`).
   Gute/Sehr gute Meldung, Störung) direkt in sich – als Piktogramme
   (★ / ★★ / ★★★ / ⚡), farbcodiert, mit Zähler je Typ **für die laufende Stunde**;
   eine Legende oben erklärt Icon + Bedeutung + Punkte. Ein Tap erzeugt sofort das
-  Ereignis. **Undo** über Toast oder Button. Bei breiten Sitzplänen schalten die
+  Ereignis. **Undo** über Toast oder Button (kurzer Tipp = letzten Eintrag zurücknehmen;
+  langes Drücken bzw. Rechtsklick = Liste aller Meldungen/Störungen der laufenden Stunde,
+  jede einzeln per ✕ entfernbar – auch nach dem Fortsetzen der Stunde). Bei breiten Sitzplänen schalten die
   Kacheln automatisch auf kompaktere Darstellung (ab 7 bzw. 9 Spalten), damit
   alles auf den Schirm passt.
 - **Modi in der Topbar:** Abwesend (🤒), Leistungsverweigerung (🚫), Keine HA (📕)

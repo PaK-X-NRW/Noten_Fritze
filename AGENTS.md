@@ -272,7 +272,11 @@ beim allerersten Start erscheint er bewusst nicht.
   Topbar (`state.trackerModus`); ein aktiver Modus setzt eine `modus-*`-Klasse am
   `<body>` (Farbschema) und macht die ganze Kachel zum Tap-Ziel. `ViewTracker` baut
   `state.tracker` nur neu auf, wenn Klasse oder Stunde wechseln – sonst gingen beim
-  Moduswechsel (`render()`) Zähler und Undo-Stack verloren. Bei breiten Sitzplänen
+  Moduswechsel (`render()`) Zähler und Undo-Stack verloren. Der Undo-Stack wird beim
+  Aufbau aus den Kachel-Ereignissen der Stunde gefüllt (gilt also auch nach dem
+  Fortsetzen). Langes Drücken/Rechtsklick auf `#undo-btn` (`undoLangDruck` in
+  views.tracker.js) öffnet `undoListeDialog` (views.js) zum gezielten Entfernen einzelner
+  Einträge; danach wird der Klick unterdrückt, sonst landet er auf iOS in der Liste. Bei breiten Sitzplänen
   staffeln die Grid-Klassen `kompakt` (≥7 Spalten) / `mini` (≥9 Spalten) die
   Kachelgröße (styles.css).
 - **Mehrere Sitzpläne je Klasse (Räume):** Store `sitzplaene` hält je Klasse **einen**
