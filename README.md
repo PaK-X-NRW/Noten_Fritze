@@ -503,6 +503,7 @@ Noten_Fritze/
 ├─ img/                     Screenshots für info.html (Beispieldaten, erfundene Namen)
 ├─ LICENSE                  MIT-Lizenz
 ├─ robots.txt, sitemap.xml  für Suchmaschinen (Sitemap bei neuen Seiten ergänzen)
+├─ google7af1e4cea435225b.html  Bestätigung für die Google Search Console (nicht löschen)
 ├─ manifest.webmanifest     PWA-Manifest
 ├─ service-worker.js        Offline-Cache
 ├─ AGENTS.md                verbindliche Arbeitsanleitung für KI-Assistenten
