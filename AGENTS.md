@@ -317,9 +317,12 @@ beim allerersten Start erscheint er bewusst nicht.
   Aufbau aus den Kachel-Ereignissen der Stunde gefüllt (gilt also auch nach dem
   Fortsetzen). Langes Drücken/Rechtsklick auf `#undo-btn` (`undoLangDruck` in
   views.tracker.js) öffnet `undoListeDialog` (ebenfalls views.tracker.js) zum gezielten Entfernen einzelner
-  Einträge; danach wird der Klick unterdrückt, sonst landet er auf iOS in der Liste. Bei breiten Sitzplänen
-  staffeln die Grid-Klassen `kompakt` (≥7 Spalten) / `mini` (≥9 Spalten) die
-  Kachelgröße (styles.css).
+  Einträge; danach wird der Klick unterdrückt, sonst landet er auf iOS in der Liste. Beide Sitzplan-Raster
+  (Tracker und Reiter Sitzplan) baut `sitzrasterHTML` (views.core.js): Bis zur Einstellung
+  `sitzplanKachelSpalten` (6–15, Standard 9) teilen sich die Kacheln die Breite, darüber
+  bleiben sie so breit (Grid-Klasse `breit`) und `.seatgrid-scroll` scrollt seitlich.
+  Die Grid-Klassen `kompakt` (≥7 sichtbare Spalten) / `mini` (≥9) staffeln die
+  Tracker-Kacheln (styles.css). Raster: bis 12 Reihen, bis 15 Spalten.
 - **Mehrere Sitzpläne je Klasse (Räume):** Store `sitzplaene` hält je Klasse **einen**
   Datensatz `{ klasseId, plaene: [{ id, name, rows, cols, seats }], aktivId }` (Schlüssel
   bleibt `klasseId`, deshalb kein `DB_VERSION`-Sprung). Zugriff nur über `Store.Sitzplan`:

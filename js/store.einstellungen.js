@@ -74,6 +74,9 @@
     // Reihenfolge der Schüler/innen in allen Listen:
     // "nachname" = alphabetisch (Nachname, dann Vorname), "manuell" = per ▲/▼ gepflegter sortIndex
     schuelerSortierung: "nachname",
+    // Sitzplan-Kacheln (Tracker und Reiter Sitzplan) werden höchstens so schmal
+    // wie bei so vielen Spalten; breitere Pläne scrollen seitlich (6–15)
+    sitzplanKachelSpalten: 9,
     // Punkte je Ereignistyp (überschreibbar)
     mitarbeitPunkte: EVENT_TYPES.reduce((m, t) => (m[t.id] = t.defaultPunkte, m), {}),
     // Schwellen: Punkte in EINER Stunde -> Stundennote (Ø der Stundennoten ist

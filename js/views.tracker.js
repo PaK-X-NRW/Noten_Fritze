@@ -9,7 +9,7 @@
 (function (global) {
   "use strict";
 
-  const { state, go, render } = global.Views;
+  const { state, go, render, sitzrasterHTML } = global.Views;
 
   // Die vier Topbar-Modi. Im Modus ist die ganze Kachel ein Tap-Ziel.
   const MODI = {
@@ -67,10 +67,8 @@
         '<div class="grow"></div>' +
         '<div class="legend">viel <span class="bar"></span> wenig</div>' +
       "</div>" +
-      // Bei vielen Spalten schrumpfen die Kacheln, damit das Raster aufs Display passt
-      '<div class="tracker-scroll"><div class="seatgrid tracker-grid' +
-        (plan.cols >= 9 ? " mini" : plan.cols >= 7 ? " kompakt" : "") +
-        '" id="tracker-grid" style="--cols:' + plan.cols + '">' + seats + "</div></div>" +
+      // Bei vielen Spalten schrumpfen die Kacheln bis zur eingestellten Grenze, danach scrollt das Raster
+      sitzrasterHTML(plan, seats, "tracker-grid", "tracker-grid") +
       (Object.keys(t.students).length ? "" : '<div class="empty">Kein Sitzplan belegt. Lege im Tab „Sitzplan“ Plätze an.</div>') +
       ohnePlatzHinweis(plan, t.students);
 

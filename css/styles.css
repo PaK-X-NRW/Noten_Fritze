@@ -385,11 +385,17 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .plan-toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: var(--gap); }
 /* Auswahl des Sitzplans (Raum) im Reiter Sitzplan */
 .sitzplan-tabs { margin-bottom: 0; padding-bottom: 0; max-width: 100%; }
+/* Sitzplan-Raster: Die Kacheln teilen sich die Breite. Hat der Plan mehr Spalten
+   als in den Einstellungen erlaubt („breit“), bleibt jede Kachel so breit wie
+   bei --sichtbar Spalten und der Rahmen .seatgrid-scroll scrollt seitlich. */
+.seatgrid-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
 .seatgrid {
-  display: grid; gap: 12px;
-  grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr));
+  --gap: 12px; --kachel-min: 0px;
+  display: grid; gap: var(--gap);
+  grid-template-columns: repeat(var(--cols, 6), minmax(var(--kachel-min), 1fr));
   align-items: stretch;
 }
+.seatgrid.breit { --kachel-min: calc((100% - (var(--sichtbar) - 1) * var(--gap)) / var(--sichtbar)); }
 .seat {
   position: relative;
   min-height: 84px;
@@ -441,11 +447,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .tracker-legend .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .tracker-legend .dot { width: 12px; height: 12px; border-radius: 50%; }
 
-.tracker-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
-.seatgrid.tracker-grid {
-  width: 100%;
-  grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr));
-}
+.seatgrid.tracker-grid { width: 100%; }
 
 .seat.tracker { min-height: 132px; justify-content: flex-start; align-items: stretch; gap: 8px; padding: 10px; cursor: default; }
 .seat.tracker.empty { justify-content: center; align-items: center; }
@@ -526,10 +528,10 @@ body.modus-abwesend .topbar, body.modus-verweigerung .topbar, body.modus-keineha
 /* Im Modus zählt der Tap auf die ganze Kachel – die Typ-Buttons reichen ihn durch */
 .seat.tracker.modus .typebtn { opacity: .3; pointer-events: none; }
 
-/* Kompakte Kacheln für große Sitzpläne: ab 7 Spalten „kompakt“, ab 9 „mini“,
+/* Kompakte Kacheln für große Sitzpläne: ab 7 sichtbaren Spalten „kompakt“, ab 9 „mini“,
    damit z. B. ein 4×9-Raster auf ein iPad-Querformat passt. */
-.tracker-grid.kompakt { gap: 8px; }
-.tracker-grid.mini { gap: 6px; }
+.tracker-grid.kompakt { --gap: 8px; }
+.tracker-grid.mini { --gap: 6px; }
 .tracker-grid.kompakt .seat.tracker { min-height: 96px; padding: 8px; gap: 6px; }
 .tracker-grid.mini .seat.tracker { min-height: 72px; padding: 6px; gap: 4px; }
 .tracker-grid.kompakt .seat .seat-head .nm { font-size: 13px; }

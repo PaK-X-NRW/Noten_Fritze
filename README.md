@@ -137,6 +137,7 @@ stunden        { id, klasseId, datum(YYYY-MM-DD), startTs, endeTs, dauerMin, stu
 abwesenheiten  { id(schuelerId_datum), klasseId, schuelerId, datum(YYYY-MM-DD), createdAt }
 einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punkte'|'note6'),
                  stundenplan, schuelerSortierung('nachname'|'manuell'),
+                 sitzplanKachelSpalten(6..15, Standard 9),
                  mitarbeitPunkte, mitarbeitSchwellen,
                  heatPunkteEinfach, heatPunkteGut, heatPunkteSehrGut,
                  heatStartWert, heatVerfallPunkte, heatVerfallMinuten, anteile }
@@ -148,7 +149,7 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
   Sitzplatz-Zuweisung); das Löschen einer Kategorie oder einer Spalte nimmt die
   darin erfassten Noten mit.
 - **App-Version:** `APP_VERSION` in `js/version.js` (Schema `MAJOR.MINOR.PATCH`,
-  aktuell **1.13.0**) ist die sichtbare Programmversion: angezeigt unter
+  aktuell **1.14.0**) ist die sichtbare Programmversion: angezeigt unter
   Einstellungen → Über, Name des Service-Worker-Caches, Feld `appVersion` im
   JSON-Backup. Sie wird von Hand gepflegt und ist unabhängig von den beiden
   internen Zählern unten.
@@ -308,7 +309,9 @@ Stundennoten (`3+`, nicht `2,8`).
   langes Drücken bzw. Rechtsklick = Liste aller Meldungen/Störungen der laufenden Stunde,
   jede einzeln per ✕ entfernbar – auch nach dem Fortsetzen der Stunde). Bei breiten Sitzplänen schalten die
   Kacheln automatisch auf kompaktere Darstellung (ab 7 bzw. 9 Spalten), damit
-  alles auf den Schirm passt.
+  alles auf den Schirm passt. Hat ein Plan mehr Spalten als unter Einstellungen →
+  Darstellung festgelegt (6–15, Standard 9), werden die Kacheln nicht weiter
+  kleiner – das Raster lässt sich dann seitlich wischen (gilt auch im Reiter Sitzplan).
 - **Modi in der Topbar:** Abwesend (🤒), Leistungsverweigerung (🚫), Keine HA (📕)
   und Heatmap (⚙️) sind keine Kachel-Buttons mehr, sondern Modi. Ein aktiver Modus
   **färbt Topbar und Seite um** und blendet ein Hinweisbanner ein; danach ist die
@@ -443,7 +446,7 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   mit der Anzahl aus dem Tracker und zählen nicht in die Note.
 - **Sitzplan** – mehrere Sitzpläne je Klasse (einer pro Raum, z. B. „Klassenraum“,
   „Physikraum“): Auswahlleiste oben, „Neuer Sitzplan“ (leer oder als Kopie),
-  Umbenennen, Löschen. Je Plan Raster (Reihen/Spalten frei), Plätze antippen zum
+  Umbenennen, Löschen. Je Plan Raster (bis 12 Reihen, bis 15 Spalten), Plätze antippen zum
   Zuweisen, „Automatisch belegen“, Abwesenheits-Toggle (🤒) je Platz.
   Beim Tracker-Start wählt man den Raum; im Tracker wechselt der Knopf 🏫 mit dem
   Raumnamen den Plan mitten in der Stunde (Zähler und Heatmap bleiben).

@@ -85,6 +85,21 @@
     return "<strong>" + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname);
   }
 
+  // Sitzplan-Raster (Tracker und Reiter Sitzplan): Bis zur eingestellten
+  // Spaltenzahl teilen sich die Kacheln die Bildschirmbreite, darüber bleiben
+  // sie so breit und das Raster scrollt seitlich (Klasse „breit“, styles.css).
+  // Die Tracker-Kacheln werden nach den sichtbaren Spalten gestaffelt:
+  // ab 7 „kompakt“, ab 9 „mini“.
+  //   klasse: zusätzliche Grid-Klassen, id: optionale Element-ID
+  function sitzrasterHTML(plan, seatsHTML, klasse, id) {
+    const grenze = Math.max(6, Math.min(15, parseInt(state.settings.sitzplanKachelSpalten, 10) || 9));
+    const sichtbar = Math.min(plan.cols, grenze);
+    return '<div class="seatgrid-scroll"><div class="seatgrid' + (klasse ? " " + klasse : "") +
+      (sichtbar >= 9 ? " mini" : sichtbar >= 7 ? " kompakt" : "") +
+      (plan.cols > grenze ? " breit" : "") + '"' + (id ? ' id="' + id + '"' : "") +
+      ' style="--cols:' + plan.cols + ";--sichtbar:" + sichtbar + '">' + seatsHTML + "</div></div>";
+  }
+
   // ---- Navigation ----------------------------------------------------------
   async function go(view, params) {
     Object.assign(state, params || {});
@@ -113,6 +128,6 @@
 
   const api = global.Views = {
     state, go, render, quartalFilter, quartalTabsHTML,
-    halbjahrFilter, halbjahrTabsHTML, notenBadge, nameHTML
+    halbjahrFilter, halbjahrTabsHTML, notenBadge, nameHTML, sitzrasterHTML
   };
 })(window);

@@ -102,7 +102,7 @@
       const k = await Store.Klassen.get(state.klasseId);
       const plan = await Store.Sitzplan.get(k.id);
       const rows = Math.max(1, Math.min(12, parseInt(UI.$("#grid-rows").value, 10) || plan.rows));
-      const cols = Math.max(1, Math.min(12, parseInt(UI.$("#grid-cols").value, 10) || plan.cols));
+      const cols = Math.max(1, Math.min(15, parseInt(UI.$("#grid-cols").value, 10) || plan.cols));
       // Neues Raster, bestehende Zuweisungen soweit möglich übernehmen
       const alt = {}; plan.seats.forEach((s) => { alt[s.id] = s.schuelerId; });
       const np = Store.neuerSitzplan(k.id, rows, cols, plan.name);

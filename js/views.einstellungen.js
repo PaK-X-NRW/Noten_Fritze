@@ -66,6 +66,7 @@
       danach: () => { state.notenHalbjahr = ""; state.auswertungQuartal = ""; } },
     schuelerSortierung: { art: "auswahl", werte: ["nachname", "manuell"], meldung: "Gespeichert" },
     haModus: { art: "auswahl", werte: ["punkte", "note6"], meldung: "Gespeichert" },
+    sitzplanKachelSpalten: { art: "zahl", min: 6, max: 15, ersatz: 9, meldung: "Gespeichert" },
     heatStartWert: { art: "zahl", min: 0, max: 100, meldung: "Startwert gespeichert" },
     heatVerfallPunkte: { art: "zahl", min: 0, meldung: "Heatmap-Verfall gespeichert" },
     heatVerfallMinuten: { art: "zahl", min: 1, ersatz: 5, meldung: "Heatmap-Verfall gespeichert" }
@@ -160,6 +161,8 @@
           { value: "nachname", label: "Alphabetisch (Nachname)" },
           { value: "manuell", label: "Manuell (▲/▼ im Schüler-Tab)" }
         ], hint: "Gilt für alle Listen: Noten, Tracker, Sitzplan, Besprechung und CSV-Exporte. Die manuelle Reihenfolge bleibt gespeichert und ist jederzeit wieder abrufbar." }) +
+        einstellungFeld("Sitzplan: Kacheln höchstens so klein wie bei … Spalten", "sitzplanKachelSpalten", s, { type: "number", inputmode: "numeric",
+          hint: "Gilt für Tracker und Reiter Sitzplan. Hat ein Sitzplan mehr Spalten, bleiben die Kacheln so groß und das Raster lässt sich seitlich wischen. Wertebereich: 6 bis 15 (bei 15 wird nie gescrollt)." }) +
       "</div>" +
       '<div class="card"><h2>Mitarbeit – Punkte je Ereignistyp</h2>' + punkte +
         einstellungFeld("Vergessene Hausaufgaben werten", "haModus", s, { type: "select", options: [

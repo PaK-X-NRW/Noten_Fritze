@@ -6,7 +6,7 @@
 (function (global) {
   "use strict";
 
-  const { render } = global.Views;
+  const { render, sitzrasterHTML } = global.Views;
   // ---- Tab: Sitzplan (Editor) ---------------------------------------------
   // Eine Klasse kann mehrere Sitzpläne haben (je Raum einen); gezeigt wird der
   // zuletzt benutzte. Alle Buttons unten wirken auf diesen Plan.
@@ -46,7 +46,7 @@
       "</div>" +
       '<div class="plan-toolbar">' +
         '<div class="hstack"><label class="muted">Reihen</label><input id="grid-rows" type="number" inputmode="numeric" min="1" max="12" value="' + plan.rows + '" style="width:80px"></div>' +
-        '<div class="hstack"><label class="muted">Spalten</label><input id="grid-cols" type="number" inputmode="numeric" min="1" max="12" value="' + plan.cols + '" style="width:80px"></div>' +
+        '<div class="hstack"><label class="muted">Spalten</label><input id="grid-cols" type="number" inputmode="numeric" min="1" max="15" value="' + plan.cols + '" style="width:80px"></div>' +
         '<button class="btn" data-action="set-grid">Raster anwenden</button>' +
         '<button class="btn" data-action="auto-seat">Automatisch belegen</button>' +
         '<button class="btn" data-action="clear-seats">Leeren</button>' +
@@ -54,7 +54,7 @@
         '<span class="muted">' + belegt + " / " + schueler.length + ' belegt</span>' +
         '<button class="btn primary" data-action="open-tracker">▶︎ Tracker starten</button>' +
       "</div>" +
-      '<div class="seatgrid" style="--cols:' + plan.cols + '">' + seats + "</div>"
+      sitzrasterHTML(plan, seats)
     );
   }
 
