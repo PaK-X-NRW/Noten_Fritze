@@ -49,6 +49,86 @@
     return Store.schwellenNormalisieren(liste);
   }
 
+  // ---- Bauplan der einfachen Einstellungen ----------------------------------
+  // Schlüssel = Pfad im Einstellungs-Objekt ("heatStartWert",
+  // "mitarbeitPunkte.gut"). Ein Eingabefeld mit data-einstellung="<Schlüssel>"
+  // wird beim Ändern nach diesen Regeln geprüft und gespeichert – eine neue
+  // Einstellung braucht also nur einen Eintrag hier, einen Standardwert in
+  // DEFAULT_SETTINGS und ein Feld (einstellungFeld / zahlZeile).
+  //   art:     "zahl" (ganze Zahl) | "auswahl"
+  //   min/max: Grenzen einer Zahl; ersatz: Wert bei ungültiger Eingabe (Standard 0)
+  //   werte:   erlaubte Werte einer Auswahl, der erste ist der Standard
+  //   meldung: Toast nach dem Speichern
+  //   danach:  zusätzliche Wirkung nach dem Speichern
+  const EINSTELLUNGEN = {
+    aktuellesQuartal: { art: "zahl", min: 1, max: 4, ersatz: 1, meldung: "Quartal gespeichert",
+      // Filter-Defaults neu ziehen (Notenübersicht folgt dem Halbjahr)
+      danach: () => { state.notenHalbjahr = ""; state.auswertungQuartal = ""; } },
+    schuelerSortierung: { art: "auswahl", werte: ["nachname", "manuell"], meldung: "Gespeichert" },
+    haModus: { art: "auswahl", werte: ["punkte", "note6"], meldung: "Gespeichert" },
+    heatStartWert: { art: "zahl", min: 0, max: 100, meldung: "Startwert gespeichert" },
+    heatVerfallPunkte: { art: "zahl", min: 0, meldung: "Heatmap-Verfall gespeichert" },
+    heatVerfallMinuten: { art: "zahl", min: 1, ersatz: 5, meldung: "Heatmap-Verfall gespeichert" }
+  };
+  // Je Ereignistyp: Mitarbeitspunkte, bei Meldungen zusätzlich Heatmap-Punkte
+  Store.EVENT_TYPES.forEach((t) => {
+    EINSTELLUNGEN["mitarbeitPunkte." + t.id] = { art: "zahl", meldung: "Punkte gespeichert" };
+    if (t.heatSetting) EINSTELLUNGEN[t.heatSetting] = { art: "zahl", min: 0, meldung: "Heatmap-Punkte gespeichert" };
+  });
+
+  function wertLesen(s, pfad) {
+    return pfad.split(".").reduce((o, teil) => (o == null ? o : o[teil]), s);
+  }
+  function wertSetzen(s, pfad, wert) {
+    const teile = pfad.split(".");
+    const letzter = teile.pop();
+    const ziel = teile.reduce((o, teil) => (o[teil] = o[teil] || {}), s);
+    ziel[letzter] = wert;
+  }
+
+  // Eingabe nach dem Bauplan in einen gültigen Wert übersetzen.
+  function wertPruefen(regel, eingabe) {
+    if (regel.art === "auswahl") {
+      return regel.werte.indexOf(eingabe) !== -1 ? eingabe : regel.werte[0];
+    }
+    // Leer, ungültig oder 0 -> Ersatzwert (wie bisher: parseInt(...) || ersatz)
+    let n = parseInt(eingabe, 10) || regel.ersatz || 0;
+    if (regel.min !== undefined) n = Math.max(regel.min, n);
+    if (regel.max !== undefined) n = Math.min(regel.max, n);
+    return n;
+  }
+
+  async function einstellungSpeichern(s, feld) {
+    const pfad = feld.getAttribute("data-einstellung");
+    const regel = EINSTELLUNGEN[pfad];
+    if (!regel) return;
+    const wert = wertPruefen(regel, feld.value);
+    wertSetzen(s, pfad, wert);
+    await Store.saveSettings(s);
+    feld.value = String(wert);   // korrigierten Wert zeigen (z. B. 140 -> 100)
+    if (regel.danach) regel.danach();
+    if (regel.meldung) UI.toast(regel.meldung);
+  }
+
+  // Zahl-Feld in einer Zeile (Beschriftung links, Feld rechts)
+  function zahlZeile(label, pfad, s, hinweis) {
+    return '<div class="form-row" style="align-items:center">' +
+      '<div class="grow"><strong>' + UI.esc(label) + "</strong>" +
+        (hinweis ? '<div class="hint">' + UI.esc(hinweis) + "</div>" : "") + "</div>" +
+      zahlFeld(pfad, s) +
+    "</div>";
+  }
+  function zahlFeld(pfad, s, placeholder) {
+    return '<input type="number" inputmode="numeric" style="width:110px" id="f-' + pfad.replace(/\./g, "-") + '"' +
+      ' data-einstellung="' + pfad + '" value="' + UI.esc(wertLesen(s, pfad)) + '"' +
+      (placeholder ? ' placeholder="' + UI.esc(placeholder) + '"' : "") + ">";
+  }
+  // Auswahl- oder Zahlfeld mit Beschriftung über UI.field
+  function einstellungFeld(label, pfad, s, opts) {
+    return UI.field(label, pfad, wertLesen(s, pfad),
+      Object.assign({}, opts, { attrs: 'data-einstellung="' + pfad + '"' }));
+  }
+
   // =========================================================================
   //  EINSTELLUNGEN
   // =========================================================================
@@ -58,23 +138,9 @@
     // keine Berechtigungsabfrage beim Anzeigen.
     const ordnerApi = !!window.showDirectoryPicker;
     const ordnerHandle = ordnerApi ? await CSV.exportOrdner() : null;
-    const punkte = Store.EVENT_TYPES.map((t) =>
-      '<div class="form-row" style="align-items:center">' +
-        '<div class="grow"><strong>' + UI.esc(t.label) + "</strong></div>" +
-        '<input type="number" inputmode="numeric" style="width:110px" data-punkt="' + t.id + '" value="' + s.mitarbeitPunkte[t.id] + '">' +
-      "</div>"
-    ).join("");
-
-    const heatpunkte = [
-      ["einfach", "Wortmeldung", s.heatPunkteEinfach],
-      ["gut", "Gute Meldung", s.heatPunkteGut],
-      ["sehrgut", "Sehr gute Meldung", s.heatPunkteSehrGut]
-    ].map(([key, label, value]) =>
-      '<div class="form-row" style="align-items:center">' +
-        '<div class="grow"><strong>' + UI.esc(label) + "</strong></div>" +
-        '<input type="number" inputmode="numeric" style="width:110px" data-heat-punkt="' + key + '" value="' + value + '">' +
-      "</div>"
-    ).join("");
+    const punkte = Store.EVENT_TYPES.map((t) => zahlZeile(t.label, "mitarbeitPunkte." + t.id, s)).join("");
+    const heatpunkte = Store.EVENT_TYPES.filter((t) => t.heatSetting)
+      .map((t) => zahlZeile(t.label, t.heatSetting, s)).join("");
 
     const topbar =
       '<button class="iconbtn plain" data-action="home" title="Zurück">‹</button>' +
@@ -82,7 +148,7 @@
 
     const body =
       '<div class="card"><h2>Notenberechnung</h2>' +
-        UI.field("Aktuelles Quartal", "aktuellesQuartal", s.aktuellesQuartal, { type: "select", options: [
+        einstellungFeld("Aktuelles Quartal", "aktuellesQuartal", s, { type: "select", options: [
           { value: "1", label: "1. Quartal" },
           { value: "2", label: "2. Quartal" },
           { value: "3", label: "3. Quartal" },
@@ -90,13 +156,13 @@
         ], hint: "Neue Noten, Stunden und Mitarbeits-Ereignisse werden diesem Quartal zugeordnet." }) +
       "</div>" +
       '<div class="card"><h2>Darstellung</h2>' +
-        UI.field("Reihenfolge der Schüler/innen", "schuelerSortierung", s.schuelerSortierung, { type: "select", options: [
+        einstellungFeld("Reihenfolge der Schüler/innen", "schuelerSortierung", s, { type: "select", options: [
           { value: "nachname", label: "Alphabetisch (Nachname)" },
           { value: "manuell", label: "Manuell (▲/▼ im Schüler-Tab)" }
         ], hint: "Gilt für alle Listen: Noten, Tracker, Sitzplan, Besprechung und CSV-Exporte. Die manuelle Reihenfolge bleibt gespeichert und ist jederzeit wieder abrufbar." }) +
       "</div>" +
       '<div class="card"><h2>Mitarbeit – Punkte je Ereignistyp</h2>' + punkte +
-        UI.field("Vergessene Hausaufgaben werten", "haModus", s.haModus, { type: "select", options: [
+        einstellungFeld("Vergessene Hausaufgaben werten", "haModus", s, { type: "select", options: [
           { value: "punkte", label: "Punkteabzug in der Mitarbeit" },
           { value: "note6", label: "Ab der 3. je eine Note 6 (Mündliche Mitarbeit)" }
         ], hint: "Bei „Note 6“ geben vergessene Hausaufgaben keine Punkte; je drei vergessene HA im Quartal kommt eine zusätzliche Stundennote 6 in den Notenvorschlag – eine eigene Notenspalte entsteht dabei nicht." }) +
@@ -106,11 +172,10 @@
         '<div id="schwellen-global">' + schwellenFelderHTML(s.mitarbeitSchwellen) + "</div>" +
       "</div>" +
       '<div class="card"><h2>Heatmap</h2>' + heatpunkte +
-        '<div class="field" style="margin-top:14px">' + UI.field("Default-Wert für neue / zurückgesetzte Heatmap", "heatStartWert", s.heatStartWert, { type: "number", inputmode: "numeric", hint: "Wertebereich: 0 bis 100" }) + "</div>" +
+        '<div class="field" style="margin-top:14px">' + einstellungFeld("Default-Wert für neue / zurückgesetzte Heatmap", "heatStartWert", s, { type: "number", inputmode: "numeric", hint: "Wertebereich: 0 bis 100" }) + "</div>" +
         '<div class="form-row" style="align-items:center">' +
           '<div class="grow"><strong>Y Heatmap-Punkte verfallen pro X Minuten</strong><div class="hint">Bezogen auf eine 45-Minuten-Stunde; der Tracker skaliert auf die tatsächliche Stundendauer.</div></div>' +
-          '<input type="number" inputmode="numeric" style="width:110px" id="f-heatVerfallPunkte" value="' + s.heatVerfallPunkte + '">' +
-          '<input type="number" inputmode="numeric" style="width:110px" id="f-heatVerfallMinuten" value="' + s.heatVerfallMinuten + '" placeholder="X Minuten">' +
+          zahlFeld("heatVerfallPunkte", s) + zahlFeld("heatVerfallMinuten", s, "X Minuten") +
         "</div>" +
       "</div>" +
       '<div class="card"><h2>Stundenplan</h2>' +
@@ -159,45 +224,10 @@
         '<p class="hint">DB-Schema ' + DB.DB_VERSION + " · Daten-Version " + Store.SCHEMA_VERSION + ".</p></div>";
 
     return { topbar, body, mount: () => {
-      const selSort = UI.$("#f-schuelerSortierung");
-      if (selSort) selSort.addEventListener("change", async () => {
-        s.schuelerSortierung = selSort.value === "manuell" ? "manuell" : "nachname";
-        await Store.saveSettings(s); UI.toast("Gespeichert");
-      });
-      const selQ = UI.$("#f-aktuellesQuartal");
-      if (selQ) selQ.addEventListener("change", async () => {
-        s.aktuellesQuartal = parseInt(selQ.value, 10) || 1;
-        await Store.saveSettings(s);
-        // Filter-Defaults neu ziehen (Notenübersicht folgt dem Halbjahr)
-        state.notenHalbjahr = ""; state.auswertungQuartal = "";
-        UI.toast("Quartal gespeichert");
-      });
-      const selHa = UI.$("#f-haModus");
-      if (selHa) selHa.addEventListener("change", async () => {
-        s.haModus = selHa.value === "note6" ? "note6" : "punkte";
-        await Store.saveSettings(s); UI.toast("Gespeichert");
-      });
-      UI.$all("[data-heat-punkt]").forEach((inp) => inp.addEventListener("change", async () => {
-        const key = inp.getAttribute("data-heat-punkt");
-        if (key === "einfach") s.heatPunkteEinfach = Math.max(0, parseInt(inp.value, 10) || 0);
-        else if (key === "gut") s.heatPunkteGut = Math.max(0, parseInt(inp.value, 10) || 0);
-        else if (key === "sehrgut") s.heatPunkteSehrGut = Math.max(0, parseInt(inp.value, 10) || 0);
-        await Store.saveSettings(s); UI.toast("Heatmap-Punkte gespeichert");
-      }));
-      const heatStart = UI.$("#f-heatStartWert");
-      if (heatStart) heatStart.addEventListener("change", async () => {
-        s.heatStartWert = Math.max(0, Math.min(100, parseInt(heatStart.value, 10) || 0));
-        await Store.saveSettings(s);
-        UI.toast("Startwert gespeichert");
-      });
-      const heatVerfallPunkte = UI.$("#f-heatVerfallPunkte");
-      if (heatVerfallPunkte) heatVerfallPunkte.addEventListener("change", async () => { s.heatVerfallPunkte = Math.max(0, parseInt(heatVerfallPunkte.value, 10) || 0); await Store.saveSettings(s); });
-      const heatVerfallMinuten = UI.$("#f-heatVerfallMinuten");
-      if (heatVerfallMinuten) heatVerfallMinuten.addEventListener("change", async () => { s.heatVerfallMinuten = Math.max(1, parseInt(heatVerfallMinuten.value, 10) || 5); await Store.saveSettings(s); });
-      UI.$all("[data-punkt]").forEach((inp) => inp.addEventListener("change", async () => {
-        s.mitarbeitPunkte[inp.getAttribute("data-punkt")] = parseInt(inp.value, 10) || 0;
-        await Store.saveSettings(s); UI.toast("Punkte gespeichert");
-      }));
+      // Einfache Einstellungen: alle nach dem Bauplan (EINSTELLUNGEN)
+      UI.$all("[data-einstellung]").forEach((feld) =>
+        feld.addEventListener("change", () => einstellungSpeichern(s, feld)));
+      // Zusammengesetzte Einstellungen: Notenschwellen und Stundenplan
       const schwellenBox = UI.$("#schwellen-global");
       if (schwellenBox) UI.$all("[data-schwelle]", schwellenBox).forEach((inp) => inp.addEventListener("change", async () => {
         const liste = schwellenAusFormular(schwellenBox);
@@ -215,5 +245,5 @@
     }};
   }
 
-  Object.assign(global.Views, { ViewEinstellungen, schwellenFelderHTML, schwellenAusFormular });
+  Object.assign(global.Views, { ViewEinstellungen, schwellenFelderHTML, schwellenAusFormular, EINSTELLUNGEN });
 })(window);

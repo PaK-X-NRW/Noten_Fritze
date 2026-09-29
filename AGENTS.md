@@ -513,6 +513,15 @@ folgt für jede Aufgabe:
   eine frische Kopie (Merge mit `DEFAULT_SETTINGS`). Ein Schritt muss daher
   selbst laden **und** speichern; `migrateSchema` liest nach den Schritten neu,
   sonst überschreibt es deren Änderungen.
+- **Neue Einstellung anlegen:** 1) Standardwert in `DEFAULT_SETTINGS`
+  (`store.einstellungen.js`) – über den `getSettings`-Merge bekommen ihn auch
+  vorhandene Installationen, eine Migration ist dafür nicht nötig. 2) Regel im
+  Bauplan `EINSTELLUNGEN` (`views.einstellungen.js`: `art` zahl/auswahl, `min`,
+  `max`, `ersatz`, `werte`, `meldung`, `danach`). 3) Feld mit
+  `einstellungFeld(...)` bzw. `zahlZeile(...)` in eine Karte setzen. Speichern,
+  Prüfen und Rückmeldung übernimmt dann der gemeinsame Handler – keine eigenen
+  Listener je Feld. Zusammengesetzte Werte (Schwellen, Stundenplan) behalten
+  eigene Handler. Die Einstellung in README (Datenmodell) und ggf. info.html nennen.
 - **Fehler nicht verschlucken:** Aktionen aus der Action-Map und unbehandelte
   Promise-Fehler landen über `UI.fehlerMelden` als Toast (plus Konsole). Eigene
   `try/catch` nur, wo ein Fehler fachlich erwartet wird (z. B. Abbruch im

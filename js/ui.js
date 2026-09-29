@@ -119,7 +119,8 @@
     const attrs = 'name="' + name + '" id="f-' + name + '"' +
       (opts.placeholder ? ' placeholder="' + esc(opts.placeholder) + '"' : "") +
       (opts.inputmode ? ' inputmode="' + opts.inputmode + '"' : "") +
-      (opts.autofocus ? " autofocus" : "");
+      (opts.autofocus ? " autofocus" : "") +
+      (opts.attrs ? " " + opts.attrs : "");   // weitere Attribute, z. B. data-*
     let control;
     if (type === "textarea") {
       control = "<textarea " + attrs + ">" + esc(value || "") + "</textarea>";
