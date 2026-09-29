@@ -48,6 +48,8 @@
   function hideToast() { document.getElementById("toast-root").innerHTML = ""; }
 
   // ---- Modal (Bottom-Sheet) ------------------------------------------------
+  // Modale lassen sich stapeln (z. B. Sicherheitsabfrage über einem Dialog):
+  // close() entfernt nur das eigene Modal, das darunterliegende bleibt offen.
   function modal(opts) {
     // opts: { title, bodyHTML, onMount(root), buttons:[{label,className,onClick(close)}], onClose }
     const root = document.getElementById("modal-root");
@@ -64,8 +66,11 @@
     if (typeof opts.bodyHTML === "string") body.innerHTML = opts.bodyHTML;
     else if (opts.bodyHTML) body.appendChild(opts.bodyHTML);
 
+    let offen = true;
     function close() {
-      root.innerHTML = "";
+      if (!offen) return;
+      offen = false;
+      if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
       if (opts.onClose) opts.onClose();
     }
     const actions = box.querySelector(".actions");
@@ -93,7 +98,7 @@
         buttons: [
           { label: opts.cancelLabel || "Abbrechen", className: "", onClick: (close) => { close(); resolve(false); } },
           { label: opts.okLabel || "Löschen", className: opts.danger === false ? "primary" : "danger",
-            onClick: (close) => { resolve(true); document.getElementById("modal-root").innerHTML = ""; } }
+            onClick: (close) => { resolve(true); close(); } }
         ]
       });
     });

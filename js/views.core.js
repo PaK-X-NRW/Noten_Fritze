@@ -100,9 +100,6 @@
 
   const api = global.Views = {
     state, go, render, quartalFilter, quartalTabsHTML,
-    halbjahrFilter, halbjahrTabsHTML,
-    // Legacy-Aliase, werden in Paket 4 entfernt (views.dialoge.js
-    // destrukturiert noch die alten Namen)
-    hjFilter: quartalFilter, hjTabsHTML: quartalTabsHTML
+    halbjahrFilter, halbjahrTabsHTML
   };
 })(window);

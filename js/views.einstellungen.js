@@ -82,11 +82,6 @@
 
     const body =
       '<div class="card"><h2>Notenberechnung</h2>' +
-        UI.field("Rundung der Gesamtnote", "rundung", s.rundung, { type: "select", options: [
-          { value: "eine", label: "Eine Nachkommastelle (2,3)" },
-          { value: "keine", label: "Zwei Nachkommastellen (2,33)" },
-          { value: "ganze", label: "Ganze Note (2)" }
-        ]}) +
         UI.field("Aktuelles Quartal", "aktuellesQuartal", s.aktuellesQuartal, { type: "select", options: [
           { value: "1", label: "1. Quartal" },
           { value: "2", label: "2. Quartal" },
@@ -164,8 +159,6 @@
         '<p class="hint">DB-Schema ' + DB.DB_VERSION + " · Daten-Version " + Store.SCHEMA_VERSION + ".</p></div>";
 
     return { topbar, body, mount: () => {
-      const sel = UI.$("#f-rundung");
-      if (sel) sel.addEventListener("change", async () => { s.rundung = sel.value; await Store.saveSettings(s); UI.toast("Gespeichert"); });
       const selSort = UI.$("#f-schuelerSortierung");
       if (selSort) selSort.addEventListener("change", async () => {
         s.schuelerSortierung = selSort.value === "manuell" ? "manuell" : "nachname";

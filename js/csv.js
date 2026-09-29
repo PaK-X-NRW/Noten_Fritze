@@ -115,7 +115,6 @@
     return "download";
   }
 
-  function n(v) { return Calc.formatNote(v, 1); } // Note deutsch (Komma)
   function safe(s) { return (s || "").replace(/[\/\\:*?"<>|]/g, "-"); }
 
   // ---- Export: Schülerliste ------------------------------------------------
@@ -129,8 +128,9 @@
   // Je Schüler/in eine Zeile mit der kompletten Kette beider Halbjahre, so wie
   // sie in der Notenübersicht steht: Epochalnoten, schriftliche und sonstige
   // Leistungen, Zeugnisnote je Halbjahr und die Jahresnote. Zwischennoten als
-  // Tendenz (2+, 3, 4-), Zeugnisnoten auf der Zeugnisskala.
-  async function exportNoten(klasse, schuelerListe, kategorien, notenAll, settings) {
+  // Tendenz (2+, 3, 4-), Zeugnisnoten auf der Zeugnisskala. In MSS-Klassen ist
+  // jedes Kurshalbjahr eine eigene Endnote – dort gibt es keine Jahresnote.
+  async function exportNoten(klasse, schuelerListe, kategorien, notenAll) {
     const mss = Calc.istMSS(klasse);
     const t = (v) => Calc.formatTendenz(v, mss);
     const zn = (v) => Calc.formatZeugnisnote(v, mss);
@@ -141,7 +141,7 @@
         hj + ". HJ Schriftliche Leistungen", hj + ". HJ Sonstige Leistungen",
         hj + ". HJ " + (mss ? "Zeugnispunkte" : "Zeugnisnote"));
     });
-    kopf.push(mss ? "Zeugnispunkte Jahr" : "Zeugnisnote Jahr");
+    if (!mss) kopf.push("Zeugnisnote Jahr");
     const rows = [kopf];
 
     const notenBySchueler = {};
@@ -154,7 +154,7 @@
       erg.forEach((e) => {
         zeile.push(t(e.epochal[0].note), t(e.epochal[1].note), t(e.schriftlich), t(e.sonstige), zn(e.zeugnis));
       });
-      zeile.push(zn(Calc.jahresnote(erg[0].zeugnis, erg[1].zeugnis, mss)));
+      if (!mss) zeile.push(zn(Calc.jahresnote(erg[0].zeugnis, erg[1].zeugnis, mss)));
       rows.push(zeile);
     });
     return await speichern("noten_" + safe(klasse.name) + ".csv", toCSV(rows), "text/csv");
@@ -201,7 +201,7 @@
       const s = sMap[e.schuelerId]; if (!s) return;
       const wert = Calc.parseNote(e.wert, mss);
       if (wert === null) return;
-      rows.push([s.vorname, s.nachname, n(wert), quartal]);
+      rows.push([s.vorname, s.nachname, Calc.formatTendenz(wert, mss), quartal]);
     });
     return await speichern("mitarbeit_q" + quartal + "_" + safe(klasse.name) + ".csv", toCSV(rows), "text/csv");
   }

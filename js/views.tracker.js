@@ -465,65 +465,56 @@
     UI.toast((t && t.names && t.names[sid] ? t.names[sid] + " · " : "") + (istAbwesend ? "heute abwesend" : "wieder anwesend"));
   }
 
-  // „Keine Hausaufgaben“ für diese Stunde vermerken bzw. wieder entfernen.
-  async function trackerKeineHAToggle(sid) {
+  // Vermerk für diese Stunde setzen bzw. wieder entfernen (Toggle). Je
+  // Schüler/in und Stunde gibt es höchstens einen Vermerk je Typ; sein
+  // Ereignis steht in t[feld][sid].
+  //   typ:  "keinehausaufgabe" | "verweigerung"
+  //   feld: Merkliste im Tracker-Zustand ("keineHA" | "verweigerung")
+  //   punkte: eingefrorene Punktzahl des neuen Ereignisses
+  async function trackerVermerkToggle(sid, typ, feld, punkte, toastGesetzt) {
     const t = state.tracker;
-    if (!t) return;
-    const typ = "keinehausaufgabe";
+    if (!t) return null;
     const name = t.names && t.names[sid] ? t.names[sid] + " · " : "";
-    const vorhanden = t.keineHA[sid];
+    if (!t[feld]) t[feld] = {};
+    const vorhanden = t[feld][sid];
+    let e = null;
     if (vorhanden) {
       await Store.Ereignisse.remove(vorhanden);
-      delete t.keineHA[sid];
+      delete t[feld][sid];
       t.counts[sid] = Math.max(0, (t.counts[sid] || 1) - 1);
       if (t.typeCounts[sid]) t.typeCounts[sid][typ] = Math.max(0, (t.typeCounts[sid][typ] || 1) - 1);
       UI.toast(name + "Vermerk entfernt");
     } else {
-      const e = Store.neuesEreignis(state.klasseId, sid, typ, state.settings.mitarbeitPunkte[typ], t.stunde.id);
-      e.quartal = parseInt(state.settings.aktuellesQuartal, 10) || 1;
-      e.halbjahr = Store.halbjahrAusQuartal(e.quartal);
+      e = Store.neuesEreignis(state.klasseId, sid, typ, punkte, t.stunde.id,
+        state.settings.aktuellesQuartal);
       await Store.Ereignisse.save(e);
-      t.keineHA[sid] = e.id;
+      t[feld][sid] = e.id;
       t.counts[sid] = (t.counts[sid] || 0) + 1;
       if (!t.typeCounts[sid]) t.typeCounts[sid] = {};
       t.typeCounts[sid][typ] = (t.typeCounts[sid][typ] || 0) + 1;
-      UI.toast(name + "keine Hausaufgaben");
-      // Im Modus „note6“ zählt jede 3. vergessene HA des Quartals als Note 6
-      // im Notenvorschlag – übertragen wird sie mit dem Quartalsabschluss.
-      const note6 = await Store.haNote6Pruefen(state.klasseId, sid, e.quartal);
-      if (note6) UI.toast("3× Hausaufgaben vergessen – zählt als Note 6 in der Mitarbeit");
+      UI.toast(name + toastGesetzt);
     }
     await refreshTrackerSeat(sid);
+    return e;
+  }
+
+  // „Keine Hausaufgaben“ für diese Stunde vermerken bzw. wieder entfernen.
+  async function trackerKeineHAToggle(sid) {
+    const e = await trackerVermerkToggle(sid, "keinehausaufgabe", "keineHA",
+      state.settings.mitarbeitPunkte.keinehausaufgabe, "keine Hausaufgaben");
+    // Im Modus „note6“ zählt jede 3. vergessene HA des Quartals als Note 6
+    // im Notenvorschlag – übertragen wird sie mit dem Quartalsabschluss.
+    if (e && await Store.haNote6Pruefen(state.klasseId, sid, e.quartal)) {
+      UI.toast("3× Hausaufgaben vergessen – zählt als Note 6 in der Mitarbeit");
+    }
   }
 
   // „Leistungsverweigerung“ für diese Stunde vermerken bzw. wieder entfernen.
   // Die Stunde zählt als Note 6; Meldungen der Stunde entfallen in der
   // Auswertung, vergessene Hausaufgaben bleiben gezählt.
-  async function trackerVerweigerungToggle(sid) {
-    const t = state.tracker;
-    if (!t) return;
-    const typ = "verweigerung";
-    const name = t.names && t.names[sid] ? t.names[sid] + " · " : "";
-    const vorhanden = t.verweigerung && t.verweigerung[sid];
-    if (vorhanden) {
-      await Store.Ereignisse.remove(vorhanden);
-      delete t.verweigerung[sid];
-      t.counts[sid] = Math.max(0, (t.counts[sid] || 1) - 1);
-      if (t.typeCounts[sid]) t.typeCounts[sid][typ] = Math.max(0, (t.typeCounts[sid][typ] || 1) - 1);
-      UI.toast(name + "Vermerk entfernt");
-    } else {
-      const e = Store.neuesEreignis(state.klasseId, sid, typ, 0, t.stunde.id);
-      e.quartal = parseInt(state.settings.aktuellesQuartal, 10) || 1;
-      e.halbjahr = Store.halbjahrAusQuartal(e.quartal);
-      await Store.Ereignisse.save(e);
-      if (!t.verweigerung) t.verweigerung = {};
-      t.verweigerung[sid] = e.id;
-      t.counts[sid] = (t.counts[sid] || 0) + 1;
-      if (!t.typeCounts[sid]) t.typeCounts[sid] = {};
-      t.typeCounts[sid][typ] = (t.typeCounts[sid][typ] || 0) + 1;
-      UI.toast(name + "Leistungsverweigerung – Stunde zählt als 6");
-    }
-    await refreshTrackerSeat(sid);
+  function trackerVerweigerungToggle(sid) {
+    return trackerVermerkToggle(sid, "verweigerung", "verweigerung", 0,
+      "Leistungsverweigerung – Stunde zählt als 6");
   }
 
   async function trackerHeatEditDialog(sid) {

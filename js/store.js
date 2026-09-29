@@ -33,14 +33,15 @@
   // Reihenfolge = Anzeige-Reihenfolge im Tracker.
   // aufKachel: true  -> eigener Button auf der Schülerkachel (mit icon)
   // aufKachel: false -> nur über einen Tracker-Modus in der Topbar erfassbar
+  // heatSetting: Einstellung mit den Heatmap-Punkten dieses Typs (nur Meldungen)
   const EVENT_TYPES = [
-    { id: "einfach",   label: "Wortmeldung",       kurz: "Meldung",  farbe: "#2e7d32", defaultPunkte: 1,  heatDelta: 1, positiv: true,  aufKachel: true, icon: "★" },
-    { id: "gut",       label: "Gute Meldung",      kurz: "gut",      farbe: "#1565c0", defaultPunkte: 2,  heatDelta: 2, positiv: true,  aufKachel: true, icon: "★★" },
-    { id: "sehrgut",   label: "Sehr gute Meldung", kurz: "sehr gut", farbe: "#6a1b9a", defaultPunkte: 3,  heatDelta: 3, positiv: true,  aufKachel: true, icon: "★★★" },
-    { id: "stoerung",  label: "Störung",           kurz: "Störung",  farbe: "#c62828", defaultPunkte: -2, heatDelta: 0, positiv: false, aufKachel: true, icon: "⚡" },
+    { id: "einfach",   label: "Wortmeldung",       kurz: "Meldung",  farbe: "#2e7d32", defaultPunkte: 1,  heatSetting: "heatPunkteEinfach", positiv: true,  aufKachel: true, icon: "★" },
+    { id: "gut",       label: "Gute Meldung",      kurz: "gut",      farbe: "#1565c0", defaultPunkte: 2,  heatSetting: "heatPunkteGut",     positiv: true,  aufKachel: true, icon: "★★" },
+    { id: "sehrgut",   label: "Sehr gute Meldung", kurz: "sehr gut", farbe: "#6a1b9a", defaultPunkte: 3,  heatSetting: "heatPunkteSehrGut", positiv: true,  aufKachel: true, icon: "★★★" },
+    { id: "stoerung",  label: "Störung",           kurz: "Störung",  farbe: "#c62828", defaultPunkte: -2, positiv: false, aufKachel: true, icon: "⚡" },
     // Erfassung nur über Tracker-Modus: die Stunde zählt als Note 6 (Calc)
-    { id: "verweigerung", label: "Leistungsverweigerung", kurz: "Verweigerung", farbe: "#4a148c", defaultPunkte: 0, heatDelta: 0, positiv: false, aufKachel: false },
-    { id: "keinehausaufgabe", label: "Fehlende HA", kurz: "keine HA", farbe: "#b9770e", defaultPunkte: -1, heatDelta: 0, positiv: false, aufKachel: false }
+    { id: "verweigerung", label: "Leistungsverweigerung", kurz: "Verweigerung", farbe: "#4a148c", defaultPunkte: 0, positiv: false, aufKachel: false },
+    { id: "keinehausaufgabe", label: "Fehlende HA", kurz: "keine HA", farbe: "#b9770e", defaultPunkte: -1, positiv: false, aufKachel: false }
   ];
   const KACHEL_EVENT_TYPES = EVENT_TYPES.filter((t) => t.aufKachel);
   const EVENT_TYPE_MAP = EVENT_TYPES.reduce((m, t) => (m[t.id] = t, m), {});
@@ -63,17 +64,6 @@
       s.heatLastDecayAt = now();
     }
     return s;
-  }
-
-  function currentHeatPoints(s, settings, jetzt) {
-    const punktestand = normalisiereSchuelerHeat(JSON.parse(JSON.stringify(s || {})));
-    const verfallMinuten = Math.max(1, parseInt((settings && settings.heatVerfallMinuten), 10) || 5);
-    const verfallPunkte = Math.max(0, parseInt((settings && settings.heatVerfallPunkte), 10) || 1);
-    const aktuelleZeit = jetzt || now();
-    const vergangen = Math.max(0, aktuelleZeit - punktestand.heatLastDecayAt);
-    const decay = vergangen / 60000 / verfallMinuten * verfallPunkte;
-    const heatPoints = clampHeatPoints(punktestand.heatPoints - decay);
-    return { heatPoints, heatLastDecayAt: punktestand.heatLastDecayAt, decay, verfallMinuten, verfallPunkte };
   }
 
   // ---- Quartal / Halbjahr ---------------------------------------------------
@@ -370,7 +360,7 @@
   // ---- Noten (Einzelnoten) -------------------------------------------------
   function neueNote(data) {
     data = data || {};
-    const datum = data.datum || new Date().toISOString().slice(0, 10);
+    const datum = data.datum || datumLokal();
     // Quartal: vom Aufrufer übergeben oder aus dem Datum abgeleitet.
     // Wird es übergeben, leitet sich das Halbjahr daraus ab, sonst aus dem Datum.
     const quartal = data.quartal || quartalAusDatum(datum);
@@ -506,8 +496,10 @@
   };
 
   // ---- Ereignisse (Mitarbeit) ----------------------------------------------
-  function neuesEreignis(klasseId, schuelerId, typ, punkte, stundeId) {
-    const datum = new Date().toISOString().slice(0, 10);
+  // quartal: i. d. R. settings.aktuellesQuartal; ohne Angabe aus dem Datum.
+  function neuesEreignis(klasseId, schuelerId, typ, punkte, stundeId, quartal) {
+    const datum = datumLokal();
+    const q = parseInt(quartal, 10) || quartalAusDatum(datum);
     return {
       id: uid(),
       klasseId,
@@ -516,8 +508,8 @@
       typ,
       punkte,           // zum Zeitpunkt der Erfassung eingefrorene Punktzahl
       timestamp: now(),
-      quartal: quartalAusDatum(datum),    // 1–4; Aufrufer setzen i. d. R. settings.aktuellesQuartal
-      halbjahr: halbjahrAusDatum(datum),
+      quartal: q,                          // 1–4
+      halbjahr: halbjahrAusQuartal(q),     // abgeleitet (Legacy-Feld)
       notiz: ""
     };
   }
@@ -587,19 +579,6 @@
     }
   };
 
-  async function addHeatPoints(schuelerId, delta) {
-    const s = await DB.get("schueler", schuelerId);
-    if (!s) return null;
-    normalisiereSchuelerHeat(s);
-    const settings = await getSettings();
-    const current = currentHeatPoints(s, settings, now());
-    s.heatPoints = clampHeatPoints(current.heatPoints + (Number(delta) || 0));
-    s.heatLastDecayAt = now();
-    s.updatedAt = now();
-    await DB.put("schueler", s);
-    return s;
-  }
-
   // ---- Abwesenheiten ---------------------------------------------------------
   // Schüler tageweise als krank/abwesend markieren (Toggle).
   // Datensatz: { id: schuelerId + "_" + datum, klasseId, schuelerId, datum, createdAt }
@@ -657,7 +636,7 @@
     Ereignisse, neuesEreignis,
     Stunden, neueStunde,
     Abwesenheiten,
-    addHeatPoints, currentHeatPoints, normalisiereSchuelerHeat,
+    normalisiereSchuelerHeat,
     haNote6Pruefen
   };
 })(window);

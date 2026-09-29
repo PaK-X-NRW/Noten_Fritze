@@ -94,8 +94,7 @@
   }
 
   function mountKlasse(k) {
-    if (state.tab === "sitzplan") mountSitzplanEditor(k);
-    else if (state.tab === "noten") mountNotenTabelle(k);
+    if (state.tab === "noten") mountNotenTabelle(k);
   }
 
   // ---- Tab: Schüler --------------------------------------------------------
@@ -816,7 +815,6 @@
       '<div class="seatgrid" style="--cols:' + plan.cols + '">' + seats + "</div>"
     );
   }
-  function mountSitzplanEditor(k) { /* Grid-Inputs werden über Buttons gelesen */ }
 
   // ---- Tab: Mitarbeit-Auswertung ------------------------------------------
   // Gemeinsamer Rechenkontext der Mitarbeits-Auswertung (Tab + Herleitungs-Dialog):

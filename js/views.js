@@ -69,7 +69,7 @@
       const [s, kt, n] = await Promise.all([
         Store.Schueler.byKlasse(k.id), Store.Kategorien.byKlasse(k.id), Store.Noten.byKlasse(k.id)
       ]);
-      exportToast(await CSV.exportNoten(k, s, kt, n, state.settings), "Noten-CSV");
+      exportToast(await CSV.exportNoten(k, s, kt, n), "Noten-CSV");
     },
     "export-einzelnoten": async () => {
       const k = await Store.Klassen.get(state.klasseId);
@@ -267,18 +267,14 @@
     if (state.tracker && state.tracker.abwesend && state.tracker.abwesend[sid]) return; // abwesend: keine Ereignisse
     const typ = el.getAttribute("data-type");
     const punkte = state.settings.mitarbeitPunkte[typ];
-    const heatDelta = typ === "einfach"
-      ? Math.max(0, parseInt(state.settings.heatPunkteEinfach, 10) || 0)
-      : typ === "gut"
-        ? Math.max(0, parseInt(state.settings.heatPunkteGut, 10) || 0)
-        : typ === "sehrgut"
-          ? Math.max(0, parseInt(state.settings.heatPunkteSehrGut, 10) || 0)
-          : 0;
+    const typDef = Store.EVENT_TYPE_MAP[typ];
+    const heatDelta = typDef && typDef.heatSetting
+      ? Math.max(0, parseInt(state.settings[typDef.heatSetting], 10) || 0)
+      : 0;
     const t = state.tracker;
-    const e = Store.neuesEreignis(state.klasseId, sid, typ, punkte, t && t.stunde ? t.stunde.id : null);
+    const e = Store.neuesEreignis(state.klasseId, sid, typ, punkte, t && t.stunde ? t.stunde.id : null,
+      state.settings.aktuellesQuartal);
     e.heatDelta = heatDelta;
-    e.quartal = parseInt(state.settings.aktuellesQuartal, 10) || 1;
-    e.halbjahr = Store.halbjahrAusQuartal(e.quartal);
     await Store.Ereignisse.save(e);
 
     if (heatDelta > 0) await trackerHeatAddieren(sid, heatDelta);

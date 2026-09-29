@@ -18,6 +18,11 @@
   function klasseDialog(k) {
     const isNew = !k;
     const data = k || Store.neueKlasse();
+    // Voreinstellung der Anteile je Fachtyp aus den Einstellungen (z. B. „50/50")
+    const anteilText = (typ) => {
+      const a = state.settings.anteile[typ];
+      return a.schriftlich + "/" + a.sonstige;
+    };
     const body =
       UI.field("Klassenname", "name", data.name, { placeholder: "z. B. 8b", autofocus: true }) +
       '<div class="form-row">' +
@@ -25,8 +30,8 @@
         UI.field("Fach", "fach", data.fach, { placeholder: "Mathematik" }) +
       "</div>" +
       UI.field("Fachtyp", "typ", data.typ, { type: "select", options: [
-        { value: "hauptfach", label: "Hauptfach (Standard 50/50)" },
-        { value: "nebenfach", label: "Nebenfach (Standard 40/60)" }
+        { value: "hauptfach", label: "Hauptfach (Standard " + anteilText("hauptfach") + ")" },
+        { value: "nebenfach", label: "Nebenfach (Standard " + anteilText("nebenfach") + ")" }
       ], hint: "Bestimmt die Voreinstellung der Anteile schriftlich/sonstige." }) +
       UI.field("Klassenstufe", "klassenstufe", data.klassenstufe == null ? "" : data.klassenstufe, { type: "select", options: [
         { value: "", label: "– (Sekundarstufe I)" }
@@ -611,8 +616,6 @@
           CSV.exportEreignisse(k, schuelerListe, alle.filter((e) => e.quartal === q)); // bleibt offen
         }},
         { label: "Übertragen & abschließen", className: "danger", onClick: async (close, box) => {
-          // Werte VOR dem Confirm-Dialog einsammeln und prüfen – UI.confirmDialog
-          // leert den modal-root komplett (auch dieses Modal).
           const felder = eingetraegeneWerte(box);
           let ungueltig = null;
           const eintraege = [];
@@ -633,6 +636,7 @@
             "Aufheben kannst du das jederzeit im Reiter Mitarbeit.",
             { okLabel: "Übertragen & abschließen", danger: false });
           if (!ok) return;
+          close();
 
           // Ziel-Kategorie: gewählte oder neu angelegte „Mündliche Mitarbeit“.
           // Sie wird als Mitarbeits-Kategorie markiert – daran erkennt die
@@ -662,7 +666,6 @@
           // Stunden und Ereignisse bleiben stehen – das Quartal wird nur als
           // abgeschlossen vermerkt und dadurch im Mitarbeit-Tab gesperrt.
           await Store.quartalAbschliessen(k, q, Store.datumLokal());
-          // Das Modal ist durch den Confirm-Dialog bereits geschlossen.
           UI.toast(eintraege.length + " Noten übertragen – Quartal abgeschlossen");
           render();
         }}
@@ -699,10 +702,10 @@
           buttons: [
             { label: "Abbrechen" },
             { label: "Ersetzen", className: "danger", onClick: async (close2) => {
-              await klassenImportAusfuehren(payload, "ersetzen", close2);
+              await klassenImportAusfuehren(payload, "ersetzen", () => { close2(); close(); });
             }},
             { label: "Als Kopie importieren", className: "primary", onClick: async (close2) => {
-              await klassenImportAusfuehren(payload, "kopie", close2);
+              await klassenImportAusfuehren(payload, "kopie", () => { close2(); close(); });
             }}
           ]
         });

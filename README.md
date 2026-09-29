@@ -129,7 +129,7 @@ stunden        { id, klasseId, datum(YYYY-MM-DD), startTs, endeTs, dauerMin, stu
                  createdAt, updatedAt }
 abwesenheiten  { id(schuelerId_datum), klasseId, schuelerId, datum(YYYY-MM-DD), createdAt }
 einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punkte'|'note6'),
-                 stundenplan, rundung, schuelerSortierung('nachname'|'manuell'),
+                 stundenplan, schuelerSortierung('nachname'|'manuell'),
                  mitarbeitPunkte, mitarbeitSchwellen,
                  heatPunkteEinfach, heatPunkteGut, heatPunkteSehrGut,
                  heatStartWert, heatVerfallPunkte, heatVerfallMinuten, anteile }
@@ -190,8 +190,9 @@ verfälschen. Fehlt alles, ist die Gesamtnote „–“.
 **Standard-Anteile:** Hauptfach 50 % schriftlich / 50 % sonstige, Nebenfach 30 % / 70 %
 (pro Klasse über „Anteile ändern“ anpassbar).
 
-**Noteneingabe** akzeptiert `2`, `2,3`, `2.3`, `2+` (→ 1,7), `2-` (→ 2,3); die
-Einstellung „Rundung“ betrifft nur noch die Mitarbeits-Auswertung.
+**Noteneingabe** akzeptiert `2`, `2,3`, `2.3`, `2+` (→ 1,7), `2-` (→ 2,3). Gerundet
+wird ausschließlich nach den festen Regeln oben (Drittel- und Zeugnisskala) – eine
+eigene Rundungs-Einstellung gibt es seit 1.13.0 nicht mehr.
 Die Aufschlüsselung ist im **Besprechungsmodus** und im Schüler-Detail transparent
 sichtbar (Kategorie-Ø, Gewichte, Epochalnoten, Teilnoten roh und gerundet, Zeugnisnote).
 
@@ -447,7 +448,7 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
 - **Besprechungsmodus** – ein/e Schüler/in einzeln, groß; nur deren Daten sichtbar
   (Datenschutz bei der Notenbesprechung), Vor/Zurück, Halbjahr-Filter; zeigt
   die Zeugnisnote groß und darunter die komplette Herleitung Schritt für Schritt.
-- **Einstellungen** – Rundung, aktuelles Quartal, Reihenfolge der Schüler/innen,
+- **Einstellungen** – aktuelles Quartal, Reihenfolge der Schüler/innen,
   Wertung vergessener Hausaufgaben (HA-Modus),
   Stundenplan (10 Stunden,
   täglich gleich), Mitarbeitspunkte, Notenschwellen, Heatmap-Punktverfall,

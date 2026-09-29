@@ -65,13 +65,9 @@
     // "note6"  = jede 3. vergessene HA je Quartal erzeugt automatisch eine
     //            Note 6 in „Mündliche Mitarbeit", HA geben dann keine Punkte
     haModus: "punkte",
-    // Legacy-Feld: nicht mehr im UI, wird aus dem Quartal abgeleitet
-    aktuellesHalbjahr: 1,
     // Stundenplan: flache Liste von genau 10 { nr, start: "HH:MM", ende: "HH:MM" },
     // gilt für jeden Schultag gleich (kein Wochenplan mehr).
     stundenplan: defaultStundenplan(),
-    // Rundung der Gesamtnote: "keine" (2 NK), "eine" (1 NK), "ganze" (ganze Note)
-    rundung: "eine",
     // Reihenfolge der Schüler/innen in allen Listen:
     // "nachname" = alphabetisch (Nachname, dann Vorname), "manuell" = per ▲/▼ gepflegter sortIndex
     schuelerSortierung: "nachname",
@@ -116,6 +112,9 @@
     }
     // Fehlende Felder aus Defaults ergänzen (Vorwärtskompatibilität)
     s = Object.assign(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), s);
+    // Nicht mehr benutzte Felder älterer Versionen; verschwinden beim nächsten Speichern
+    delete s.rundung;
+    delete s.aktuellesHalbjahr;
     if (s.heatPunktVerfallProMinuten && !s.heatVerfallMinuten) {
       s.heatVerfallMinuten = s.heatPunktVerfallProMinuten;
     }
