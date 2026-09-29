@@ -151,7 +151,7 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
   Sitzplatz-Zuweisung); das Löschen einer Kategorie oder einer Spalte nimmt die
   darin erfassten Noten mit.
 - **App-Version:** `APP_VERSION` in `js/version.js` (Schema `MAJOR.MINOR.PATCH`,
-  aktuell **1.14.1**) ist die sichtbare Programmversion: angezeigt unter
+  aktuell **1.15.0**) ist die sichtbare Programmversion: angezeigt unter
   Einstellungen → Über, Name des Service-Worker-Caches, Feld `appVersion` im
   JSON-Backup. Sie wird von Hand gepflegt und ist unabhängig von den beiden
   internen Zählern unten.
