@@ -72,6 +72,19 @@
     ).join("");
   }
 
+  // ---- Bausteine für Listen und Tabellen ------------------------------------
+  // Farbiges Notenkästchen; ohne Note ein graues „–“.
+  //   format: "tendenz" (Drittelnoten 2+, 3, 4-) | "zeugnis" (ganze Note bzw. 4-)
+  function notenBadge(note, mss, format) {
+    if (note === null || note === undefined || isNaN(note)) return '<span class="muted">–</span>';
+    const text = format === "zeugnis" ? Calc.formatZeugnisnote(note, mss) : Calc.formatTendenz(note, mss);
+    return '<span class="note-badge" style="background:' + Calc.noteFarbe(note, mss) + '">' + text + "</span>";
+  }
+  // „Nachname, Vorname“ mit hervorgehobenem Nachnamen (Tabellen)
+  function nameHTML(s) {
+    return "<strong>" + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname);
+  }
+
   // ---- Navigation ----------------------------------------------------------
   async function go(view, params) {
     Object.assign(state, params || {});
@@ -100,6 +113,6 @@
 
   const api = global.Views = {
     state, go, render, quartalFilter, quartalTabsHTML,
-    halbjahrFilter, halbjahrTabsHTML
+    halbjahrFilter, halbjahrTabsHTML, notenBadge, nameHTML
   };
 })(window);

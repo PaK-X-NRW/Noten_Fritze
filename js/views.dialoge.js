@@ -176,7 +176,7 @@
         const existing = await Store.Schueler.byKlasse(k.id);
         let idx = existing.length;
         const neu = liste.map((r) => Store.neuerSchueler(k.id, { vorname: r.vorname, nachname: r.nachname, bemerkung: r.bemerkung, sortIndex: idx++ }));
-        await DB.bulkPut("schueler", neu);
+        await Store.Schueler.saveAlle(neu);
         close(); render(); UI.toast(neu.length + " Schüler/innen importiert");
       }}
     ]});

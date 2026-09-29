@@ -99,6 +99,9 @@ Wichtige Muster:
   leiten damit Spalten aus Noten ohne `leistungId` ab.
 - Jede Datei beginnt mit einem **Header-Kommentarblock** (`/* ===...`), der
   Zweck und Inhalt beschreibt. Bei neuen Dateien dieses Format übernehmen.
+- Wiederkehrende Bausteine liegen im Views-Kern: `notenBadge(note, mss, "tendenz"|"zeugnis")`
+  (farbiges Notenkästchen) und `nameHTML(s)` („**Nachname**, Vorname“) – nicht neu bauen.
+  Views schreiben nie direkt in `DB`, sondern immer über den `Store`.
 - HTML wird als String gebaut. **Nutzerdaten immer mit `UI.esc()` escapen**,
   bevor sie ins HTML wandern (XSS-Schutz, Namen sind Freitext).
 - Interaktionen laufen über **`data-action`-Attribute** und zentrale Delegation

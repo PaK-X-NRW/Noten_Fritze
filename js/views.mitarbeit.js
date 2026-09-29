@@ -8,7 +8,8 @@
   "use strict";
 
   const {
-    state, render, quartalFilter, quartalTabsHTML, schwellenFelderHTML, schwellenAusFormular
+    state, render, quartalFilter, quartalTabsHTML, schwellenFelderHTML, schwellenAusFormular,
+    notenBadge, nameHTML
   } = global.Views;
   // ---- Tab: Mitarbeit-Auswertung ------------------------------------------
   // Gemeinsamer Rechenkontext der Mitarbeits-Auswertung (Tab + Herleitungs-Dialog):
@@ -88,7 +89,7 @@
         : mss ? String(Calc.noteZuMssPunkte(gerundet)) : Calc.formatTendenz(gerundet, false);
       const eingetragen = uebertragen[s.id];
       return "<tr>" +
-        "<td><strong>" + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
+        "<td>" + nameHTML(s) + "</td>" +
         '<td class="num">' + (a ? a.meldungen : 0) + "</td>" +
         '<td class="num">' + (a ? a.punkte : 0) + "</td>" +
         '<td class="num">' + (a ? a.nenner : 0) + "</td>" +
@@ -101,10 +102,7 @@
             (mss ? Calc.noteFarbe(Calc.noteZuMssPunkte(gerundet), true) : Calc.noteFarbe(note)) + '">' +
             vorschlagText + "</button>"
           : "–") + "</td>" +
-        '<td class="num">' + (eingetragen !== undefined
-          ? '<span class="note-badge" style="background:' + Calc.noteFarbe(eingetragen, mss) + '">' +
-            Calc.formatTendenz(eingetragen, mss) + "</span>"
-          : '<span class="muted">–</span>') + "</td>" +
+        '<td class="num">' + notenBadge(eingetragen, mss) + "</td>" +
         "<td>" + typen + "</td>" +
       "</tr>";
     }).join("");
@@ -287,7 +285,7 @@
         : Calc.formatTendenz(Calc.tendenznote(vorschlag, false), false));
       const vorbelegt = schon !== undefined ? Calc.formatTendenz(schon, mss) : ausVorschlag;
       return "<tr>" +
-        "<td><strong>" + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
+        "<td>" + nameHTML(s) + "</td>" +
         '<td class="num">' + (hatV
           ? '<span class="note-badge" style="background:' + Calc.noteFarbe(vorschlag) + '">' + Calc.formatNote(vorschlag, 1) + "</span>"
           : "–") + "</td>" +

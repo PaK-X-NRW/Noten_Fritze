@@ -10,7 +10,7 @@
 (function (global) {
   "use strict";
 
-  const { state, render, halbjahrFilter, halbjahrTabsHTML, breakdownHTML } = global.Views;
+  const { state, render, halbjahrFilter, halbjahrTabsHTML, breakdownHTML, notenBadge, nameHTML } = global.Views;
   // ---- Tab: Noten ----------------------------------------------------------
   // Die Notenübersicht zeigt genau ein Halbjahr. Aufbau der Spalten:
   //   Name | schriftliche Leistungen | [1. Quartal: sonstige Leistungen] |
@@ -24,16 +24,10 @@
   // damit einzelne Zeilen neu, ohne die ganze View neu aufzubauen.
   let notenKtx = null;
 
-  // Badge für eine Note auf der Zeugnisskala (ganze Note bzw. 4-).
-  function zeugnisBadge(note, mss) {
-    if (note === null || note === undefined) return '<span class="muted">–</span>';
-    return '<span class="note-badge" style="background:' + Calc.noteFarbe(note, mss) + '">' + Calc.formatZeugnisnote(note, mss) + "</span>";
-  }
-  // Badge für eine Drittelnote – angezeigt als Tendenz (2+, 3, 4-).
-  function tendenzBadge(note, mss) {
-    if (note === null || note === undefined) return '<span class="muted">–</span>';
-    return '<span class="note-badge" style="background:' + Calc.noteFarbe(note, mss) + '">' + Calc.formatTendenz(note, mss) + "</span>";
-  }
+  // Badge für eine Note auf der Zeugnisskala (ganze Note bzw. 4-)
+  const zeugnisBadge = (note, mss) => notenBadge(note, mss, "zeugnis");
+  // Badge für eine Drittelnote – angezeigt als Tendenz (2+, 3, 4-)
+  const tendenzBadge = (note, mss) => notenBadge(note, mss, "tendenz");
 
   async function TabNoten(k) {
     const [schueler, katsRoh, leistungen, notenAll, ereignisse] = await Promise.all([
@@ -120,9 +114,7 @@
         '<br><span class="muted" style="text-transform:none;font-weight:400">' + untertitel + "</span>",
       zelle: (sp, ctx) => {
         const n = ctx.werte[l.id];
-        const inhalt = n && n.wert !== null && n.wert !== undefined
-          ? '<span class="note-badge" style="background:' + Calc.noteFarbe(n.wert, mss) + '">' + Calc.formatTendenz(n.wert, mss) + "</span>"
-          : '<span class="muted">–</span>';
+        const inhalt = tendenzBadge(n ? n.wert : null, mss);
         return spaltenZelle(sp, inhalt, "zelle",
           ' data-lid="' + l.id + '" data-sid="' + ctx.s.id + '" tabindex="0"');
       }
@@ -259,8 +251,7 @@
 
   function notenZeilenInhalt(s) {
     const ctx = zeilenKontext(s);
-    return '<td class="pointer" data-action="student-detail" data-sid="' + s.id + '"><strong>' +
-      UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
+    return '<td class="pointer" data-action="student-detail" data-sid="' + s.id + '">' + nameHTML(s) + "</td>" +
       notenKtx.spalten.map((sp) => sp.zelle(sp, ctx)).join("");
   }
   function notenZeile(s) {
@@ -336,17 +327,8 @@
         quartal,
         datum: v.datum || Store.datumLokal()
       });
+      // Speichert die Spalte; ihre Noten folgen ihr (Quartal/Kategorie/Datum)
       await Store.Leistungen.save(data);
-      // Noten der Spalte folgen ihr (Quartal/Kategorie/Datum sind Spalten-Sache)
-      const noten = await DB.getAllByIndex("noten", "leistungId", data.id);
-      noten.forEach((n) => {
-        n.kategorieId = data.kategorieId;
-        n.quartal = quartal;
-        n.halbjahr = Store.halbjahrAusQuartal(quartal);
-        n.titel = data.titel;
-        n.datum = data.datum;
-      });
-      if (noten.length) await DB.bulkPut("noten", noten);
       // Beim Anlegen ins Halbjahr der neuen Spalte wechseln, damit sie sichtbar ist
       state.notenHalbjahr = String(Store.halbjahrAusQuartal(quartal));
       close(); render();

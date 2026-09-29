@@ -308,7 +308,23 @@
           ? (a.sortIndex || 0) - (b.sortIndex || 0)
           : ((a.datum || "") < (b.datum || "") ? -1 : 1))),
     get: (id) => DB.get("leistungen", id),
-    save: (l) => DB.put("leistungen", l),
+    // Speichert die Spalte. Titel, Datum, Quartal und Kategorie ihrer Noten
+    // folgen ihr – beides in einer Transaktion.
+    async save(l) {
+      const noten = await DB.getAllByIndex("noten", "leistungId", l.id);
+      noten.forEach((n) => {
+        n.kategorieId = l.kategorieId;
+        n.quartal = l.quartal;
+        n.halbjahr = halbjahrAusQuartal(l.quartal);
+        n.titel = l.titel || "";
+        n.datum = l.datum;
+      });
+      await DB.atomar(["leistungen", "noten"], (os) => {
+        os("leistungen").put(l);
+        noten.forEach((n) => os("noten").put(n));
+      });
+      return l;
+    },
     remove: (id) => kaskade([["noten", "leistungId", id]], [["leistungen", id]])
   };
 

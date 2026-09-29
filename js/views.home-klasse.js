@@ -6,7 +6,7 @@
 (function (global) {
   "use strict";
 
-  const { state } = global.Views;
+  const { state, nameHTML } = global.Views;
   const api = global.Views;   // Tabs aus views.noten/sitzplan/mitarbeit.js (laden später)
 
   // =========================================================================
@@ -108,7 +108,7 @@
     const rows = schueler.map((s, i) =>
       "<tr>" +
         '<td class="num muted">' + (i + 1) + "</td>" +
-        "<td><strong>" + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname) + "</td>" +
+        "<td>" + nameHTML(s) + "</td>" +
         "<td>" + UI.esc(s.bemerkung || "") + "</td>" +
         '<td class="right nowrap">' +
           (manuell
