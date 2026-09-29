@@ -145,6 +145,6 @@
   Object.assign(global.Store, {
     DEFAULT_SETTINGS,
     getSettings, saveSettings,
-    defaultStundenplan, schwellenNormalisieren
+    defaultStundenplan, schwellenNormalisieren, hhmmZuMinuten
   });
 })(window);

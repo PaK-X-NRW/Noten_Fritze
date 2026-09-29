@@ -270,7 +270,7 @@
     // ausgeblendet – eine neue Spalte dort wäre unsichtbar. Eine bereits
     // zugeordnete Kategorie bleibt wählbar, damit sie beim Bearbeiten einer
     // Altspalte nicht stillschweigend wechselt.
-    const benutzbar = kats.filter((c) => (c.anzeige || "note") === "note" &&
+    const benutzbar = kats.filter((c) => Calc.istNotenKategorie(c) &&
       (c.quelle !== "mitarbeit" || (vorhanden && vorhanden.kategorieId === c.id)));
     if (!benutzbar.length) {
       UI.toast("Erst eine Kategorie anlegen (z. B. „Klassenarbeit“)");
@@ -351,8 +351,7 @@
     const hj = halbjahrFilter();
     const hjErg = Calc.halbjahrErgebnis(kats, notenAll.filter((n) => n.schuelerId === sid), k, hj, mss);
 
-    const mitarbeitKats = kats.filter((c) =>
-      c.quelle === "mitarbeit" && c.art !== "schriftlich" && (c.anzeige || "note") === "note");
+    const mitarbeitKats = kats.filter(Calc.istMitarbeitsKategorie);
     const quartale = hj === 2 ? [3, 4] : [1, 2];
     let mitarbeitHTML = "";
     if (mitarbeitKats.length) {
@@ -542,7 +541,7 @@
     const schonNoten = Object.keys(bereitsUebertragen).length;
 
     // Ziel-Kategorien: sonstige Leistungen mit Noten-Anzeige; "" = neu anlegen
-    const ziele = kategorien.filter((c) => c.art === "sonstige" && (c.anzeige || "note") === "note");
+    const ziele = kategorien.filter((c) => c.art === "sonstige" && Calc.istNotenKategorie(c));
     const vorgabe = ziele.find((c) => (c.name || "").trim().toLowerCase() === "mündliche mitarbeit");
     const katSelect =
       '<div class="field"><label for="qa-kategorie">Ziel-Kategorie für die übertragenen Noten</label>' +

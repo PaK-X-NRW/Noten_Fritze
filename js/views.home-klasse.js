@@ -336,7 +336,7 @@
     ktx.quartale.forEach((q, i) => {
       ktx.leistungen
         .filter((l) => l.quartal === q && vonKategorie(l).art !== "schriftlich" &&
-          (vonKategorie(l).anzeige || "note") === "note" && vonKategorie(l).quelle !== "mitarbeit")
+          Calc.istNotenKategorie(vonKategorie(l)) && !Calc.istMitarbeitsKategorie(vonKategorie(l)))
         .forEach((l) => spalten.push(leistungSpalte(l, vonKategorie(l), mss)));
       Object.keys(ktx.katById).map((id) => ktx.katById[id])
         .filter((c) => c.art !== "schriftlich" && c.anzeige === "fehlendeHA")
@@ -850,8 +850,7 @@
     const [kats, leistungen, noten] = await Promise.all([
       Store.Kategorien.byKlasse(k.id), Store.Leistungen.byKlasse(k.id), Store.Noten.byKlasse(k.id)
     ]);
-    const katIds = kats.filter((c) => c.quelle === "mitarbeit" &&
-      c.art !== "schriftlich" && (c.anzeige || "note") === "note").map((c) => c.id);
+    const katIds = kats.filter(Calc.istMitarbeitsKategorie).map((c) => c.id);
     const leistungIds = leistungen
       .filter((l) => l.quartal === quartal && katIds.indexOf(l.kategorieId) !== -1)
       .map((l) => l.id);

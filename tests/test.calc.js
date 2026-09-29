@@ -218,14 +218,21 @@
   gruppe("Gewichtete Rechnung (berechneSchueler)", () => {
     fall("Zwei Ebenen: Kategorie-Ø, dann gewichtet", () => {
       const kats = [kat("KA", "schriftlich", 2), kat("Test", "schriftlich", 1)];
-      const r = Calc.berechneSchueler(kats, [note("KA", 2, 1), note("KA", 3, 1), note("Test", 1, 1)], KLASSE, "keine", 1);
+      const r = Calc.berechneSchueler(kats, [note("KA", 2, 1), note("KA", 3, 1), note("Test", 1, 1)], KLASSE, 1);
       nahe(r.schriftlich.schnitt, (2.5 * 2 + 1 * 1) / 3);
     });
     fall("Halbjahr: sonstige als Mittel der Quartals-Durchschnitte", () => {
       const kats = [kat("Test", "sonstige", 1)];
-      const r = Calc.berechneSchueler(kats, [note("Test", 1, 1), note("Test", 1, 1), note("Test", 3, 2)], KLASSE, "keine", "hj1");
+      const r = Calc.berechneSchueler(kats, [note("Test", 1, 1), note("Test", 1, 1), note("Test", 3, 2)], KLASSE, "hj1");
       nahe(r.sonstige.schnitt, 2, "(1 + 3) / 2, nicht (1+1+3)/3");
       gleich(r.sonstige.quartale.length, 2);
+    });
+    fall("Kategorie-Helfer", () => {
+      gleich(Calc.istNotenKategorie(kat("a", "sonstige", 1)), true);
+      gleich(Calc.istNotenKategorie(kat("a", "sonstige", 1, { anzeige: "fehlendeHA" })), false);
+      gleich(Calc.istMitarbeitsKategorie(kat("m", "sonstige", 2, { quelle: "mitarbeit" })), true);
+      gleich(Calc.istMitarbeitsKategorie(kat("m", "schriftlich", 2, { quelle: "mitarbeit" })), false);
+      gleich(Calc.istMitarbeitsKategorie(kat("m", "sonstige", 2)), false);
     });
     fall("Zeitraum-Filter", () => {
       gleich(Calc.quartaleVonFilter(3), [3]);

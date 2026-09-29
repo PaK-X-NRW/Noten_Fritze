@@ -68,7 +68,11 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `store.migrationen.js` – Daten-Migrationen (`schemaVersion`)
   - `store.transfer.js` – Backup und Klassen-Export/-Import
   - `store.demo.js` – Demo-Daten beim ersten Start
-  - `calc.js` – reine Rechenlogik (Noten, Mitarbeit, Farben) – frei von DOM/DB
+  - `calc.js` – Rechen-Kern: Notenskala, Drittel-/Zeugnisskala, MSS (Namespace `Calc`)
+  - `calc.zeugnis.js` – Halbjahres-Kette bis zur Zeugnisnote
+  - `calc.mitarbeit.js` – Mitarbeits-Auswertung (Stundennoten-Modell)
+  - `calc.tracker.js` – Heatmap und Stundenplan
+    (alle `calc*.js` rein, ohne DOM/DB; geprüft in `tests.html`)
   - `csv.js` – CSV-Export/Import
   - `ui.js` – UI-Bausteine (Modal, Toast, Formfelder)
   - `views.core.js` – Views-Kern (State, Routing, Render-Schleife)
@@ -523,7 +527,10 @@ Noten_Fritze/
    ├─ store.migrationen.js  Daten-Migrationen (schemaVersion)
    ├─ store.transfer.js     Backup + Klassen-Export/-Import
    ├─ store.demo.js         Demo-Daten beim ersten Start
-   ├─ calc.js               Noten-/Mitarbeitslogik
+   ├─ calc.js               Rechen-Kern (Notenskala)
+   ├─ calc.zeugnis.js       Halbjahres-Kette bis zur Zeugnisnote
+   ├─ calc.mitarbeit.js     Mitarbeits-Auswertung
+   ├─ calc.tracker.js       Heatmap und Stundenplan
    ├─ csv.js                CSV-Export/Import
    ├─ ui.js                 Modal/Toast/Formfelder
    ├─ views.core.js         Views-Kern (State, Routing, Render)

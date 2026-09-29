@@ -51,7 +51,10 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/store.migrationen.js` | `Store` | `SCHEMA_VERSION`, `MIGRATION_STEPS`, `migrateSchema` |
 | `js/store.transfer.js` | `Store` | Backup (`exportAll`/`importAll`) und Klassen-Export/-Import |
 | `js/store.demo.js` | `Store` | Demo-Daten (`seedDemoData`) beim ersten Start |
-| `js/calc.js` | `Calc` | Reine Rechenlogik (Noten, Mitarbeit, Heatmap) – **frei von DOM/DB** |
+| `js/calc.js` | `Calc` | Rechen-Kern: Notenskala (Eingabe, Drittel-/Zeugnisskala, Anzeige, MSS-Umrechnung), Kategorie-Helfer – **frei von DOM/DB** |
+| `js/calc.zeugnis.js` | `Calc` | Halbjahres-Kette: `berechneSchueler`, `halbjahrErgebnis`, `mitarbeitVorhanden` |
+| `js/calc.mitarbeit.js` | `Calc` | Mitarbeits-Auswertung (Stundennoten-Modell), Schwellen |
+| `js/calc.tracker.js` | `Calc` | Heatmap-Verfall/-Farbe, Stundenplan (`trackerSession`) |
 | `js/csv.js` | `CSV` | CSV-Export/Import (UTF-8 mit BOM) |
 | `js/ui.js` | `UI` | UI-Bausteine: Modal, Toast, Formfelder, `esc`, `$`/`$all` |
 | `js/views.core.js` | `Views` | Views-Kern: State, Navigation (`go`), Render-Schleife (`render`) |
@@ -156,7 +159,12 @@ beim allerersten Start erscheint er bewusst nicht.
 
 ## 6. Fachlogik – wo was hingehört
 
-- **Berechnungen immer in `calc.js`** (rein, testbar, ohne DOM/DB-Zugriff):
+- **Berechnungen immer in `calc*.js`** (rein, testbar, ohne DOM/DB-Zugriff; geprüft in
+  `tests.html`). Aufgeteilt nach Thema wie beim Store: `calc.js` legt `window.Calc` an,
+  `calc.zeugnis.js` / `calc.mitarbeit.js` / `calc.tracker.js` hängen sich per
+  `Object.assign(global.Calc, …)` an. Ob eine Kategorie als Note zählt bzw. eine
+  Mitarbeits-Kategorie ist, beantworten `Calc.istNotenKategorie` /
+  `Calc.istMitarbeitsKategorie` – die Bedingung nicht in Views nachbauen:
   Noten-Parsing (`2+` → 1,7), gewichtete Gesamtnote (Kategorie → Art-Gruppe →
   Gesamt, fehlende Gruppen zählen 100 %), Mitarbeits-Auswertung, Heatmap-Farbe.
 - **Zeugnisskala:** `Calc.zeugnisnote` rundet auf ganze Noten plus die einzige zulässige
@@ -176,8 +184,6 @@ beim allerersten Start erscheint er bewusst nicht.
   CSV-Export: Epochalnote je Quartal (Drittel) → sonstige Leistungen (Ø der gerundeten
   Epochalnoten, Drittel) → schriftliche Leistungen (Drittel) → Zeugnisnote (Zeugnisskala).
   Keine dieser Rechnungen in einer View nachbauen.
-  `Calc.zeugnisErgebnis(res)` ist die ältere, quartalsbezogene Variante – sie wird von der
-  Notenübersicht nicht mehr benutzt.
 - **Kategorien** tragen `anzeige: "note" | "fehlendeHA"`. `fehlendeHA` heißt: die Spalte
   zeigt die Anzahl der `keinehausaufgabe`-Ereignisse und die Kategorie fällt in
   `Calc.berechneSchueler` aus der Gewichtung (Feld `zaehltInNote` je Kategorie-Ergebnis).
@@ -369,9 +375,9 @@ beim allerersten Start erscheint er bewusst nicht.
   ob eine Klasse Schulnoten (1–6, niedriger = besser) oder MSS-Punkte
   (0–15, ganzzahlig, höher = besser) verwendet. Die betroffenen `Calc`-
   Funktionen (`parseNote`, `clampNote`, `noteFarbe`, `zeugnisnote`,
-  `formatZeugnisnote`, `zeugnisErgebnis`, `jahresnote`, `tendenznote`) nehmen dafür einen
+  `formatZeugnisnote`, `jahresnote`, `tendenznote`) nehmen dafür einen
   optionalen `mss`-Parameter (Default `false`); Aufrufer reichen ihn aus dem
-  `klasse`-Objekt durch. `formatNote`/`berechneSchueler`/`rundeGesamt` bleiben
+  `klasse`-Objekt durch. `formatNote`/`berechneSchueler` bleiben
   skalenunabhängig (reine Mittelwertbildung). Der Mitarbeits-Tracker
   (Stundennoten-Modell, Notenschwellen) bleibt bewusst unverändert auf der
   1–6-Skala – er ist eine interne Vorschlags-Heuristik, keine gespeicherte
@@ -464,8 +470,8 @@ folgt für jede Aufgabe:
   ergänzen.
 - **Fehlendes `UI.esc()`** bei Nutzereingaben im HTML-String.
 - **`render()` nach Mutation vergessen** → UI zeigt alten Stand.
-- Änderungen an `calc.js` können weitreichende Folgen haben (Gesamtnote!) –
-  Berechnung im Schüler-Detail / Besprechungsmodus gegenprüfen.
+- Änderungen an `calc*.js` können weitreichende Folgen haben (Gesamtnote!) –
+  `tests.html` ausführen und Schüler-Detail / Besprechungsmodus gegenprüfen.
 - **Note ohne Spalte angelegt:** Noten ohne `leistungId` tauchen in der Notenübersicht
   nicht auf. Immer über `Store.Noten.setzeZelle` bzw. `Store.leistungFuer` gehen.
 - **Quartal-Tagging vergessen:** Neue Datensätze (Ereignisse, Stunden) müssen `quartal`
