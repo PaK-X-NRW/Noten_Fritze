@@ -57,12 +57,16 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/calc.tracker.js` | `Calc` | Heatmap-Verfall/-Farbe, Stundenplan (`trackerSession`) |
 | `js/csv.js` | `CSV` | CSV-Export/Import (UTF-8 mit BOM) |
 | `js/ui.js` | `UI` | UI-Bausteine: Modal, Toast, Formfelder, `esc`, `$`/`$all` |
-| `js/views.core.js` | `Views` | Views-Kern: State, Navigation (`go`), Render-Schleife (`render`) |
-| `js/views.home-klasse.js` | `Views` | Home (Klassenübersicht) + Klassenansicht mit Tabs |
-| `js/views.tracker.js` | `Views` | Mitarbeits-Tracker (Stunden, Kacheln, Modi, Heatmap, Restzeit) |
+| `js/views.core.js` | `Views` | Views-Kern: State, Navigation (`go`), Render-Schleife (`render`), Zeitraum-Reiter |
+| `js/views.einstellungen.js` | `Views` | Einstellungen inkl. Stundenplan, Schwellen-Felder (`schwellenFelderHTML`) |
 | `js/views.besprechung.js` | `Views` | Besprechungsmodus + Noten-Aufschlüsselung (`breakdownHTML`) |
-| `js/views.einstellungen.js` | `Views` | Einstellungen inkl. Stundenplan |
-| `js/views.dialoge.js` | `Views` | Modale Dialoge (Klasse, Schüler, Kategorie, Noten, Sitzplatz, Importe) |
+| `js/views.home-klasse.js` | `Views` | Home (Klassenübersicht) + Klassenansicht mit Tabs Schüler/Kategorien |
+| `js/views.noten.js` | `Views` | Reiter Noten: Spaltenmodell, Tabelle, Dialoge Spalte + Schüler-Detail |
+| `js/views.noten.eingabe.js` | `Views` | Inline-Eingabe, Nummernpad, Spalten ziehen (`mountNotenTabelle`) |
+| `js/views.sitzplan.js` | `Views` | Reiter Sitzplan + Dialoge (Platz belegen, Räume) |
+| `js/views.mitarbeit.js` | `Views` | Reiter Mitarbeit + Dialoge (Schwellen, Herleitung, Quartal abschließen) |
+| `js/views.tracker.js` | `Views` | Mitarbeits-Tracker (Stunden, Kacheln, Modi, Heatmap, Restzeit, Tippen, Rückgängig) |
+| `js/views.dialoge.js` | `Views` | Allgemeine Dialoge (Klasse, Anteile, Schüler, Kategorie, Importe) |
 | `js/views.js` | `Views` | Aktions-Dispatcher: Action-Map + zentrale Delegation |
 | `js/app.js` | – | Bootstrap (DB öffnen, Demo-Daten, erster Render, SW-Registrierung) |
 
@@ -77,7 +81,12 @@ Wichtige Muster:
   per `const { state, go, render } = global.Views;` am Dateianfang.
   `views.js` (Dispatcher) lädt **zuletzt** und destrukturiert alles, was die
   Action-Map braucht – aufgerufen wird erst zur Laufzeit per Klick.
-  `render()` löst die Views über die Registry auf (`api.ViewHome()`).
+  `render()` löst die Views über die Registry auf (`api.ViewHome()`), ebenso
+  `ViewKlasse` die Reiter (`api.TabNoten(k)` …), weil deren Module später laden.
+  Eine Datei je Bereich der App: Reiter, Eingabe-Logik und Dialoge eines
+  Bereichs liegen zusammen; `views.dialoge.js` nur für allgemeine Dialoge.
+  Wer beim Laden destrukturiert, braucht ein **früher** geladenes Modul
+  (Reihenfolge in `index.html`, `tests.html` und `service-worker.js` gleich halten).
 - Der **Store** ist nach demselben Muster aufgeteilt: `store.js` legt
   `window.Store` an (Ereignistypen, Datums-/Quartals-Helfer, Repositories), die
   Module `store.*.js` hängen sich per `Object.assign(global.Store, { ... })` an
@@ -230,12 +239,12 @@ beim allerersten Start erscheint er bewusst nicht.
   Das Quartal einer Note kommt aus ihrer Spalte, **nicht** aus `settings.aktuellesQuartal` –
   sonst wandern Noten beim Erfassen ins falsche Halbjahr.
 - **Notentabelle = Spaltenmodell:** Kopf und Datenzellen entstehen aus einer Liste von
-  Spalten-Deskriptoren (`halbjahrSpalten` in `views.home-klasse.js`), jeder mit `id`,
+  Spalten-Deskriptoren (`halbjahrSpalten` in `views.noten.js`), jeder mit `id`,
   Farbgruppe (`grp`) und `zelle(sp, ctx)`. Neue Spalten dort ergänzen, nicht im
   HTML-String. Reihenfolge: schriftliche Leistungen · je Quartal (sonstige Leistungen
   **ohne** die der Mitarbeits-Kategorien, HA-Zählung, Epochalnote) · Schriftlich ·
   Sonstige · Zeugnisnote (+ Jahr im 2. HJ, aber **nicht** in MSS-Klassen).
-- **Inline-Eingabe:** `notenEingabe` in `views.home-klasse.js` macht die Zelle zum
+- **Inline-Eingabe:** `notenEingabe` in `views.noten.eingabe.js` macht die Zelle zum
   Eingabefeld (Enter = nächste Zeile, Tab = nächste Spalte, Esc = abbrechen).
   Dazu öffnet sich das **Nummernpad** (`.notenpad`, im `body` mit
   `position: fixed`, damit der Tabellen-Scroll es nicht abschneidet; Werte:
@@ -304,7 +313,7 @@ beim allerersten Start erscheint er bewusst nicht.
   Moduswechsel (`render()`) Zähler und Undo-Stack verloren. Der Undo-Stack wird beim
   Aufbau aus den Kachel-Ereignissen der Stunde gefüllt (gilt also auch nach dem
   Fortsetzen). Langes Drücken/Rechtsklick auf `#undo-btn` (`undoLangDruck` in
-  views.tracker.js) öffnet `undoListeDialog` (views.js) zum gezielten Entfernen einzelner
+  views.tracker.js) öffnet `undoListeDialog` (ebenfalls views.tracker.js) zum gezielten Entfernen einzelner
   Einträge; danach wird der Klick unterdrückt, sonst landet er auf iOS in der Liste. Bei breiten Sitzplänen
   staffeln die Grid-Klassen `kompakt` (≥7 Spalten) / `mini` (≥9 Spalten) die
   Kachelgröße (styles.css).

@@ -4,7 +4,7 @@
 (function (global) {
   "use strict";
 
-  const { state, halbjahrFilter, halbjahrTabsHTML } = global.Views;
+  const { state, render, halbjahrFilter, halbjahrTabsHTML } = global.Views;
 
   // =========================================================================
   //  BESPRECHUNGSMODUS – ein Schüler nach dem anderen
@@ -107,5 +107,14 @@
       "</div>";
   }
 
-  Object.assign(global.Views, { ViewBesprechung, breakdownHTML });
+  // Vor/Zurück zur nächsten Person in der Besprechung
+  async function besprechungStep(dir) {
+    const schueler = await Store.Schueler.byKlasse(state.klasseId);
+    const idx = schueler.findIndex((s) => s.id === state.selectedSchuelerId);
+    const j = idx + dir;
+    if (j < 0 || j >= schueler.length) return;
+    state.selectedSchuelerId = schueler[j].id; render();
+  }
+
+  Object.assign(global.Views, { ViewBesprechung, breakdownHTML, besprechungStep });
 })(window);

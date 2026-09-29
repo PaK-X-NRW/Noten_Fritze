@@ -76,11 +76,14 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `csv.js` – CSV-Export/Import
   - `ui.js` – UI-Bausteine (Modal, Toast, Formfelder)
   - `views.core.js` – Views-Kern (State, Routing, Render-Schleife)
-  - `views.home-klasse.js` – Home + Klassenansicht mit Tabs
-  - `views.tracker.js` – Mitarbeits-Tracker
-  - `views.besprechung.js` – Besprechungsmodus
   - `views.einstellungen.js` – Einstellungen inkl. Stundenplan
-  - `views.dialoge.js` – modale Dialoge
+  - `views.besprechung.js` – Besprechungsmodus
+  - `views.home-klasse.js` – Home + Klassenansicht (Reiter Schüler, Kategorien)
+  - `views.noten.js` / `views.noten.eingabe.js` – Reiter Noten (Tabelle, Dialoge / Eingabe, Nummernpad)
+  - `views.sitzplan.js` – Reiter Sitzplan
+  - `views.mitarbeit.js` – Reiter Mitarbeit inkl. Quartalsabschluss
+  - `views.tracker.js` – Mitarbeits-Tracker
+  - `views.dialoge.js` – allgemeine Dialoge
   - `views.js` – Aktions-Dispatcher (Action-Map, Delegation)
   - `app.js` – Bootstrap
 - **PWA:** `manifest.webmanifest` + `service-worker.js` (App-Shell-Cache) für
@@ -534,11 +537,15 @@ Noten_Fritze/
    ├─ csv.js                CSV-Export/Import
    ├─ ui.js                 Modal/Toast/Formfelder
    ├─ views.core.js         Views-Kern (State, Routing, Render)
-   ├─ views.home-klasse.js  Home + Klassenansicht mit Tabs
-   ├─ views.tracker.js      Mitarbeits-Tracker
-   ├─ views.besprechung.js  Besprechungsmodus
    ├─ views.einstellungen.js Einstellungen inkl. Stundenplan
-   ├─ views.dialoge.js      modale Dialoge
+   ├─ views.besprechung.js  Besprechungsmodus
+   ├─ views.home-klasse.js  Home + Klassenansicht (Schüler, Kategorien)
+   ├─ views.noten.js        Reiter Noten (Tabelle, Spalten-/Schüler-Dialog)
+   ├─ views.noten.eingabe.js Eingabe, Nummernpad, Spalten ziehen
+   ├─ views.sitzplan.js     Reiter Sitzplan
+   ├─ views.mitarbeit.js    Reiter Mitarbeit, Quartal abschließen
+   ├─ views.tracker.js      Mitarbeits-Tracker
+   ├─ views.dialoge.js      allgemeine Dialoge
    ├─ views.js              Aktions-Dispatcher (Action-Map)
    └─ app.js                Bootstrap
 ```

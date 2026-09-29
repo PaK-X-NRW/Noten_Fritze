@@ -2,6 +2,7 @@
    views.js – Aktions-Dispatcher: zentrale Delegation über [data-action].
    Lädt nach den View-Modulen (views.core.js, views.*.js) und holt sich deren
    Funktionen aus window.Views; aufgerufen werden die Actions erst zur Laufzeit.
+   Die Action-Map verteilt nur – Logik gehört in das Modul des Bereichs.
    ========================================================================= */
 (function (global) {
   "use strict";
@@ -13,7 +14,8 @@
     importStudentsDialog, backupImportDialog,
     schwellenDialog, mitarbeitHerleitungDialog, quartalAbschliessenDialog, klassenImportDialog,
     trackerStartDialog, trackerModusToggle, trackerModusEnde, trackerModusTap,
-    trackerStundeBeenden, trackerVerlassen, trackerHeatAddieren, trackerRaumDialog, renderSeatCounts
+    trackerStundeBeenden, trackerVerlassen, trackerRaumDialog, trackerTap, trackerUndo,
+    besprechungStep
   } = global.Views;
 
   // =========================================================================
@@ -86,7 +88,7 @@
     },
 
     // Sitzplan
-    "seat-assign": (el) => seatAssignDialog2(el.getAttribute("data-seat")),
+    "seat-assign": async (el) => seatAssignDialog(await Store.Klassen.get(state.klasseId), el.getAttribute("data-seat")),
     "sitzplan-waehlen": async (el) => { await Store.Sitzplan.setAktiv(state.klasseId, el.getAttribute("data-id")); render(); },
     "sitzplan-neu": async () => sitzplanNeuDialog(await Store.Klassen.get(state.klasseId)),
     "sitzplan-umbenennen": async () => sitzplanUmbenennenDialog(await Store.Klassen.get(state.klasseId)),
@@ -246,113 +248,6 @@
     else if (status === "download") UI.toast(label + " exportiert");
   }
 
-  // seat-assign braucht die aktuelle Klasse
-  async function seatAssignDialog2(seatId) {
-    const k = await Store.Klassen.get(state.klasseId);
-    seatAssignDialog(k, seatId);
-  }
-
-  async function besprechungStep(dir) {
-    const schueler = await Store.Schueler.byKlasse(state.klasseId);
-    const idx = schueler.findIndex((s) => s.id === state.selectedSchuelerId);
-    const j = idx + dir;
-    if (j < 0 || j >= schueler.length) return;
-    state.selectedSchuelerId = schueler[j].id; render();
-  }
-
-  // ---- Tracker: Tap & Undo -------------------------------------------------
-  async function trackerTap(el) {
-    const sid = el.getAttribute("data-sid");
-    if (state.trackerModus) return; // im Modus zählt der Tap auf die ganze Kachel
-    if (state.tracker && state.tracker.abwesend && state.tracker.abwesend[sid]) return; // abwesend: keine Ereignisse
-    const typ = el.getAttribute("data-type");
-    const punkte = state.settings.mitarbeitPunkte[typ];
-    const typDef = Store.EVENT_TYPE_MAP[typ];
-    const heatDelta = typDef && typDef.heatSetting
-      ? Math.max(0, parseInt(state.settings[typDef.heatSetting], 10) || 0)
-      : 0;
-    const t = state.tracker;
-    const e = Store.neuesEreignis(state.klasseId, sid, typ, punkte, t && t.stunde ? t.stunde.id : null,
-      state.settings.aktuellesQuartal);
-    e.heatDelta = heatDelta;
-    await Store.Ereignisse.save(e);
-
-    if (heatDelta > 0) await trackerHeatAddieren(sid, heatDelta);
-    t.counts[sid] = (t.counts[sid] || 0) + 1;
-    (t.typeCounts[sid] = t.typeCounts[sid] || {});
-    t.typeCounts[sid][typ] = (t.typeCounts[sid][typ] || 0) + 1;
-    t.undoStack.push(e);
-
-    // Sofortiges Feedback direkt am getippten Button + Kachel aktualisieren
-    el.classList.remove("pulse"); void el.offsetWidth; el.classList.add("pulse");
-    renderSeatCounts(sid);
-
-    const undoBtn = document.getElementById("undo-btn");
-    if (undoBtn) undoBtn.disabled = false;
-
-    const name = (t.names && t.names[sid]) ? t.names[sid] + " · " : "";
-    UI.toast(name + Store.EVENT_TYPE_MAP[typ].label, { undo: () => undoEvent(e) });
-  }
-
-  async function trackerUndo() {
-    const t = state.tracker;
-    if (!t.undoStack.length) return;
-    const e = t.undoStack.pop();
-    await undoEvent(e, true);
-  }
-  async function undoEvent(e, fromStack) {
-    await Store.Ereignisse.remove(e.id);
-    const t = state.tracker;
-    if (!fromStack) { const i = t.undoStack.findIndex((x) => x.id === e.id); if (i >= 0) t.undoStack.splice(i, 1); }
-    t.counts[e.schuelerId] = Math.max(0, (t.counts[e.schuelerId] || 1) - 1);
-    if (t.typeCounts[e.schuelerId]) {
-      t.typeCounts[e.schuelerId][e.typ] = Math.max(0, (t.typeCounts[e.schuelerId][e.typ] || 1) - 1);
-    }
-    if (e.heatDelta > 0) await trackerHeatAddieren(e.schuelerId, -e.heatDelta);
-
-    renderSeatCounts(e.schuelerId);
-
-    const undoBtn = document.getElementById("undo-btn");
-    if (undoBtn) undoBtn.disabled = t.undoStack.length === 0;
-    UI.toast("Rückgängig gemacht");
-  }
-
-  // Liste aller Meldungen/Störungen der laufenden Stunde (neueste oben), jede
-  // einzeln entfernbar. Geöffnet über langes Drücken bzw. Rechtsklick auf
-  // „Rückgängig" (views.tracker.js); der kurze Tipp nimmt weiter den letzten zurück.
-  function undoListeDialog() {
-    const t = state.tracker; if (!t) return;
-    const zeilenHTML = () => {
-      if (!t.undoStack.length) return '<p class="muted">Keine Einträge in dieser Stunde.</p>';
-      return t.undoStack.slice().reverse().map((e) => {
-        const typ = Store.EVENT_TYPE_MAP[e.typ] || { label: e.typ, icon: "" };
-        const zeit = new Date(e.timestamp).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
-        return '<div class="undo-zeile">' +
-          '<span class="muted">' + zeit + "</span>" +
-          '<span class="nm">' + UI.esc((t.names && t.names[e.schuelerId]) || "?") + "</span>" +
-          '<span><span style="color:' + typ.farbe + '">' + UI.esc(typ.icon || "") + "</span> " + UI.esc(typ.label) + "</span>" +
-          '<button class="iconbtn" data-weg="' + UI.esc(e.id) + '" title="Eintrag entfernen">✕</button>' +
-        "</div>";
-      }).join("");
-    };
-    const m = UI.modal({
-      title: "Einträge dieser Stunde",
-      bodyHTML: '<div class="undo-liste"></div>',
-      buttons: [{ label: "Fertig" }]
-    });
-    const liste = m.box.querySelector(".undo-liste");
-    const zeichnen = () => {
-      liste.innerHTML = zeilenHTML();
-      UI.$all("[data-weg]", liste).forEach((b) => b.addEventListener("click", async () => {
-        const e = t.undoStack.find((x) => x.id === b.getAttribute("data-weg"));
-        if (!e) return;
-        b.disabled = true;
-        await undoEvent(e);
-        zeichnen();
-      }));
-    };
-    zeichnen();
-  }
 
   // ---- Delegation ----------------------------------------------------------
   function initDelegation() {
@@ -374,5 +269,5 @@
     });
   }
 
-  Object.assign(global.Views, { initDelegation, undoListeDialog });
+  Object.assign(global.Views, { initDelegation });
 })(window);

@@ -146,7 +146,7 @@
       clearTimeout(timer);
       if (ausgeloest) return;
       ausgeloest = true;
-      global.Views.undoListeDialog();
+      undoListeDialog();
       if (fingerLiegt) klicksSchluckenBisLoslassen();
     };
     btn.addEventListener("pointerdown", (ev) => {
@@ -655,8 +655,102 @@
     UI.toast("Stunde beendet");
   }
 
+  // ---- Tracker: Tap & Undo -------------------------------------------------
+  async function trackerTap(el) {
+    const sid = el.getAttribute("data-sid");
+    if (state.trackerModus) return; // im Modus zählt der Tap auf die ganze Kachel
+    if (state.tracker && state.tracker.abwesend && state.tracker.abwesend[sid]) return; // abwesend: keine Ereignisse
+    const typ = el.getAttribute("data-type");
+    const punkte = state.settings.mitarbeitPunkte[typ];
+    const typDef = Store.EVENT_TYPE_MAP[typ];
+    const heatDelta = typDef && typDef.heatSetting
+      ? Math.max(0, parseInt(state.settings[typDef.heatSetting], 10) || 0)
+      : 0;
+    const t = state.tracker;
+    const e = Store.neuesEreignis(state.klasseId, sid, typ, punkte, t && t.stunde ? t.stunde.id : null,
+      state.settings.aktuellesQuartal);
+    e.heatDelta = heatDelta;
+    await Store.Ereignisse.save(e);
+
+    if (heatDelta > 0) await trackerHeatAddieren(sid, heatDelta);
+    t.counts[sid] = (t.counts[sid] || 0) + 1;
+    (t.typeCounts[sid] = t.typeCounts[sid] || {});
+    t.typeCounts[sid][typ] = (t.typeCounts[sid][typ] || 0) + 1;
+    t.undoStack.push(e);
+
+    // Sofortiges Feedback direkt am getippten Button + Kachel aktualisieren
+    el.classList.remove("pulse"); void el.offsetWidth; el.classList.add("pulse");
+    renderSeatCounts(sid);
+
+    const undoBtn = document.getElementById("undo-btn");
+    if (undoBtn) undoBtn.disabled = false;
+
+    const name = (t.names && t.names[sid]) ? t.names[sid] + " · " : "";
+    UI.toast(name + Store.EVENT_TYPE_MAP[typ].label, { undo: () => undoEvent(e) });
+  }
+
+  async function trackerUndo() {
+    const t = state.tracker;
+    if (!t.undoStack.length) return;
+    const e = t.undoStack.pop();
+    await undoEvent(e, true);
+  }
+  async function undoEvent(e, fromStack) {
+    await Store.Ereignisse.remove(e.id);
+    const t = state.tracker;
+    if (!fromStack) { const i = t.undoStack.findIndex((x) => x.id === e.id); if (i >= 0) t.undoStack.splice(i, 1); }
+    t.counts[e.schuelerId] = Math.max(0, (t.counts[e.schuelerId] || 1) - 1);
+    if (t.typeCounts[e.schuelerId]) {
+      t.typeCounts[e.schuelerId][e.typ] = Math.max(0, (t.typeCounts[e.schuelerId][e.typ] || 1) - 1);
+    }
+    if (e.heatDelta > 0) await trackerHeatAddieren(e.schuelerId, -e.heatDelta);
+
+    renderSeatCounts(e.schuelerId);
+
+    const undoBtn = document.getElementById("undo-btn");
+    if (undoBtn) undoBtn.disabled = t.undoStack.length === 0;
+    UI.toast("Rückgängig gemacht");
+  }
+
+  // Liste aller Meldungen/Störungen der laufenden Stunde (neueste oben), jede
+  // einzeln entfernbar. Geöffnet über langes Drücken bzw. Rechtsklick auf
+  // „Rückgängig" (views.tracker.js); der kurze Tipp nimmt weiter den letzten zurück.
+  function undoListeDialog() {
+    const t = state.tracker; if (!t) return;
+    const zeilenHTML = () => {
+      if (!t.undoStack.length) return '<p class="muted">Keine Einträge in dieser Stunde.</p>';
+      return t.undoStack.slice().reverse().map((e) => {
+        const typ = Store.EVENT_TYPE_MAP[e.typ] || { label: e.typ, icon: "" };
+        const zeit = new Date(e.timestamp).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+        return '<div class="undo-zeile">' +
+          '<span class="muted">' + zeit + "</span>" +
+          '<span class="nm">' + UI.esc((t.names && t.names[e.schuelerId]) || "?") + "</span>" +
+          '<span><span style="color:' + typ.farbe + '">' + UI.esc(typ.icon || "") + "</span> " + UI.esc(typ.label) + "</span>" +
+          '<button class="iconbtn" data-weg="' + UI.esc(e.id) + '" title="Eintrag entfernen">✕</button>' +
+        "</div>";
+      }).join("");
+    };
+    const m = UI.modal({
+      title: "Einträge dieser Stunde",
+      bodyHTML: '<div class="undo-liste"></div>',
+      buttons: [{ label: "Fertig" }]
+    });
+    const liste = m.box.querySelector(".undo-liste");
+    const zeichnen = () => {
+      liste.innerHTML = zeilenHTML();
+      UI.$all("[data-weg]", liste).forEach((b) => b.addEventListener("click", async () => {
+        const e = t.undoStack.find((x) => x.id === b.getAttribute("data-weg"));
+        if (!e) return;
+        b.disabled = true;
+        await undoEvent(e);
+        zeichnen();
+      }));
+    };
+    zeichnen();
+  }
+
   Object.assign(global.Views, {
-    ViewTracker, trackerStartDialog, trackerHeatEditDialog, trackerAbwesendToggle,
+    ViewTracker, trackerTap, trackerUndo, undoListeDialog, trackerStartDialog, trackerHeatEditDialog, trackerAbwesendToggle,
     trackerKeineHAToggle, trackerVerweigerungToggle, trackerModusToggle, trackerModusEnde, trackerModusTap,
     trackerStundeBeenden, trackerVerlassen, trackerHeatAddieren, trackerRaumDialog,
     stopHeatTimer, renderSeatCounts, syncModusKlasse
