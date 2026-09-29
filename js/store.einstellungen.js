@@ -57,7 +57,10 @@
 
   const DEFAULT_SETTINGS = {
     key: "app",
-    schemaVersion: 8,
+    // Datenform (siehe store.migrationen.js). Neu angelegte Einstellungen
+    // bekommen die aktuelle SCHEMA_VERSION (getSettings); dieser Wert gilt nur
+    // für sehr alte Datensätze ohne das Feld – für sie laufen alle Migrationen.
+    schemaVersion: 1,
     // Aktuelles Quartal (1–4) – neue Noten/Ereignisse/Stunden werden damit getaggt
     aktuellesQuartal: 1,
     // Vergessene Hausaufgaben werten:
@@ -107,7 +110,9 @@
     let s = await DB.get("einstellungen", "app");
     const quartalFehlt = !s || !s.aktuellesQuartal;
     if (!s) {
+      // Erster Start bzw. leere Datenbank: nichts zu migrieren
       s = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+      s.schemaVersion = global.Store.SCHEMA_VERSION;
       await DB.put("einstellungen", s);
     }
     // Fehlende Felder aus Defaults ergänzen (Vorwärtskompatibilität)

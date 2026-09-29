@@ -23,6 +23,28 @@
   }
   const now = () => Date.now();
 
+  // Löscht einen Datensatz samt abhängiger Daten in einer Transaktion.
+  //   ueberIndex: [[store, index, wert], …] – alle Treffer werden gelöscht
+  //   loeschen:   [[store, schlüssel], …]   – einzelne Datensätze
+  //   schreiben:  [[store, datensatz], …]   – angepasste Datensätze (z. B. Sitzplan)
+  // Die Schlüssel werden vorher gelesen; geschrieben wird alles oder nichts.
+  async function kaskade(ueberIndex, loeschen, schreiben) {
+    loeschen = loeschen || []; schreiben = schreiben || [];
+    const keys = await Promise.all(ueberIndex.map((x) => DB.keysByIndex(x[0], x[1], x[2])));
+    const stores = [];
+    ueberIndex.concat(loeschen, schreiben).forEach((x) => { if (stores.indexOf(x[0]) === -1) stores.push(x[0]); });
+    await DB.atomar(stores, (os) => {
+      ueberIndex.forEach((x, i) => keys[i].forEach((k) => os(x[0]).delete(k)));
+      loeschen.forEach((x) => os(x[0]).delete(x[1]));
+      schreiben.forEach((x) => os(x[0]).put(x[1]));
+    });
+  }
+  // Abhängige Datensätze einer Klasse (für Löschen und Klassen-Import „ersetzen“)
+  function klassenAbhaengige(klasseId) {
+    return ["schueler", "kategorien", "leistungen", "noten", "ereignisse", "abwesenheiten", "stunden"]
+      .map((store) => [store, "klasseId", klasseId]);
+  }
+
   // Einstellungen und Standardwerte liegen in store.einstellungen.js, das erst
   // nach dieser Datei geladen wird. Beide werden ausschließlich zur Laufzeit
   // gebraucht, deshalb hier über den Namespace holen statt beim Laden.
@@ -128,18 +150,8 @@
       if (k) { k.lastOpenedAt = now(); await DB.put("klassen", k); }
       return k;
     },
-    async remove(id) {
-      // Kaskadierendes Löschen aller abhängigen Daten
-      await DB.delByIndex("schueler", "klasseId", id);
-      await DB.delByIndex("kategorien", "klasseId", id);
-      await DB.delByIndex("leistungen", "klasseId", id);
-      await DB.delByIndex("noten", "klasseId", id);
-      await DB.delByIndex("ereignisse", "klasseId", id);
-      await DB.delByIndex("abwesenheiten", "klasseId", id);
-      await DB.delByIndex("stunden", "klasseId", id);
-      await DB.del("sitzplaene", id);
-      await DB.del("klassen", id);
-    }
+    // Kaskadierendes Löschen aller abhängigen Daten (alles oder nichts)
+    remove: (id) => kaskade(klassenAbhaengige(id), [["sitzplaene", id], ["klassen", id]])
   };
 
   // ---- Quartalsabschluss ---------------------------------------------------
@@ -220,19 +232,19 @@
       return DB.bulkPut("schueler", list);
     },
     async remove(id) {
-      await DB.delByIndex("noten", "schuelerId", id);
-      await DB.delByIndex("ereignisse", "schuelerId", id);
-      await DB.delByIndex("abwesenheiten", "schuelerId", id);
       // Sitzplatz-Zuweisung in allen Sitzplänen der Klasse entfernen
+      const schreiben = [];
       const s = await DB.get("schueler", id);
       if (s) {
         const rec = sitzplaeneNormalisieren(await DB.get("sitzplaene", s.klasseId));
         if (rec) {
           rec.plaene.forEach((p) => p.seats.forEach((seat) => { if (seat.schuelerId === id) seat.schuelerId = null; }));
-          await DB.put("sitzplaene", rec);
+          schreiben.push(["sitzplaene", rec]);
         }
       }
-      await DB.del("schueler", id);
+      await kaskade([
+        ["noten", "schuelerId", id], ["ereignisse", "schuelerId", id], ["abwesenheiten", "schuelerId", id]
+      ], [["schueler", id]], schreiben);
     },
     async reorder(list) {
       list.forEach((s, i) => { s.sortIndex = i; });
@@ -266,11 +278,7 @@
       .then((list) => list.sort((a, b) => a.sortIndex - b.sortIndex)),
     get: (id) => DB.get("kategorien", id),
     save: (k) => DB.put("kategorien", k),
-    async remove(id) {
-      await DB.delByIndex("leistungen", "kategorieId", id);
-      await DB.delByIndex("noten", "kategorieId", id);
-      await DB.del("kategorien", id);
-    }
+    remove: (id) => kaskade([["leistungen", "kategorieId", id], ["noten", "kategorieId", id]], [["kategorien", id]])
   };
 
   // ---- Leistungen (Spalten der Notenübersicht) -----------------------------
@@ -301,10 +309,7 @@
           : ((a.datum || "") < (b.datum || "") ? -1 : 1))),
     get: (id) => DB.get("leistungen", id),
     save: (l) => DB.put("leistungen", l),
-    async remove(id) {
-      await DB.delByIndex("noten", "leistungId", id);
-      await DB.del("leistungen", id);
-    }
+    remove: (id) => kaskade([["noten", "leistungId", id]], [["leistungen", id]])
   };
 
   // Leitet für Noten ohne leistungId die Spalten ab (Migration und Import
@@ -623,7 +628,7 @@
   // (store.einstellungen.js, store.migrationen.js, store.transfer.js,
   // store.demo.js) – siehe Kopfkommentar.
   global.Store = {
-    uid, now,
+    uid, now, klassenAbhaengige, kaskade,
     EVENT_TYPES, EVENT_TYPE_MAP, KACHEL_EVENT_TYPES,
     halbjahrAusDatum, quartalAusDatum, halbjahrAusQuartal, datumLokal,
     Klassen, neueKlasse,

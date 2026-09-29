@@ -47,6 +47,14 @@
   }
   function hideToast() { document.getElementById("toast-root").innerHTML = ""; }
 
+  // Unerwarteter Fehler (z. B. Speicher voll, beschädigte Daten): sichtbar
+  // melden statt still scheitern. Details stehen in der Browser-Konsole.
+  function fehlerMelden(e) {
+    console.error(e);
+    const text = e && e.message ? e.message : String(e || "unbekannter Fehler");
+    toast("Da ist etwas schiefgegangen: " + text, { duration: 8000 });
+  }
+
   // ---- Modal (Bottom-Sheet) ------------------------------------------------
   // Modale lassen sich stapeln (z. B. Sicherheitsabfrage über einem Dialog):
   // close() entfernt nur das eigene Modal, das darunterliegende bleibt offen.
@@ -166,7 +174,7 @@
 
   global.UI = {
     esc, fromHTML, $, $all,
-    toast, hideToast, modal, confirmDialog,
+    toast, hideToast, fehlerMelden, modal, confirmDialog,
     field, formValues,
     relZeit, datumKurz, initialen, vollerName
   };

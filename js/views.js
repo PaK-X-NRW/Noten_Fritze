@@ -360,7 +360,12 @@
       const el = ev.target.closest("[data-action]");
       if (!el) return;
       const action = el.getAttribute("data-action");
-      if (ACTIONS[action]) { ev.preventDefault(); ACTIONS[action](el, ev); }
+      if (!ACTIONS[action]) return;
+      ev.preventDefault();
+      // Fehler einer Aktion (auch asynchron) als Toast melden
+      try {
+        Promise.resolve(ACTIONS[action](el, ev)).catch(UI.fehlerMelden);
+      } catch (e) { UI.fehlerMelden(e); }
     });
     // Esc beendet einen aktiven Tracker-Modus (Tastatur am iPad/Desktop)
     document.addEventListener("keydown", (ev) => {

@@ -4,15 +4,36 @@
    alle Klassen als JSON) und den Export/Import einer einzelnen Klasse
    (exportKlasse/importKlasse, z. B. zur Übergabe an Kolleg/innen).
    Beide leiten bei Dateien aus älteren Versionen die Spalten (Leistungen)
-   aus den Noten ab.
+   aus den Noten ab, prüfen die Datei vor dem Schreiben und schreiben in
+   einer einzigen Transaktion (alles oder nichts).
    ========================================================================= */
 (function (global) {
   "use strict";
 
   const {
-    uid, Klassen, getSettings, saveSettings,
-    normalisiereSchuelerHeat, leistungenAusNoten, sitzplaeneNormalisieren
+    uid, now, Klassen, getSettings, klassenAbhaengige, kaskade,
+    normalisiereSchuelerHeat, leistungenAusNoten, sitzplaeneNormalisieren,
+    SCHEMA_VERSION, migrateSchema
   } = global.Store;
+
+  // Datensatz-Listen eines Backups und ihr Schlüsselfeld
+  const DATEN_STORES = {
+    klassen: "id", schueler: "id", kategorien: "id", leistungen: "id", noten: "id",
+    sitzplaene: "klasseId", ereignisse: "id", abwesenheiten: "id", stunden: "id"
+  };
+  // Prüft eine Liste aus einer Import-Datei, bevor irgendetwas geschrieben
+  // wird: fehlt sie, ist sie leer; ist sie kaputt, bricht der Import ab.
+  function pruefeListe(d, name, schluessel, was) {
+    const liste = d[name];
+    if (liste === undefined || liste === null) return [];
+    if (!Array.isArray(liste)) throw new Error(was + " ist beschädigt: „" + name + "“ ist keine Liste.");
+    liste.forEach((x) => {
+      if (!x || typeof x !== "object" || x[schluessel] === undefined || x[schluessel] === null) {
+        throw new Error(was + " ist beschädigt: „" + name + "“ enthält einen Eintrag ohne Kennung.");
+      }
+    });
+    return liste;
+  }
 
   // ---- Backup (Gesamt-Export/Import als JSON) ------------------------------
   async function exportAll() {
@@ -24,31 +45,51 @@
     ]);
     return {
       app: "noten-fritze", appVersion: APP_VERSION,
-      schemaVersion: DB.DB_VERSION, exportedAt: new Date().toISOString(),
+      // dbVersion = Struktur der Datenbank, schemaVersion = Form der Datensätze.
+      // (Ältere Backups trugen hier fälschlich die dbVersion; beim Import zählt
+      // deshalb die schemaVersion in den Einstellungen.)
+      dbVersion: DB.DB_VERSION, schemaVersion: SCHEMA_VERSION,
+      exportedAt: new Date().toISOString(),
       data: { klassen, schueler, kategorien, leistungen, noten, sitzplaene, ereignisse, abwesenheiten, stunden, settings }
     };
   }
+
+  // Spielt ein Backup ein. Ablauf: erst die ganze Datei prüfen, dann alles in
+  // EINER Transaktion schreiben (bei replace vorher leeren) – bricht etwas ab,
+  // bleibt der bisherige Datenstand vollständig erhalten. Danach werden die
+  // Daten sofort auf den aktuellen Stand migriert (ältere Backups).
   async function importAll(backup, { replace }) {
-    if (!backup || !backup.data) throw new Error("Ungültiges Backup-Format.");
-    if (replace) await DB.clearAll();
+    if (!backup || !backup.data || typeof backup.data !== "object") throw new Error("Ungültiges Backup-Format.");
     const d = backup.data;
-    await DB.bulkPut("klassen", d.klassen || []);
-    const settings = await getSettings();
-    await DB.bulkPut("schueler", (d.schueler || []).map((s) => normalisiereSchuelerHeat(s, settings)));
-    await DB.bulkPut("kategorien", d.kategorien || []);
-    // Backup aus einer älteren Version: Spalten aus den Noten ableiten
-    const noten = (d.noten || []).map((n) => Object.assign({}, n));
-    const leistungen = (d.leistungen || []).slice();
-    if (!leistungen.length && noten.some((n) => !n.leistungId)) {
-      leistungenAusNoten(noten).forEach((l) => leistungen.push(l));
+    const was = "Das Backup";
+    const daten = {};
+    Object.keys(DATEN_STORES).forEach((name) => { daten[name] = pruefeListe(d, name, DATEN_STORES[name], was); });
+    const backupSettings = d.settings && typeof d.settings === "object" ? d.settings : null;
+    // Datenform des Backups; fehlt sie, laufen alle Migrationen (sie sind wiederholbar).
+    const version = parseInt(backupSettings && backupSettings.schemaVersion, 10) || 1;
+    if (version > SCHEMA_VERSION) {
+      throw new Error("Dieses Backup stammt aus einer neueren Version von Noten-Fritze. " +
+        "Bitte zuerst die App aktualisieren (Seite neu laden) und dann erneut importieren.");
     }
-    await DB.bulkPut("leistungen", leistungen);
-    await DB.bulkPut("noten", noten);
-    await DB.bulkPut("sitzplaene", d.sitzplaene || []);
-    await DB.bulkPut("ereignisse", d.ereignisse || []);
-    await DB.bulkPut("abwesenheiten", d.abwesenheiten || []);
-    await DB.bulkPut("stunden", d.stunden || []);
-    if (d.settings) await saveSettings(d.settings);
+
+    const settingsAktuell = await getSettings();
+    daten.schueler = daten.schueler.map((s) => normalisiereSchuelerHeat(Object.assign({}, s), settingsAktuell));
+    // Backup aus einer älteren Version: Spalten aus den Noten ableiten
+    daten.noten = daten.noten.map((n) => Object.assign({}, n));
+    if (!daten.leistungen.length && daten.noten.some((n) => !n.leistungId)) {
+      daten.leistungen = leistungenAusNoten(daten.noten);
+    }
+    // Einstellungen aus dem Backup, sonst die bisherigen – jeweils mit der
+    // Datenform des Backups, damit die Migration danach weiß, wo sie anfängt.
+    const settings = Object.assign({}, backupSettings || settingsAktuell, { key: "app", schemaVersion: version });
+
+    const stores = Object.keys(DATEN_STORES).concat("einstellungen");
+    await DB.atomar(stores, (os) => {
+      if (replace) stores.forEach((name) => os(name).clear());
+      Object.keys(DATEN_STORES).forEach((name) => daten[name].forEach((x) => os(name).put(x)));
+      os("einstellungen").put(settings);
+    });
+    await migrateSchema();
   }
 
   // ---- Klassen-Export/-Import (einzelne Klasse als JSON) -------------------
@@ -76,6 +117,8 @@
   }
   // modus "ersetzen": vorhandene Klasse mit gleicher ID kaskadierend löschen,
   //   dann die Datensätze unverändert einfügen (ID unbekannt -> einfach importieren).
+  //   Beides passiert in einer Transaktion: Bricht der Import ab, bleibt die
+  //   vorhandene Klasse unverändert.
   // modus "kopie":   alle IDs neu vergeben und Referenzen ummappen,
   //   Name wird um „ (Kopie)" ergänzt.
   // Rückgabe: die importierte Klasse.
@@ -84,14 +127,16 @@
       throw new Error("Ungültiges Klassen-Export-Format.");
     }
     const d = payload.data;
+    const was = "Der Klassen-Export";
+    if (!d.klasse.id) throw new Error(was + " ist beschädigt: Die Klasse hat keine Kennung.");
     let klasse = d.klasse;
-    let schueler = d.schueler || [];
-    let kategorien = d.kategorien || [];
-    let leistungen = d.leistungen || [];
-    let noten = d.noten || [];
-    let ereignisse = d.ereignisse || [];
-    let stunden = d.stunden || [];
-    let abwesenheiten = d.abwesenheiten || [];
+    let schueler = pruefeListe(d, "schueler", "id", was);
+    let kategorien = pruefeListe(d, "kategorien", "id", was);
+    let leistungen = pruefeListe(d, "leistungen", "id", was);
+    let noten = pruefeListe(d, "noten", "id", was);
+    let ereignisse = pruefeListe(d, "ereignisse", "id", was);
+    let stunden = pruefeListe(d, "stunden", "id", was);
+    let abwesenheiten = pruefeListe(d, "abwesenheiten", "id", was);
     // Ältere Exporte enthalten nur einen Sitzplan – er wird zum Plan „Klassenraum".
     let sitzplan = sitzplaeneNormalisieren(d.sitzplan || null);
 
@@ -143,20 +188,26 @@
           }))
         });
       }
-    } else if (modus === "ersetzen") {
-      if (await Klassen.get(klasse.id)) await Klassen.remove(klasse.id); // Kaskade
     }
+    // „ersetzen": Die vorhandene Klasse samt Daten wird in derselben
+    // Transaktion gelöscht, in der die neuen Daten geschrieben werden.
+    const ersetzen = modus !== "kopie" && !!(await Klassen.get(klasse.id));
 
     const settings = await getSettings();
-    await Klassen.save(klasse);
-    await DB.bulkPut("schueler", schueler.map((s) => normalisiereSchuelerHeat(s, settings)));
-    await DB.bulkPut("kategorien", kategorien);
-    await DB.bulkPut("leistungen", leistungen);
-    await DB.bulkPut("noten", noten);
-    await DB.bulkPut("ereignisse", ereignisse);
-    await DB.bulkPut("stunden", stunden);
-    await DB.bulkPut("abwesenheiten", abwesenheiten);
-    if (sitzplan) await DB.put("sitzplaene", sitzplan);
+    klasse = Object.assign({}, klasse, { updatedAt: now() });
+    const schreiben = [["klassen", klasse]];
+    schueler.forEach((s) => schreiben.push(["schueler", normalisiereSchuelerHeat(Object.assign({}, s), settings)]));
+    kategorien.forEach((x) => schreiben.push(["kategorien", x]));
+    leistungen.forEach((x) => schreiben.push(["leistungen", x]));
+    noten.forEach((x) => schreiben.push(["noten", x]));
+    ereignisse.forEach((x) => schreiben.push(["ereignisse", x]));
+    stunden.forEach((x) => schreiben.push(["stunden", x]));
+    abwesenheiten.forEach((x) => schreiben.push(["abwesenheiten", x]));
+    if (sitzplan) schreiben.push(["sitzplaene", sitzplan]);
+    await kaskade(
+      ersetzen ? klassenAbhaengige(klasse.id) : [],
+      ersetzen ? [["sitzplaene", klasse.id]] : [],
+      schreiben);
     return klasse;
   }
 

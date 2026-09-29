@@ -9,10 +9,10 @@
   async function boot() {
     try {
       await DB.open();
+      // Daten-Migrationen (schemaVersion) vor allem anderen ausführen
+      await Store.migrateSchema();
       // Beim allerersten Start Demo-Daten anlegen (nur wenn DB leer ist)
       await Store.seedDemoData();
-      // Daten-Migrationen (schemaVersion) vor dem ersten Render ausführen
-      await Store.migrateSchema();
     } catch (e) {
       console.error("DB-Fehler:", e);
       document.getElementById("view").innerHTML =
@@ -21,6 +21,11 @@
         '<p class="muted">Bitte den privaten Modus deaktivieren oder einen anderen Browser verwenden.</p></div></div>';
       return;
     }
+
+    // Alles, was sonst unbemerkt scheitern würde (z. B. Knöpfe in Dialogen),
+    // als Toast melden
+    window.addEventListener("unhandledrejection", (ev) => UI.fehlerMelden(ev.reason));
+    window.addEventListener("error", (ev) => { if (ev.error) UI.fehlerMelden(ev.error); });
 
     Views.initDelegation();
     await Views.render();

@@ -144,6 +144,34 @@
     return new Promise((resolve, reject) => {
       t.oncomplete = () => resolve(keys.length);
       t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error);
+    });
+  }
+
+  // Schlüssel aller Datensätze mit einem bestimmten Index-Wert (nur lesen).
+  async function keysByIndex(store, indexName, value) {
+    const t = await tx(store, "readonly");
+    return reqToPromise(t.objectStore(store).index(indexName).getAllKeys(value));
+  }
+
+  // Schreibt in mehrere Stores in EINER Transaktion: entweder wird alles
+  // gespeichert oder – bei einem Fehler mittendrin – gar nichts. Für Löschen
+  // mit Kaskade und für Importe, damit nie ein halber Datenstand zurückbleibt.
+  //   schritte(os): os(name) liefert den Object-Store; darin synchron
+  //   put/delete/clear aufrufen (kein await – sonst endet die Transaktion).
+  async function atomar(storeNames, schritte) {
+    const db = await open();
+    const t = db.transaction(storeNames, "readwrite");
+    return new Promise((resolve, reject) => {
+      t.oncomplete = () => resolve(true);
+      t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error || new Error("Speichern abgebrochen"));
+      try {
+        schritte((name) => t.objectStore(name));
+      } catch (e) {
+        try { t.abort(); } catch (e2) { /* schon beendet */ }
+        reject(e);
+      }
     });
   }
 
@@ -155,11 +183,12 @@
     return new Promise((resolve, reject) => {
       t.oncomplete = () => resolve(true);
       t.onerror = () => reject(t.error);
+      t.onabort = () => reject(t.error);
     });
   }
 
   global.DB = {
-    open, put, bulkPut, get, getAll, getAllByIndex, del, delByIndex, clearAll,
+    open, put, bulkPut, get, getAll, getAllByIndex, keysByIndex, del, delByIndex, clearAll, atomar,
     DB_NAME, DB_VERSION, STORES
   };
 })(window);

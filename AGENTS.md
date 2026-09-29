@@ -107,6 +107,16 @@ IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
   Datensätze mitlöschen (Leistungen, Noten, Ereignisse, Stunden, Abwesenheiten,
   Sitzplatz-Zuweisung); eine Kategorie nimmt ihre Leistungen mit, eine Leistung
   ihre Noten. Bestehende Logik in `store.js` wiederverwenden, nicht umgehen.
+- **Alles oder nichts:** Löschen mit Kaskade und Importe schreiben über
+  `DB.atomar(stores, (os) => { … })` in **einer** Transaktion (in `store.js` über
+  den Helfer `kaskade(ueberIndex, loeschen, schreiben)`). Bricht etwas ab, bleibt
+  der alte Stand vollständig erhalten. Innerhalb von `atomar` nur synchron
+  `put`/`delete`/`clear` aufrufen – ein `await` beendet die Transaktion (ältere
+  iPad-Safari). Lesen deshalb vorher (z. B. `DB.keysByIndex`).
+- **Importe prüfen vor dem Schreiben:** `importAll`/`importKlasse` validieren die
+  Datei (Listen, Kennungen) und lehnen Backups aus einer **neueren** Datenversion
+  ab. Nach `importAll` läuft sofort `migrateSchema()` ab der Datenversion des
+  Backups – deshalb muss jeder Migrationsschritt wiederholbar sein (s. unten).
 - **Versionierung ist dreistufig** – die App-Version ist unabhängig von den
   beiden internen Zählern, sie werden **nicht** gekoppelt:
   0. **App-Version** (`APP_VERSION` in `js/version.js`, `MAJOR.MINOR.PATCH`):
@@ -125,6 +135,12 @@ IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
      ⚠️ Ein Schritt, der **Einstellungen** ändert, muss `getSettings()` selbst
      aufrufen und speichern; `migrateSchema` liest die Einstellungen nach den
      Schritten neu (jeder `getSettings()`-Aufruf liefert eine frische Kopie).
+     ⚠️ Jeder Schritt muss **wiederholbar** sein: nur Datensätze in der alten
+     Form anfassen (z. B. „nur Ereignisse ohne `stundeId`“), nie gewählte Werte
+     pauschal überschreiben. Ein älteres Backup lässt die Schritte ab seiner
+     Version erneut über alle Daten laufen. Neue Einstellungen bekommen die
+     aktuelle `SCHEMA_VERSION` (erster Start); `migrateSchema` läuft beim Start
+     **vor** den Demo-Daten.
 - IDs via `Store`-internem `uid()` (crypto.randomUUID mit Fallback).
 - Tages-Zuordnungen (Abwesenheiten, aktive Tage) nutzen das **lokale** Datum
   (`Store.datumLokal()` / `Calc.tagVonTs()`), nicht `toISOString()` (UTC).
@@ -365,7 +381,7 @@ beim allerersten Start erscheint er bewusst nicht.
 - **Klassen-Export/-Import:** `Store.exportKlasse` / `Store.importKlasse` (JSON einer
   einzelnen Klasse inkl. Schüler, Kategorien, Noten, Ereignisse, Stunden,
   Abwesenheiten, alle Sitzpläne). Import bei bestehender Klassen-ID im Modus „ersetzen“
-  (kaskadierend löschen, dann importieren) oder „kopie“ (alle IDs neu vergeben,
+  (kaskadierend löschen und importieren in einer Transaktion) oder „kopie“ (alle IDs neu vergeben,
   Referenzen inkl. `sitzplan.plaene[].seats[].schuelerId` ummappen). Buttons „Exportieren“
   in der Klassen-Topbar, „Klasse importieren“ auf Home (`klassenImportDialog`).
 - **Klasse löschen:** 🗑-Button direkt auf der Home-Kachel (`delete-class`,
@@ -488,6 +504,10 @@ folgt für jede Aufgabe:
   eine frische Kopie (Merge mit `DEFAULT_SETTINGS`). Ein Schritt muss daher
   selbst laden **und** speichern; `migrateSchema` liest nach den Schritten neu,
   sonst überschreibt es deren Änderungen.
+- **Fehler nicht verschlucken:** Aktionen aus der Action-Map und unbehandelte
+  Promise-Fehler landen über `UI.fehlerMelden` als Toast (plus Konsole). Eigene
+  `try/catch` nur, wo ein Fehler fachlich erwartet wird (z. B. Abbruch im
+  Teilen-Blatt), und dann mit verständlicher Meldung.
 - **Beispieldaten:** `Store.seedDemoData` (Klasse 8b) läuft nur bei leerer
   Datenbank beim App-Start. `Store.seedBeispielklassen` (9a Musterjahr + LK 12)
   legt zusätzlich an, auch wenn schon Klassen da sind, und überspringt

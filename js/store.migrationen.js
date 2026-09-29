@@ -23,6 +23,10 @@
   // beim App-Start (app.js, vor dem ersten Render) ausgeführt.
   // Regel: Neue Felder bekommen immer Defaults (Factorys + getSettings-Merge),
   // damit auch nicht migrierte/alte Datensätze ohne das Feld funktionieren.
+  // Regel: Jeder Schritt ist WIEDERHOLBAR – er ändert nur Datensätze, die noch
+  // in der alten Form vorliegen. Nach dem Einspielen eines älteren Backups
+  // laufen die Schritte ab dessen Version erneut über alle Daten, auch über
+  // die bereits aktuellen (siehe Store.importAll).
   const SCHEMA_VERSION = 14;
   const MIGRATION_STEPS = {
     // v1 -> v2: Noten und Ereignisse erhalten ein Halbjahr (1 | 2),
@@ -52,8 +56,10 @@
     // v4 -> v5: Unterrichtsstunden werden eine eigene Entität. Bestehende
     // Ereignisse werden je (Klasse, Kalendertag) zu einer bereits beendeten
     // Stunde zusammengefasst, damit die Auswertung weiter rechnen kann.
+    // Wiederholbar: nur Ereignisse, die noch keiner Stunde zugeordnet sind.
     5: async () => {
-      const ereignisse = await DB.getAll("ereignisse");
+      const ereignisse = (await DB.getAll("ereignisse")).filter((e) => !e.stundeId);
+      if (!ereignisse.length) return;
       const gruppen = {};
       ereignisse.forEach((e) => {
         const datum = datumLokal(new Date(e.timestamp));
@@ -82,14 +88,15 @@
     },
     // v5 -> v6: Kategorien bekommen das Feld `anzeige` (Note oder Zählung
     // fehlender Hausaufgaben); Nebenfächer rechnen jetzt 30 % schriftlich /
-    // 70 % sonstige statt 40/60.
+    // 70 % sonstige statt 40/60. Wiederholbar: umgestellt wird nur, wo noch
+    // die alte Voreinstellung 40/60 steht – eigene Anteile bleiben.
     6: async () => {
       const kategorien = await DB.getAll("kategorien");
       kategorien.forEach((c) => { if (!c.anzeige) c.anzeige = "note"; });
       await DB.bulkPut("kategorien", kategorien);
       const klassen = await DB.getAll("klassen");
       klassen.forEach((k) => {
-        if (k.typ === "nebenfach") {
+        if (k.typ === "nebenfach" && Number(k.anteilSchriftlich) === 40 && Number(k.anteilSonstige) === 60) {
           k.anteilSchriftlich = DEFAULT_SETTINGS.anteile.nebenfach.schriftlich;
           k.anteilSonstige = DEFAULT_SETTINGS.anteile.nebenfach.sonstige;
           k.updatedAt = now();
@@ -106,7 +113,9 @@
     },
     // v7 -> v8: Quartale (1–4) auf Noten, Ereignissen und Stunden (aus dem
     // Datum abgeleitet); neues Setting aktuellesQuartal (aus dem heutigen
-    // Datum) und haModus ("punkte" = bisherige Punktewertung).
+    // Datum) und haModus ("punkte" = bisherige Punktewertung). Beide Settings
+    // kommen über den getSettings-Merge dazu und werden nur gespeichert – so
+    // überschreibt ein wiederholter Schritt keine gewählten Werte.
     8: async () => {
       const noten = await DB.getAll("noten");
       noten.forEach((n) => { if (!n.quartal) n.quartal = quartalAusDatum(n.datum); });
@@ -119,10 +128,7 @@
       const stunden = await DB.getAll("stunden");
       stunden.forEach((st) => { if (!st.quartal) st.quartal = quartalAusDatum(st.datum); });
       await DB.bulkPut("stunden", stunden);
-      const s = await getSettings();
-      s.aktuellesQuartal = quartalAusDatum(datumLokal());
-      s.haModus = "punkte";
-      await saveSettings(s);
+      await saveSettings(await getSettings());
     },
     // v8 -> v9: Klassen bekommen eine Klassenstufe (5-13); ab 11 gelten
     // MSS-Punkte (0-15) statt Schulnoten (siehe Calc.istMSS).
@@ -180,14 +186,16 @@
     // v12 -> v13: „Quartal abschließen" löscht keine Stunden und Ereignisse
     // mehr, sondern merkt sich das abgeschlossene Quartal an der Klasse.
     // Bestandsklassen: Quartale, für die bereits eine Mitarbeitsnote übertragen
-    // wurde, gelten rückwirkend als abgeschlossen.
+    // wurde, gelten rückwirkend als abgeschlossen. Wiederholbar: nur Klassen
+    // ohne das Feld – sonst würde ein aufgehobener Abschluss wieder gesetzt.
     13: async () => {
       const klassen = await DB.getAll("klassen");
       if (!klassen.length) return;
       const kategorien = await DB.getAll("kategorien");
       const noten = await DB.getAll("noten");
       klassen.forEach((k) => {
-        if (!Array.isArray(k.abgeschlosseneQuartale)) k.abgeschlosseneQuartale = [];
+        if (Array.isArray(k.abgeschlosseneQuartale)) return;
+        k.abgeschlosseneQuartale = [];
         const mitarbeitIds = kategorien
           .filter((c) => c.klasseId === k.id && c.quelle === "mitarbeit")
           .map((c) => c.id);
