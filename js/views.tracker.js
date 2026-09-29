@@ -5,6 +5,7 @@
    - Kacheln tragen nur die Ereignistypen mit aufKachel = true
    - Abwesend / Verweigerung / keine HA / Heatmap laufen als Modi über die Topbar
    - Heatmap verfällt nur innerhalb einer laufenden Stunde (dazwischen eingefroren)
+   - Pausetaste hält den Verfall an, bis sie gelöst oder der Tracker verlassen wird
    ========================================================================= */
 (function (global) {
   "use strict";
@@ -65,7 +66,11 @@
       '<div class="plan-toolbar tracker-toolbar">' +
         '<div class="tracker-legend">' + legende + "</div>" +
         '<div class="grow"></div>' +
-        '<div class="legend">viel <span class="bar"></span> wenig</div>' +
+        '<div class="legend">' +
+          '<button class="btn heatpause' + (t.heatPause ? " aktiv" : "") + '" data-action="tracker-heat-pause"' +
+            ' title="' + (t.heatPause ? "Verfall läuft ab dem jetzigen Stand weiter" : "Farben bleiben stehen, Meldungen zählen weiter") + '">' +
+            (t.heatPause ? "▶︎ Heatmap fortsetzen" : "⏸ Heatmap pausieren") + "</button>" +
+          'viel <span class="bar"></span> wenig</div>' +
       "</div>" +
       // Bei vielen Spalten schrumpfen die Kacheln bis zur eingestellten Grenze, danach scrollt das Raster
       sitzrasterHTML(plan, seats, "tracker-grid", "tracker-grid") +
@@ -220,7 +225,8 @@
 
     state.tracker = {
       klasseId: k.id, stunde, counts, typeCounts, keineHA, verweigerung, names, students,
-      undoStack, heatTimer: null, abwesend
+      undoStack, heatTimer: null, abwesend,
+      heatPause: false   // Pausetaste: Verfall ruht, bis sie gelöst oder der Tracker verlassen wird
     };
 
     await heatUhrNachziehen(students);
@@ -267,9 +273,29 @@
     return jetzt;
   }
 
+  // Während der Pause gilt die Uhr der Kachel als Bezugszeit: kein Verfall.
   function heatAktuell(s) {
+    const pause = state.tracker && state.tracker.heatPause && s.heatLastDecayAt;
     return Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, trackerVerfallMinuten(),
-      state.settings.heatVerfallPunkte, heatBezugsZeit());
+      state.settings.heatVerfallPunkte, pause ? s.heatLastDecayAt : heatBezugsZeit());
+  }
+
+  // Pausetaste: Beim Anhalten wird der aktuelle Stand festgeschrieben, beim
+  // Fortsetzen startet die Uhr neu – die Pausenzeit holt der Verfall nicht nach.
+  // Meldungen während der Pause geben weiter Heatmap-Punkte.
+  async function trackerHeatPause() {
+    const t = state.tracker;
+    if (!t) return;
+    if (t.heatPause) {
+      t.heatPause = false;
+      await heatUhrNachziehen(t.students);
+      UI.toast("Heatmap läuft weiter");
+    } else {
+      await heatEinfrieren();
+      t.heatPause = true;
+      UI.toast("Heatmap pausiert");
+    }
+    render();
   }
 
   // Heatmap-Punkte gutschreiben/abziehen. Rechnet mit der Stunden-Bezugszeit,
@@ -636,6 +662,8 @@
   async function trackerVerlassen() {
     stopHeatTimer();
     await heatEinfrieren();
+    // Eine Pause gilt nur, solange der Tracker offen ist
+    if (state.tracker) state.tracker.heatPause = false;
     state.trackerModus = null;
     syncModusKlasse();
   }
@@ -751,6 +779,6 @@
     ViewTracker, trackerTap, trackerUndo, undoListeDialog, trackerStartDialog, trackerHeatEditDialog, trackerAbwesendToggle,
     trackerKeineHAToggle, trackerVerweigerungToggle, trackerModusToggle, trackerModusEnde, trackerModusTap,
     trackerStundeBeenden, trackerVerlassen, trackerHeatAddieren, trackerRaumDialog,
-    stopHeatTimer, renderSeatCounts, syncModusKlasse
+    stopHeatTimer, renderSeatCounts, syncModusKlasse, trackerHeatPause
   });
 })(window);

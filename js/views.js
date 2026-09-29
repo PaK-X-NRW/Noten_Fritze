@@ -14,7 +14,7 @@
     importStudentsDialog, backupImportDialog,
     schwellenDialog, mitarbeitHerleitungDialog, quartalAbschliessenDialog, klassenImportDialog,
     trackerStartDialog, trackerModusToggle, trackerModusEnde, trackerModusTap,
-    trackerStundeBeenden, trackerVerlassen, trackerRaumDialog, trackerTap, trackerUndo,
+    trackerStundeBeenden, trackerVerlassen, trackerRaumDialog, trackerTap, trackerUndo, trackerHeatPause,
     besprechungStep
   } = global.Views;
 
@@ -140,6 +140,7 @@
     "tracker-modus-tap": (el) => trackerModusTap(el.getAttribute("data-sid")),
     "tracker-stunde-beenden": () => trackerStundeBeenden(),
     "tracker-undo": () => trackerUndo(),
+    "tracker-heat-pause": () => trackerHeatPause(),
 
     "besprechung-pick": (el) => { state.selectedSchuelerId = el.getAttribute("data-sid"); render(); },
     "besprechung-list": () => { state.selectedSchuelerId = null; render(); },

@@ -336,6 +336,10 @@ Stundennoten (`3+`, nicht `2,8`).
   zusätzlich lässt sich einstellen, wie viele Heatmap-Punkte pro X Minuten verfallen.
   Der Verfall läuft **nur innerhalb einer laufenden Stunde** – zwischen den Stunden
   ist der Wert eingefroren und läuft in der nächsten Stunde einfach weiter.
+  Mit **⏸ Heatmap pausieren** (rechts neben der Farbskala) ruht der Verfall auch
+  mitten in der Stunde, etwa bei Gruppenarbeit oder Test; Meldungen geben weiter
+  Punkte. Fortsetzen läuft ab dem aktuellen Stand weiter, beim Verlassen des
+  Trackers endet die Pause automatisch.
   Der Wertebereich liegt immer bei 0 bis 100. Negative Meldungen wie Störung oder
   fehlende HA beeinflussen die Heatmap nicht.
 - **Mitarbeitsnote / Epochalnote (Vorschlag, Stundennoten-Modell):** Jede

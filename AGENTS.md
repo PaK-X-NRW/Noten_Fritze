@@ -308,7 +308,11 @@ beim allerersten Start erscheint er bewusst nicht.
 - **Heatmap-Zeit:** Der Verfall läuft **nur innerhalb einer laufenden Stunde**
   (Bezugszeit `min(jetzt, stunde.endeTs)`). Beim Öffnen/Fortsetzen wird
   `heatLastDecayAt` auf jetzt gesetzt (kein Nachhol-Verfall aus der Pause), beim
-  Beenden/Verlassen der aktuelle Wert festgeschrieben.
+  Beenden/Verlassen der aktuelle Wert festgeschrieben. Die **Pausetaste**
+  (`tracker-heat-pause`, `trackerHeatPause`) schreibt beim Anhalten den Stand fest
+  (`heatEinfrieren`), setzt `state.tracker.heatPause`; währenddessen rechnet
+  `heatAktuell` ohne Verfall, Meldungen geben weiter Punkte. Fortsetzen zieht die Uhr
+  nach (`heatUhrNachziehen`), `trackerVerlassen` hebt die Pause auf (nur flüchtig).
 - **Tracker-Modi:** Abwesend / Verweigerung (🚫) / Keine HA / Heatmap liegen in der
   Topbar (`state.trackerModus`); ein aktiver Modus setzt eine `modus-*`-Klasse am
   `<body>` (Farbschema) und macht die ganze Kachel zum Tap-Ziel. `ViewTracker` baut
