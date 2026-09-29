@@ -499,6 +499,8 @@ echte PNG-App-Icons (aktuell SVG) · Mehrbenutzer/Sync (nicht vorgesehen, da lok
 ```
 Noten_Fritze/
 ├─ index.html               App-Shell
+├─ tests.html               Selbsttest der Rechenregeln (Doppelklick; ohne Nutzerdaten)
+├─ tests/                   Test-Rahmen und Prüfungen (test.js, test.calc.js, test.hilfen.js)
 ├─ info.html                Infoseite für Lehrkräfte: Funktionen, Anleitung, Hinweise,
 │                           Datenschutzerklärung, Kontakt, Lizenz (ohne Scripts)
 ├─ img/                     Screenshots für info.html (Beispieldaten, erfundene Namen)

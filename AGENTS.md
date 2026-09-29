@@ -388,8 +388,16 @@ beim allerersten Start erscheint er bewusst nicht.
 
 ## 7. Testen & Verifizieren
 
-- Es gibt **kein Test-Framework und keinen Linter**. Verifizierung erfolgt
-  manuell im Browser:
+- **Selbsttest `tests.html`** (per Doppelklick, ohne Framework): prüft die
+  Rechenregeln aus Abschnitt 6 und die Beispiele aus `Schuljahr-Schema.md` mit
+  festen Werten, dazu Hilfsfunktionen aus Store und CSV. Er liest und schreibt
+  **keine** Nutzerdaten. Nach jeder Änderung an `calc*.js`, `store*.js` oder
+  `csv.js` ausführen – alle Prüfungen müssen grün sein. Ein geänderter Sollwert
+  bedeutet eine geänderte Note und braucht Rücksprache. Neue Rechenregeln
+  bekommen einen eigenen Fall in `tests/test.calc.js`; neue JS-Dateien, die die
+  Tests brauchen, auch in `tests.html` eintragen. Die Testseite gehört nicht in
+  den Service-Worker-Cache.
+- Einen Linter gibt es nicht. Die Oberfläche wird manuell im Browser geprüft:
   - `index.html` doppelklicken (Demo-Daten werden beim ersten Start angelegt), oder
   - lokal servern: `npx serve .` bzw. `python -m http.server` (für PWA/SW nötig).
 - Nach einer Änderung den betroffenen Flow wirklich durchklicken (z. B. Sitzplan:
