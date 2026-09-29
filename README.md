@@ -149,7 +149,7 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
   Sitzplatz-Zuweisung); das Löschen einer Kategorie oder einer Spalte nimmt die
   darin erfassten Noten mit.
 - **App-Version:** `APP_VERSION` in `js/version.js` (Schema `MAJOR.MINOR.PATCH`,
-  aktuell **1.14.0**) ist die sichtbare Programmversion: angezeigt unter
+  aktuell **1.14.1**) ist die sichtbare Programmversion: angezeigt unter
   Einstellungen → Über, Name des Service-Worker-Caches, Feld `appVersion` im
   JSON-Backup. Sie wird von Hand gepflegt und ist unabhängig von den beiden
   internen Zählern unten.
@@ -469,7 +469,7 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   Export-Ordner, Backup/Restore, Demo-Daten, Beispielklassen, alles löschen.
 - **Beispielklassen** – Knopf „Beispielklassen anlegen“ (Einstellungen) legt
   zwei Klassen mit einem komplett durchgespielten Schuljahr an: **„9a
-  (Musterjahr)“** (Sek. I, Schulnoten) und **„Mathematik LK 12“** (Oberstufe,
+  (Beispiel)“** (Sek. I, Schulnoten) und **„Mathematik LK 12 (Beispiel)“** (Oberstufe,
   MSS-Punkte). In beiden sind das 1.–3. Quartal abgeschlossen (Stunden und
   Meldungen bleiben grau sichtbar), das 4. Quartal läuft noch, sodass sich
   „Quartal abschließen“ selbst ausprobieren lässt. Anders als „Demo-Daten neu

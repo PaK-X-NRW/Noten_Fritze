@@ -537,6 +537,8 @@ folgt für jede Aufgabe:
   `try/catch` nur, wo ein Fehler fachlich erwartet wird (z. B. Abbruch im
   Teilen-Blatt), und dann mit verständlicher Meldung.
 - **Beispieldaten:** `Store.seedDemoData` (Klasse 8b) läuft nur bei leerer
-  Datenbank beim App-Start. `Store.seedBeispielklassen` (9a Musterjahr + LK 12)
-  legt zusätzlich an, auch wenn schon Klassen da sind, und überspringt
-  gleichnamige Klassen – Knopf in den Einstellungen.
+  Datenbank beim App-Start. `Store.seedBeispielklassen` („9a (Beispiel)“ +
+  „Mathematik LK 12 (Beispiel)“) legt zusätzlich an, auch wenn schon Klassen da
+  sind, und überspringt gleichnamige Klassen (Vergleich ohne Groß-/Kleinschreibung
+  und Rand-Leerzeichen); Rückgabe `{ angelegt, uebersprungen }` – Knopf in den
+  Einstellungen. Der Zusatz „(Beispiel)“ verhindert Verwechslungen mit echten Klassen.

@@ -2,7 +2,7 @@
 
 Trockendurchlauf mit drei Beispiel-Schüler/innen. Alle Zahlen sind **echt
 nachgerechnet** nach den Regeln, die ab Version 1.8.0 im Code stehen.
-Dieselbe Struktur steckt in der Beispielklasse **„9a (Musterjahr)“**
+Dieselbe Struktur steckt in der Beispielklasse **„9a (Beispiel)“**
 (Einstellungen → Beispielklassen anlegen), dort mit anderen Namen und
 Zufallsnoten.
 
@@ -224,7 +224,7 @@ gibt also das zweite den Ausschlag. Stünde bei Ben im 1. Halbjahr eine 4 und im
 
 ## Dasselbe in der Oberstufe (MSS-Punkte)
 
-**Klasse „Mathematik LK 12“, Klassenstufe 12** – identischer Ablauf, aber
+**Klasse „Mathematik LK 12 (Beispiel)“, Klassenstufe 12** – identischer Ablauf, aber
 Punkte 0–15 statt Noten, und die Reiter heißen **12.1 / 12.2** statt
 1./2. Halbjahr. Eine Jahresnote gibt es dort nicht: jedes Kurshalbjahr ist eine
 eigene Endnote.

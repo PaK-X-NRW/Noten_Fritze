@@ -225,14 +225,19 @@
     },
     "seed-beispielklassen": async () => {
       const ok = await UI.confirmDialog("Beispielklassen anlegen?",
-        "Angelegt werden „9a (Musterjahr)“ mit Schulnoten und „Mathematik LK 12“ mit MSS-Punkten – " +
-        "beide mit einem kompletten Beispieljahr. Deine vorhandenen Klassen bleiben unverändert.",
+        "Angelegt werden „9a (Beispiel)“ mit Schulnoten und „Mathematik LK 12 (Beispiel)“ mit MSS-Punkten – " +
+        "beide mit einem kompletten Beispieljahr. Deine vorhandenen Klassen bleiben unverändert; " +
+        "gibt es eine davon schon, wird sie übersprungen.",
         { okLabel: "Anlegen", danger: false });
       if (!ok) return;
-      const angelegt = await Store.seedBeispielklassen();
-      UI.toast(angelegt.length
-        ? angelegt.join(" und ") + " angelegt"
-        : "Die Beispielklassen sind bereits vorhanden");
+      const erg = await Store.seedBeispielklassen();
+      const namen = (liste) => liste.map((n) => "„" + n + "“").join(" und ");
+      const teile = [];
+      if (erg.angelegt.length) teile.push(namen(erg.angelegt) + " angelegt");
+      if (erg.uebersprungen.length) {
+        teile.push(namen(erg.uebersprungen) + " gibt es schon – übersprungen");
+      }
+      UI.toast(teile.join(" · "), { duration: 6000 });
       go("home");
     },
     "delete-all": async () => {

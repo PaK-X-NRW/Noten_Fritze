@@ -208,7 +208,7 @@
       "</div>" +
       '<div class="card"><h2>Beispielklassen</h2>' +
         '<p class="muted">Zwei Klassen mit einem komplett durchgespielten Schuljahr zum Ausprobieren: ' +
-        '„9a (Musterjahr)“ mit Schulnoten und „Mathematik LK 12“ mit MSS-Punkten. ' +
+        '„9a (Beispiel)“ mit Schulnoten und „Mathematik LK 12 (Beispiel)“ mit MSS-Punkten. ' +
         "In beiden sind das 1.–3. Quartal abgeschlossen, das 4. Quartal läuft noch. " +
         "Deine eigenen Klassen bleiben unverändert; löschen kannst du die Beispiele jederzeit auf der Startseite.</p>" +
         '<div class="btn-row">' +

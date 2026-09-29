@@ -235,13 +235,16 @@
   //  Beispielklassen „Musterjahr" – ein komplett durchgespieltes Schuljahr
   // =========================================================================
   // Zwei Klassen zum Ausprobieren und Nachvollziehen der Rechenkette:
-  //   „9a (Musterjahr)"     – Sekundarstufe I mit Schulnoten
-  //   „Mathematik LK 12"    – Oberstufe mit MSS-Punkten (0–15)
+  //   „9a (Beispiel)"               – Sekundarstufe I mit Schulnoten
+  //   „Mathematik LK 12 (Beispiel)" – Oberstufe mit MSS-Punkten (0–15)
+  // Der Zusatz „(Beispiel)" macht sie unverwechselbar mit echten Klassen.
   // In beiden sind Q1–Q3 abgeschlossen (Stunden und Meldungen bleiben dabei
   // erhalten und sind grau sichtbar), Q4 läuft noch – damit lässt sich
   // „Quartal abschließen" einmal selbst durchspielen. Anders als seedDemoData
-  // läuft das auch, wenn schon Klassen vorhanden sind; eine gleichnamige
-  // Klasse wird übersprungen.
+  // läuft das auch, wenn schon Klassen vorhanden sind; gibt es schon eine
+  // Klasse mit demselben Namen (Groß-/Kleinschreibung und Leerzeichen am Rand
+  // egal), wird die Beispielklasse übersprungen – vorhandene Klassen werden
+  // nie verändert.
   const SEK1_NAMEN = [
     ["Alina", "Böhm"], ["Bastian", "Grüner"], ["Charlotte", "Meier"], ["Dennis", "Ostermann"],
     ["Elif", "Yildiz"], ["Fabian", "Krause"], ["Greta", "Lindner"], ["Henri", "Sommer"],
@@ -259,14 +262,15 @@
   async function seedBeispielklassen() {
     const settings = await getSettings();
     const vorhandene = await Klassen.all();
+    const namensSchluessel = (n) => String(n || "").trim().toLowerCase();
     const namenVorhanden = {};
-    vorhandene.forEach((k) => { namenVorhanden[k.name] = true; });
+    vorhandene.forEach((k) => { namenVorhanden[namensSchluessel(k.name)] = true; });
 
     const konfigurationen = [
       {
         seed: 20250812, mss: false,
         klasse: {
-          name: "9a (Musterjahr)", schuljahr: "2025/26", fach: "Mathematik", typ: "hauptfach",
+          name: "9a (Beispiel)", schuljahr: "2025/26", fach: "Mathematik", typ: "hauptfach",
           klassenstufe: 9, anteilSchriftlich: 50, anteilSonstige: 50,
           notizen: "Beispielklasse mit komplettem Schuljahr: 1.–3. Quartal abgeschlossen, " +
             "4. Quartal läuft noch. Kann gefahrlos gelöscht werden."
@@ -298,7 +302,7 @@
         seed: 20250910, mss: true,
         quoten: { stark: 0.95, mittel: 0.75, schwach: 0.45 },
         klasse: {
-          name: "Mathematik LK 12", schuljahr: "2025/26", fach: "Mathematik", typ: "hauptfach",
+          name: "Mathematik LK 12 (Beispiel)", schuljahr: "2025/26", fach: "Mathematik", typ: "hauptfach",
           klassenstufe: 12, anteilSchriftlich: 50, anteilSonstige: 50,
           notizen: "Oberstufen-Beispielkurs mit MSS-Punkten (0–15): jedes Kurshalbjahr ist eine " +
             "eigene Endnote, es gibt keine Jahresnote. 1.–3. Quartal abgeschlossen, 4. Quartal läuft."
@@ -322,13 +326,14 @@
       }
     ];
 
-    const angelegt = [];
+    // Rückgabe: welche Beispielklassen angelegt und welche übersprungen wurden
+    const angelegt = [], uebersprungen = [];
     for (const cfg of konfigurationen) {
-      if (namenVorhanden[cfg.klasse.name]) continue;
+      if (namenVorhanden[namensSchluessel(cfg.klasse.name)]) { uebersprungen.push(cfg.klasse.name); continue; }
       await musterklasseAnlegen(cfg, settings);
       angelegt.push(cfg.klasse.name);
     }
-    return angelegt;
+    return { angelegt, uebersprungen };
   }
 
   async function musterklasseAnlegen(cfg, settings) {
