@@ -30,6 +30,7 @@
     tracker: null,
     pendingStunde: null,   // vom Start-Dialog übergebene (neue/fortgesetzte) Stunde
     trackerModus: null,    // null | "abwesend" | "keineha" | "heat"
+    sitzplanGestalten: false, // Reiter Sitzplan: Tippen schaltet Platz/Gang um
     settings: null
   };
 
@@ -89,7 +90,8 @@
   // Spaltenzahl teilen sich die Kacheln die Bildschirmbreite, darüber bleiben
   // sie so breit und das Raster scrollt seitlich (Klasse „breit“, styles.css).
   // Die Tracker-Kacheln werden nach den sichtbaren Spalten gestaffelt:
-  // ab 7 „kompakt“, ab 9 „mini“.
+  // ab 7 „kompakt“, ab 9 „mini“. Vorne ist unten: Die Tafel liegt als flache
+  // Leiste unter der letzten Reihe und reicht über die ganze Rasterbreite.
   //   klasse: zusätzliche Grid-Klassen, id: optionale Element-ID
   function sitzrasterHTML(plan, seatsHTML, klasse, id) {
     const grenze = Math.max(6, Math.min(15, parseInt(state.settings.sitzplanKachelSpalten, 10) || 9));
@@ -97,7 +99,8 @@
     return '<div class="seatgrid-scroll"><div class="seatgrid' + (klasse ? " " + klasse : "") +
       (sichtbar >= 9 ? " mini" : sichtbar >= 7 ? " kompakt" : "") +
       (plan.cols > grenze ? " breit" : "") + '"' + (id ? ' id="' + id + '"' : "") +
-      ' style="--cols:' + plan.cols + ";--sichtbar:" + sichtbar + '">' + seatsHTML + "</div></div>";
+      ' style="--cols:' + plan.cols + ";--sichtbar:" + sichtbar + '">' + seatsHTML +
+      '<div class="tafel"><span>Tafel</span></div></div></div>';
   }
 
   // ---- Navigation ----------------------------------------------------------

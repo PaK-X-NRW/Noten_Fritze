@@ -11,6 +11,7 @@
   const {
     klasseDialog, splitsDialog, schuelerDialog, kategorieDialog, leistungDialog,
     studentDetailDialog, seatAssignDialog, sitzplanNeuDialog, sitzplanUmbenennenDialog,
+    sitzplanFormUmschalten, sitzplanVorlage, sitzplanRegelnDialog, sitzplanAutomatisch,
     importStudentsDialog, backupImportDialog,
     schwellenDialog, mitarbeitHerleitungDialog, quartalAbschliessenDialog, klassenImportDialog,
     trackerStartDialog, trackerModusToggle, trackerModusEnde, trackerModusTap,
@@ -104,25 +105,24 @@
       const rows = Math.max(1, Math.min(12, parseInt(UI.$("#grid-rows").value, 10) || plan.rows));
       const cols = Math.max(1, Math.min(15, parseInt(UI.$("#grid-cols").value, 10) || plan.cols));
       // Neues Raster, bestehende Zuweisungen soweit möglich übernehmen
-      const alt = {}; plan.seats.forEach((s) => { alt[s.id] = s.schuelerId; });
+      const alt = {}, gang = {};
+      plan.seats.forEach((s) => { alt[s.id] = s.schuelerId; gang[s.id] = s.keinPlatz; });
       const np = Store.neuerSitzplan(k.id, rows, cols, plan.name);
       np.id = plan.id;
-      np.seats.forEach((s) => { if (alt[s.id]) s.schuelerId = alt[s.id]; });
+      np.seats.forEach((s) => { if (alt[s.id]) s.schuelerId = alt[s.id]; if (gang[s.id]) s.keinPlatz = true; });
       await Store.Sitzplan.save(np); render();
     },
-    "auto-seat": async () => {
-      const k = await Store.Klassen.get(state.klasseId);
-      const [plan, schueler] = await Promise.all([Store.Sitzplan.get(k.id), Store.Schueler.byKlasse(k.id)]);
-      plan.seats.forEach((s) => { s.schuelerId = null; });
-      schueler.forEach((s, i) => { if (plan.seats[i]) plan.seats[i].schuelerId = s.id; });
-      await Store.Sitzplan.save(plan); render();
-    },
+    "auto-seat": async () => sitzplanAutomatisch(await Store.Klassen.get(state.klasseId)),
+    "sitzplan-regeln": async () => sitzplanRegelnDialog(await Store.Klassen.get(state.klasseId)),
     "clear-seats": async () => {
       const k = await Store.Klassen.get(state.klasseId);
       const plan = await Store.Sitzplan.get(k.id);
       plan.seats.forEach((s) => { s.schuelerId = null; });
       await Store.Sitzplan.save(plan); render();
     },
+    "sitzplan-gestalten": () => { state.sitzplanGestalten = !state.sitzplanGestalten; render(); },
+    "seat-form": (el) => sitzplanFormUmschalten(el.getAttribute("data-seat")),
+    "sitzplan-vorlage": (el) => sitzplanVorlage(el.getAttribute("data-vorlage")),
     "seat-abwesend": async (el) => {
       const istAbwesend = await Store.Abwesenheiten.toggle(state.klasseId, el.getAttribute("data-id"), Store.datumLokal());
       render();

@@ -25,6 +25,7 @@ const ASSETS = [
   "./js/calc.zeugnis.js",
   "./js/calc.mitarbeit.js",
   "./js/calc.tracker.js",
+  "./js/calc.sitzplan.js",
   "./js/csv.js",
   "./js/ui.js",
   "./js/views.core.js",

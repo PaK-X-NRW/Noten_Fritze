@@ -379,6 +379,7 @@
   }
 
   function seatTrackerHTML(seat, sMap) {
+    if (seat.keinPlatz) return '<div class="seat tracker keinplatz"></div>';
     const s = seat.schuelerId ? sMap[seat.schuelerId] : null;
     if (!s) return '<div class="seat tracker empty">·</div>';
     const t = state.tracker;

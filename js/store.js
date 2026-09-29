@@ -239,6 +239,8 @@
         const rec = sitzplaeneNormalisieren(await DB.get("sitzplaene", s.klasseId));
         if (rec) {
           rec.plaene.forEach((p) => p.seats.forEach((seat) => { if (seat.schuelerId === id) seat.schuelerId = null; }));
+          // Sitzregeln, an denen die Person beteiligt ist, fallen weg
+          if (Array.isArray(rec.regeln)) rec.regeln = rec.regeln.filter((r) => r.a !== id && r.b !== id);
           schreiben.push(["sitzplaene", rec]);
         }
       }
@@ -433,8 +435,11 @@
   // ---- Sitzplan ------------------------------------------------------------
   // Eine Klasse kann mehrere Sitzpläne haben (je Raum einen). Im Store
   // "sitzplaene" liegt je Klasse EIN Datensatz (Schlüssel klasseId):
-  //   { klasseId, plaene: [{ id, name, klasseId, rows, cols, seats }], aktivId, updatedAt }
+  //   { klasseId, plaene: [{ id, name, klasseId, rows, cols, seats }], aktivId, regeln, updatedAt }
   // aktivId = zuletzt benutzter Plan (Vorauswahl im Reiter und beim Tracker-Start).
+  // seats: { id, row, col, schuelerId, keinPlatz? } – keinPlatz = Gang (Raumform).
+  // regeln = Sitzregeln der Klasse für „Automatisch belegen“ (siehe calc.sitzplan.js);
+  // sie gelten für alle Pläne, nur „fester Platz“ (typ "platz") hängt an planId.
   function neuerSitzplan(klasseId, rows, cols, name) {
     rows = rows || 4; cols = cols || 6;
     const seats = [];
@@ -498,6 +503,17 @@
       await DB.put("sitzplaene", rec);
       return plan;
     },
+    // Sitzregeln der Klasse (leere Liste, solange keine angelegt sind)
+    async regeln(klasseId) {
+      const rec = await Sitzplan.alle(klasseId);
+      return Array.isArray(rec.regeln) ? rec.regeln : [];
+    },
+    async regelnSpeichern(klasseId, regeln) {
+      const rec = await Sitzplan.alle(klasseId);
+      rec.regeln = regeln;
+      rec.updatedAt = now();
+      return DB.put("sitzplaene", rec);
+    },
     async setAktiv(klasseId, planId) {
       const rec = await Sitzplan.alle(klasseId);
       if (rec.aktivId === planId || !rec.plaene.some((p) => p.id === planId)) return;
@@ -510,6 +526,8 @@
       if (rec.plaene.length <= 1) return false;
       rec.plaene = rec.plaene.filter((p) => p.id !== planId);
       if (rec.aktivId === planId) rec.aktivId = rec.plaene[0].id;
+      // Feste Plätze in diesem Plan fallen mit weg
+      if (Array.isArray(rec.regeln)) rec.regeln = rec.regeln.filter((r) => r.planId !== planId);
       rec.updatedAt = now();
       await DB.put("sitzplaene", rec);
       return true;

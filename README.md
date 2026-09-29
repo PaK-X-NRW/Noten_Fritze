@@ -72,6 +72,7 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `calc.zeugnis.js` – Halbjahres-Kette bis zur Zeugnisnote
   - `calc.mitarbeit.js` – Mitarbeits-Auswertung (Stundennoten-Modell)
   - `calc.tracker.js` – Heatmap und Stundenplan
+  - `calc.sitzplan.js` – Raumform-Vorlagen, Sitzregeln, automatisches Verteilen
     (alle `calc*.js` rein, ohne DOM/DB; geprüft in `tests.html`)
   - `csv.js` – CSV-Export/Import
   - `ui.js` – UI-Bausteine (Modal, Toast, Formfelder)
@@ -125,8 +126,9 @@ noten          { id, klasseId, schuelerId, kategorieId, leistungId, wert(1..6,
                  createdAt }
                  (titel/datum/quartal folgen immer der Leistung)
 sitzplaene     { klasseId, aktivId, plaene:[{ id, name, rows, cols,
-                 seats:[{id,row,col,schuelerId}] }] }  (ein Plan je Raum;
-                 aktivId = zuletzt benutzter Plan)
+                 seats:[{id,row,col,schuelerId,keinPlatz?}] }], regeln:[…] }
+                 (ein Plan je Raum; aktivId = zuletzt benutzter Plan;
+                 keinPlatz = Gang; regeln = Sitzregeln der Klasse, siehe unten)
 ereignisse     { id, klasseId, schuelerId, stundeId, typ, punkte, timestamp,
                  quartal(1..4), halbjahr(1|2, abgeleitet), notiz }
 stunden        { id, klasseId, datum(YYYY-MM-DD), startTs, endeTs, dauerMin, stundeNr,
@@ -451,7 +453,17 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
 - **Sitzplan** – mehrere Sitzpläne je Klasse (einer pro Raum, z. B. „Klassenraum“,
   „Physikraum“): Auswahlleiste oben, „Neuer Sitzplan“ (leer oder als Kopie),
   Umbenennen, Löschen. Je Plan Raster (bis 12 Reihen, bis 15 Spalten), Plätze antippen zum
-  Zuweisen, „Automatisch belegen“, Abwesenheits-Toggle (🤒) je Platz.
+  Zuweisen, Abwesenheits-Toggle (🤒) je Platz. **Vorne ist unten** – dort liegt als
+  flache Leiste die Tafel (auch im Tracker).
+  **✏️ Raum gestalten:** Stellen per Tipp zwischen Platz und Gang umschalten, Vorlagen
+  „Alle Plätze“, „Mittelgang“ (ungerade Spaltenzahl) und „Zweiertische mit Gängen“.
+  Gänge bleiben im Sitzplan und Tracker leer. **📋 Regeln** (gelten für alle Räume der
+  Klasse): nicht neben / neben (nicht neben = auch davor, dahinter, schräg; neben = direkt
+  links/rechts), vorne / hinten (n Reihen), mittig (mittleres Drittel der Spalten), am Rand
+  (links/rechts wie auf dem Bildschirm, äußerster Platz der Reihe), fester Platz (nur in
+  diesem Raum). Ein Gang trennt Nachbarn. **„Automatisch belegen“** mischt die Klasse
+  zufällig nach diesen Regeln, füllt von vorne auf und nennt Regeln, die nicht aufgehen;
+  ⚠️ am Knopf „Regeln“ zeigt, wenn der aktuelle Plan eine Regel verletzt.
   Beim Tracker-Start wählt man den Raum; im Tracker wechselt der Knopf 🏫 mit dem
   Raumnamen den Plan mitten in der Stunde (Zähler und Heatmap bleiben).
 - **Tracker** – Start-Dialog (Stunde fortsetzen / Einzel- / Doppelstunde), Restzeit
@@ -541,6 +553,7 @@ Noten_Fritze/
    ├─ calc.zeugnis.js       Halbjahres-Kette bis zur Zeugnisnote
    ├─ calc.mitarbeit.js     Mitarbeits-Auswertung
    ├─ calc.tracker.js       Heatmap und Stundenplan
+   ├─ calc.sitzplan.js      Raumform, Sitzregeln, automatisches Verteilen
    ├─ csv.js                CSV-Export/Import
    ├─ ui.js                 Modal/Toast/Formfelder
    ├─ views.core.js         Views-Kern (State, Routing, Render)

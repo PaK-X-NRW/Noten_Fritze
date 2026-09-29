@@ -6,7 +6,7 @@
    ========================================================================= */
 (function () {
   "use strict";
-  const { gruppe, fall, gleich, nahe } = Test;
+  const { gruppe, fall, gleich, nahe, wahr } = Test;
 
   // ---- Bausteine für Testdaten ----------------------------------------------
   function kat(id, art, gewichtung, extra) {
@@ -336,6 +336,112 @@
       const t0 = new Date(2025, 8, 16, 9, 0).getTime();
       nahe(Calc.heatPunkteAktuell(50, t0, 5, 1, t0 + 10 * 60000).heatPoints, 48);
       nahe(Calc.heatPunkteAktuell(1, t0, 5, 1, t0 + 60 * 60000).heatPoints, 0, "nie unter 0");
+    });
+  });
+
+  gruppe("Sitzplan: Raumform", () => {
+    fall("Mittelgang nur bei ungerader Spaltenzahl", () => {
+      gleich(Calc.sitzplanGaenge(7, "mittelgang"), [3]);
+      gleich(Calc.sitzplanGaenge(6, "mittelgang"), null);
+    });
+    fall("Zweiertische: Tisch, Tisch, Gang … ohne Gang ganz rechts", () => {
+      gleich(Calc.sitzplanGaenge(8, "zweiertische"), [2, 5]);
+      gleich(Calc.sitzplanGaenge(6, "zweiertische"), [2]);
+      gleich(Calc.sitzplanGaenge(2, "zweiertische"), null);
+    });
+    fall("Alle Plätze: keine Gänge", () => {
+      gleich(Calc.sitzplanGaenge(9, "alle"), []);
+    });
+  });
+
+  // ---- Sitzregeln ------------------------------------------------------------
+  // Plan wie Store.neuerSitzplan: Reihe 0 oben (hinten), letzte Reihe unten (vorne)
+  function plan(rows, cols, gaenge) {
+    const seats = [];
+    for (let r = 0; r < rows; r++)
+      for (let c = 0; c < cols; c++)
+        seats.push({ id: r + "-" + c, row: r, col: c, schuelerId: null, keinPlatz: (gaenge || []).indexOf(r + "-" + c) !== -1 });
+    return { id: "p1", rows, cols, seats };
+  }
+  function belegen(p, belegung) {
+    p.seats.forEach((s) => { s.schuelerId = belegung[s.id] || null; });
+    return p;
+  }
+  // Fester Zufall, damit die Prüfung immer gleich läuft (mulberry32)
+  function zufall(saat) {
+    return function () {
+      saat = (saat + 0x6D2B79F5) | 0;
+      let t = Math.imul(saat ^ (saat >>> 15), 1 | saat);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  const KINDER = [];
+  for (let i = 1; i <= 20; i++) KINDER.push("k" + i);
+
+  gruppe("Sitzplan: Regeln", () => {
+    fall("vorne ist unten, mittlere Spalten ≈ ein Drittel", () => {
+      const lage = Calc.sitzplanLage(plan(3, 4));
+      gleich(lage.plaetze[lage.index["2-0"]].rang, 0, "unterste Reihe = vorne");
+      gleich(lage.plaetze[lage.index["0-0"]].rang, 2);
+      gleich([3, 4, 5, 6, 7, 9].map(Calc.mittlereSpalten), [[1], [1, 2], [1, 2, 3], [2, 3], [2, 3, 4], [3, 4, 5]]);
+    });
+    fall("Rand: äußerster Platz der Reihe, Gänge zählen nicht", () => {
+      const lage = Calc.sitzplanLage(plan(2, 4, ["0-0"]));
+      wahr(lage.plaetze[lage.index["0-1"]].randLinks, "0-1 ist links außen, weil 0-0 Gang ist");
+      wahr(lage.plaetze[lage.index["1-0"]].randLinks);
+      wahr(!lage.plaetze[lage.index["1-1"]].randLinks);
+    });
+    fall("ein Gang trennt Nachbarn", () => {
+      const p = belegen(plan(1, 3, ["0-1"]), { "0-0": "a", "0-2": "b" });
+      gleich(Calc.sitzplanRegelnPruefen(p, [
+        { typ: "neben", a: "a", b: "b" }, { typ: "nichtNeben", a: "a", b: "b" }
+      ]).map((r) => r.typ), ["neben"]);
+    });
+    fall("nicht neben gilt auch davor, dahinter und schräg", () => {
+      const p = belegen(plan(2, 2), { "0-0": "a", "1-1": "b" });
+      gleich(Calc.sitzplanRegelnPruefen(p, [{ typ: "nichtNeben", a: "a", b: "b" }]).length, 1);
+    });
+    fall("fester Platz gilt nur im eigenen Plan", () => {
+      const p = belegen(plan(1, 2), { "0-0": "a" });
+      gleich(Calc.sitzplanRegelnPruefen(p, [{ typ: "platz", a: "a", planId: "anderer", seatId: "0-1" }]).length, 0);
+      gleich(Calc.sitzplanRegelnPruefen(p, [{ typ: "platz", a: "a", planId: "p1", seatId: "0-1" }]).length, 1);
+    });
+    fall("Verteilen erfüllt alle Regeln, leere Plätze bleiben hinten", () => {
+      const regeln = [
+        { typ: "nichtNeben", a: "k1", b: "k2" }, { typ: "nichtNeben", a: "k1", b: "k3" },
+        { typ: "nichtNeben", a: "k2", b: "k3" }, { typ: "neben", a: "k4", b: "k5" },
+        { typ: "vorne", a: "k6", reihen: 1 }, { typ: "hinten", a: "k7", reihen: 1 },
+        { typ: "mittig", a: "k8" }, { typ: "rand", a: "k9", seite: "rechts" },
+        { typ: "platz", a: "k10", planId: "p1", seatId: "1-0" },
+        { typ: "vorne", a: "k11", reihen: 2 }, { typ: "mittig", a: "k11" }
+      ];
+      for (let saat = 1; saat <= 15; saat++) {
+        const p = plan(4, 6);
+        const erg = Calc.sitzplanVerteilen(p, KINDER, regeln, zufall(saat));
+        gleich(erg.verletzt.length, 0, "Saat " + saat + ": verletzte Regeln");
+        gleich(erg.ohnePlatz.length, 0, "Saat " + saat + ": ohne Platz");
+        belegen(p, erg.belegung);
+        gleich(Calc.sitzplanRegelnPruefen(p, regeln).length, 0, "Saat " + saat + ": Nachprüfung");
+        wahr(p.seats.filter((s) => !s.schuelerId).every((s) => s.row === 0), "Saat " + saat + ": leere Plätze nur in der hintersten Reihe");
+      }
+    });
+    fall("jeder Druck mischt neu", () => {
+      const a = Calc.sitzplanVerteilen(plan(4, 6), KINDER, [], zufall(1)).belegung;
+      const b = Calc.sitzplanVerteilen(plan(4, 6), KINDER, [], zufall(2)).belegung;
+      wahr(JSON.stringify(a) !== JSON.stringify(b));
+    });
+    fall("Unerfüllbares: beste Belegung plus Liste der verletzten Regeln", () => {
+      const erg = Calc.sitzplanVerteilen(plan(3, 3), ["a", "b"], [
+        { typ: "vorne", a: "a", reihen: 1 }, { typ: "hinten", a: "a", reihen: 1 }
+      ], zufall(3));
+      gleich(erg.verletzt.length, 1);
+      gleich(erg.ohnePlatz.length, 0);
+    });
+    fall("zu wenige Plätze: Rest ohne Platz, Regel-Kinder zuerst", () => {
+      const erg = Calc.sitzplanVerteilen(plan(1, 3), ["a", "b", "c", "d", "e"], [{ typ: "vorne", a: "e", reihen: 1 }], zufall(4));
+      gleich(erg.ohnePlatz.length, 2);
+      wahr(erg.ohnePlatz.indexOf("e") === -1, "e hat eine Regel und bekommt einen Platz");
     });
   });
 

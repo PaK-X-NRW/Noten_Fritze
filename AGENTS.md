@@ -55,6 +55,7 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/calc.zeugnis.js` | `Calc` | Halbjahres-Kette: `berechneSchueler`, `halbjahrErgebnis`, `mitarbeitVorhanden` |
 | `js/calc.mitarbeit.js` | `Calc` | Mitarbeits-Auswertung (Stundennoten-Modell), Schwellen |
 | `js/calc.tracker.js` | `Calc` | Heatmap-Verfall/-Farbe, Stundenplan (`trackerSession`) |
+| `js/calc.sitzplan.js` | `Calc` | Sitzplan: Gang-Vorlagen, Lage der Plätze, Sitzregeln prüfen, `sitzplanVerteilen` |
 | `js/csv.js` | `CSV` | CSV-Export/Import (UTF-8 mit BOM) |
 | `js/ui.js` | `UI` | UI-Bausteine: Modal, Toast, Formfelder, `esc`, `$`/`$all` |
 | `js/views.core.js` | `Views` | Views-Kern: State, Navigation (`go`), Render-Schleife (`render`), Zeitraum-Reiter |
@@ -189,7 +190,7 @@ beim allerersten Start erscheint er bewusst nicht.
 
 - **Berechnungen immer in `calc*.js`** (rein, testbar, ohne DOM/DB-Zugriff; geprüft in
   `tests.html`). Aufgeteilt nach Thema wie beim Store: `calc.js` legt `window.Calc` an,
-  `calc.zeugnis.js` / `calc.mitarbeit.js` / `calc.tracker.js` hängen sich per
+  `calc.zeugnis.js` / `calc.mitarbeit.js` / `calc.tracker.js` / `calc.sitzplan.js` hängen sich per
   `Object.assign(global.Calc, …)` an. Ob eine Kategorie als Note zählt bzw. eine
   Mitarbeits-Kategorie ist, beantworten `Calc.istNotenKategorie` /
   `Calc.istMitarbeitsKategorie` – die Bedingung nicht in Views nachbauen:
@@ -338,6 +339,17 @@ beim allerersten Start erscheint er bewusst nicht.
   `stunde.sitzplanId` (Auswahl im Start-Dialog, Umschalter 🏫 `tracker-raum` im Tracker);
   der Wechsel ändert nur die Anordnung, `state.tracker` bleibt erhalten. Mitarbeit,
   Heatmap und Noten hängen an den Schüler/innen, nie am Plan.
+- **Raumform und Sitzregeln:** **Vorne ist unten** (höchste `row`, Tafel unter dem Raster).
+  `seat.keinPlatz = true` ist ein Gang: bleibt im Raster (Form), zählt nie als Platz,
+  „Raster anwenden“ übernimmt ihn per Seat-ID. Die Sitzregeln liegen als `regeln` am
+  `sitzplaene`-Datensatz der Klasse (`Store.Sitzplan.regeln` / `regelnSpeichern`) und
+  gelten für alle Pläne; nur `typ: "platz"` hängt an `planId`/`seatId`. Typen und ihre
+  Geometrie stehen in `calc.sitzplan.js` (`sitzplanLage`, `sitzplanRegelnPruefen`);
+  „Automatisch belegen“ ruft `Calc.sitzplanVerteilen` (lokale Suche mit Abkühlen, drei
+  Läufe; Kosten = 1000 je verletzter Regel + Reihenabstand zur Tafel, damit Leerplätze
+  hinten bleiben). Kaskade: `Schueler.remove` entfernt Regeln der Person,
+  `Sitzplan.remove` feste Plätze des Plans; `importKlasse` (Kopie) mappt `a`/`b` um.
+  Kein Migrationsschritt nötig – fehlende Felder heißen „kein Gang“ bzw. „keine Regeln“.
 - **Abwesenheiten** (Store `abwesenheiten`, Toggle pro Schüler/Tag): eingefrorene
   Heatmap, deaktivierte Ereignis-Buttons, und die Stunden dieses Tages fallen in
   `Calc.auswertungMitarbeit` aus den gezählten Stunden (bringen also weder Punkte

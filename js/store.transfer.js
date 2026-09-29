@@ -185,7 +185,10 @@
             seats: (p.seats || []).map((seat) => Object.assign({}, seat, {
               schuelerId: seat.schuelerId ? (schuelerMap[seat.schuelerId] || null) : null
             }))
-          }))
+          })),
+          // Plan-IDs bleiben gleich, deshalb gelten feste Plätze (planId) weiter
+          regeln: (sitzplan.regeln || []).filter((r) => schuelerMap[r.a] && (!r.b || schuelerMap[r.b]))
+            .map((r) => Object.assign({}, r, { id: uid(), a: schuelerMap[r.a], b: r.b ? schuelerMap[r.b] : r.b }))
         });
       }
     }
