@@ -36,7 +36,7 @@
       const dot = stale ? "#c62828" : "#2e7d32";
       const typLabel = k.typ === "hauptfach" ? "Hauptfach" : "Nebenfach";
       return (
-        '<div class="card class-card" data-action="open-class" data-id="' + k.id + '">' +
+        '<div class="card class-card" data-action="open-class" data-id="' + k.id + '" style="border-left:8px solid ' + Calc.klassenFarbe(k) + '">' +
           '<button class="iconbtn plain danger-text card-del" data-action="delete-class" data-id="' + k.id + '" title="Klasse löschen">🗑</button>' +
           '<div class="chips">' +
             '<span class="chip accent">' + UI.esc(k.fach || "Fach") + "</span>" +

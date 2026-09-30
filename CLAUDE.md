@@ -52,14 +52,14 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/store.einstellungen.js` | `Store` | `DEFAULT_SETTINGS`, Stundenzeiten/Schwellen, `getSettings`/`saveSettings` |
 | `js/store.migrationen.js` | `Store` | `SCHEMA_VERSION`, `MIGRATION_STEPS`, `migrateSchema` |
 | `js/store.transfer.js` | `Store` | Backup (`exportAll`/`importAll`) und Klassen-Export/-Import |
-| `js/store.stundenplan.js` | `Store` | `Store.Stundenplan` (Versionen des Wochenplans), `Store.Wochennotizen` |
+| `js/store.stundenplan.js` | `Store` | `Store.Stundenplan` (Versionen des Wochenplans), `Store.Wochennotizen`, `Store.Termine` + `TERMIN_ARTEN` |
 | `js/store.demo.js` | `Store` | Demo-Daten (`seedDemoData`) beim ersten Start |
 | `js/calc.js` | `Calc` | Rechen-Kern: Notenskala (Eingabe, Drittel-/Zeugnisskala, Anzeige, MSS-Umrechnung), Kategorie-Helfer – **frei von DOM/DB** |
 | `js/calc.zeugnis.js` | `Calc` | Halbjahres-Kette: `berechneSchueler`, `halbjahrErgebnis`, `mitarbeitVorhanden` |
 | `js/calc.mitarbeit.js` | `Calc` | Mitarbeits-Auswertung (Stundennoten-Modell), Schwellen |
 | `js/calc.tracker.js` | `Calc` | Heatmap-Verfall/-Farbe, Stundenzeiten (`trackerSession`), vergessene Stunden (`stundeVergessen`, `erfassungsZeit`) |
 | `js/calc.sitzplan.js` | `Calc` | Sitzplan: Gang-Vorlagen, Lage der Plätze, Sitzregeln prüfen, `sitzplanVerteilen` |
-| `js/calc.stundenplan.js` | `Calc` | Stundenplan: Montag/KW, A/B-Wochen (`abWoche`), gültige Version (`versionFuer`), Archiv, `eintragJetzt` |
+| `js/calc.stundenplan.js` | `Calc` | Stundenplan: Montag/KW, A/B-Wochen (`abWoche`), gültige Version (`versionFuer`), Archiv, tatsächlicher Tag (`tagesPlan`), Monat, `eintragJetzt`, Klassenfarben |
 | `js/csv.js` | `CSV` | CSV-Export/Import (UTF-8 mit BOM) |
 | `js/ui.js` | `UI` | UI-Bausteine: Modal, Toast, Formfelder, `esc`, `$`/`$all` |
 | `js/views.core.js` | `Views` | Views-Kern: State, Navigation (`go`), Render-Schleife (`render`), Zeitraum-Reiter |
@@ -71,7 +71,8 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/views.sitzplan.js` | `Views` | Reiter Sitzplan + Dialoge (Platz belegen, Räume) |
 | `js/views.mitarbeit.js` | `Views` | Reiter Mitarbeit + Dialoge (Schwellen, Herleitung, Quartal abschließen) |
 | `js/views.tracker.js` | `Views` | Mitarbeits-Tracker (Stunden, Kacheln, Modi, Heatmap, Restzeit, Tippen, Rückgängig) |
-| `js/views.stundenplan.js` | `Views` | Stundenplan auf der Startseite (Raster, Wochen, Bearbeiten, Pläne/Archiv, Wochennotiz) |
+| `js/views.stundenplan.js` | `Views` | Stundenplan auf der Startseite (Wochenraster, Bearbeiten, Pläne/Archiv, Wochennotiz, nächste Termine) |
+| `js/views.kalender.js` | `Views` | Kalender: Monatsansicht, Termin-Dialog, Zellen-Menü (Ausfall, Verschieben mit Tausch, Hinweis) |
 | `js/views.dialoge.js` | `Views` | Allgemeine Dialoge (Klasse, Anteile, Schüler, Kategorie, Importe, Umzug-Empfang von der alten Adresse) |
 | `js/views.js` | `Views` | Aktions-Dispatcher: Action-Map + zentrale Delegation |
 | `js/app.js` | – | Bootstrap (DB öffnen, Demo-Daten, erster Render, SW-Registrierung) |
@@ -361,6 +362,25 @@ beim allerersten Start erscheint er bewusst nicht.
   „Doppelstunde“ zum Hauptknopf, wenn die Klasse auch die folgende Stunde hat.
   `db.js` meldet ein blockiertes Upgrade (anderes Fenster offen) per Toast und gibt
   die eigene Verbindung bei `versionchange` frei.
+- **Kalender:** Store `termine` (seit `DB_VERSION` 6) hält Termine (`art` aus
+  `Store.TERMIN_ARTEN`, `blockId` null = ganztägig), Ferien (`art: "ferien"`, `datum`–`bis`)
+  und **Änderungen** einzelner Stunden (`art: "aenderung"`, `aenderung: "ausfall" |
+  "verschoben" | "hinweis"`, `nachDatum`/`nachBlockId`). Eine Änderung meint die Stunde
+  über **Datum + Block + Klasse** (bzw. Freitext), nie über die ID des Plan-Eintrags –
+  Versionen bekommen neue IDs. Der Plan selbst wird nie geändert. `Calc.tagesPlan`
+  ist die eine Quelle für den tatsächlichen Tag (Wochenansicht, Zellen-Menü, Tracker):
+  an Ferientagen kein Unterricht, Termine und hergeschobene Stunden bleiben;
+  `Calc.stundenFinden` = Stunden, die wirklich stattfinden. Verschieben schreibt
+  `Store.Termine.verschieben` in einer Transaktion; liegt am Ziel Unterricht, tauschen
+  die Stunden die Plätze (zurück an den eigenen Platz = Änderung löschen). Die Wochen-
+  ansicht rechnet mit `tagesPlan`, nur der Bearbeiten-Modus zeigt den reinen Plan.
+  Kaskade: `Klassen.remove` löscht die Termine der Klasse (Index `klasseId`), bewusst
+  **nicht** über `klassenAbhaengige` – der Klassen-Import „ersetzen“ bringt keine
+  Termine mit. Im Backup, nicht im Klassen-Export. **Farbe je Klasse:** `klasse.farbe`
+  aus `Calc.KLASSEN_FARBEN` (Klassen-Dialog; neue Klassen bekommen
+  `Calc.freieKlassenFarbe`), ohne Wert berechnet `Calc.klassenFarbe` eine feste Farbe aus
+  der ID – keine Migration. Gilt im Stundenplan, bei Terminen der Klasse und als Streifen
+  auf der Klassenkarte.
 - **Heatmap-Zeit:** Der Verfall läuft **nur innerhalb einer laufenden Stunde**
   (Bezugszeit `min(jetzt, stunde.endeTs)`). Beim Öffnen/Fortsetzen wird
   `heatLastDecayAt` auf jetzt gesetzt (kein Nachhol-Verfall aus der Pause), beim

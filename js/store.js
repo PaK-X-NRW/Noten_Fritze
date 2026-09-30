@@ -132,6 +132,8 @@
       anteilSonstige: 50,          // %
       // Eigene Mitarbeits-Schwellen dieser Klasse; null = globale Einstellung
       mitarbeitSchwellen: null,
+      // Farbe im Stundenplan/Kalender (Calc.KLASSEN_FARBEN); null = aus der ID berechnet
+      farbe: null,
       // Abgeschlossene Quartale: [{ quartal: 1..4, datum: "YYYY-MM-DD" }].
       // Ein Eintrag sperrt das Quartal im Mitarbeit-Tab (siehe abschlussVon).
       abgeschlosseneQuartale: [],
@@ -151,14 +153,17 @@
       return k;
     },
     // Kaskadierendes Löschen aller abhängigen Daten (alles oder nichts),
-    // inkl. der Einträge der Klasse in allen Stundenplan-Versionen
+    // inkl. der Einträge der Klasse in allen Stundenplan-Versionen und ihrer Termine
     async remove(id) {
       const plaene = (await DB.getAll("stundenplaene"))
         .filter((v) => (v.eintraege || []).some((e) => e.klasseId === id))
         .map((v) => ["stundenplaene", Object.assign({}, v, {
           eintraege: v.eintraege.filter((e) => e.klasseId !== id), updatedAt: now()
         })]);
-      return kaskade(klassenAbhaengige(id), [["sitzplaene", id], ["klassen", id]], plaene);
+      // Termine der Klasse nur hier (nicht in klassenAbhaengige): der
+      // Klassen-Import „ersetzen“ bringt keine Termine mit und soll sie behalten
+      return kaskade(klassenAbhaengige(id).concat([["termine", "klasseId", id]]),
+        [["sitzplaene", id], ["klassen", id]], plaene);
     }
   };
 

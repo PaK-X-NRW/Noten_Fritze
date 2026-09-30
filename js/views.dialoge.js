@@ -14,9 +14,16 @@
   // =========================================================================
 
   // ---- Klasse anlegen/bearbeiten ------------------------------------------
-  function klasseDialog(k) {
+  async function klasseDialog(k) {
     const isNew = !k;
     const data = k || Store.neueKlasse();
+    // Farbe (Stundenplan, Kalender, Klassenkarte): neue Klassen bekommen eine noch freie
+    const farbe = isNew ? Calc.freieKlassenFarbe(await Store.Klassen.all()) : Calc.klassenFarbe(data);
+    const farbFeld = '<div class="field"><label>Farbe im Stundenplan</label>' +
+      '<input type="hidden" name="farbe" value="' + farbe + '"><div class="farbwahl">' +
+      Calc.KLASSEN_FARBEN.map((f) => '<button type="button" class="farbe' + (f === farbe ? " aktiv" : "") +
+        '" data-farbe="' + f + '" style="background:' + f + '" title="Farbe wählen"></button>').join("") +
+      "</div></div>";
     // Voreinstellung der Anteile je Fachtyp aus den Einstellungen (z. B. „50/50")
     const anteilText = (typ) => {
       const a = state.settings.anteile[typ];
@@ -36,6 +43,7 @@
         { value: "", label: "– (Sekundarstufe I)" }
       ].concat([5, 6, 7, 8, 9, 10, 11, 12, 13].map((n) => ({ value: n, label: String(n) }))),
         hint: "Ab Klassenstufe 11 werden Noten als MSS-Punkte (0–15) statt Schulnoten erfasst." }) +
+      farbFeld +
       UI.field("Notizen", "notizen", data.notizen, { type: "textarea", placeholder: "optional" });
     UI.modal({
       title: isNew ? "Neue Klasse" : "Klasse bearbeiten",
@@ -50,7 +58,7 @@
           const klassenstufeNeu = v.klassenstufe ? parseInt(v.klassenstufe, 10) : null;
           Object.assign(data, {
             name: v.name.trim(), schuljahr: v.schuljahr.trim(), fach: v.fach.trim(), typ: v.typ,
-            klassenstufe: klassenstufeNeu, notizen: v.notizen
+            klassenstufe: klassenstufeNeu, notizen: v.notizen, farbe: v.farbe || null
           });
           if (isNew || typWechsel) {
             const a = state.settings.anteile[v.typ];
@@ -65,7 +73,11 @@
           if (isNew) { await go("klasse", { klasseId: data.id, tab: "schueler" }); }
           else render();
         }}
-      ]
+      ],
+      onMount: (box) => UI.$all(".farbwahl .farbe", box).forEach((b) => b.addEventListener("click", () => {
+        UI.$all(".farbwahl .farbe", box).forEach((x) => x.classList.toggle("aktiv", x === b));
+        box.querySelector('input[name="farbe"]').value = b.getAttribute("data-farbe");
+      }))
     });
   }
 

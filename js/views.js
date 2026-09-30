@@ -17,7 +17,8 @@
     trackerStartDialog, trackerModusToggle, trackerModusEnde, trackerModusTap,
     trackerStundeBeenden, trackerVerlassen, trackerRaumDialog, trackerTap, trackerUndo, trackerHeatPause,
     besprechungStep, stundenzeitenAktion,
-    stundenplanEinrichten, ansichtSetzen, wocheBlaettern, stundenplanZelle, abWocheUmstellen, plaeneDialog
+    stundenplanEinrichten, ansichtSetzen, wocheBlaettern, stundenplanZelle, abWocheUmstellen, plaeneDialog,
+    monatBlaettern, monatTag, ansichtWechseln, terminBearbeiten, terminNeu
   } = global.Views;
 
   // =========================================================================
@@ -141,6 +142,12 @@
     "sp-zelle": (el) => stundenplanZelle(el),
     "sp-ab": () => abWocheUmstellen(),
     "sp-archiv": () => plaeneDialog(),
+    // Kalender (views.kalender.js)
+    "sp-ansicht": (el) => ansichtWechseln(el.getAttribute("data-ansicht")),
+    "mo-blaettern": (el) => monatBlaettern(el.getAttribute("data-schritt")),
+    "mo-tag": (el) => monatTag(el.getAttribute("data-datum")),
+    "termin-neu": () => terminNeu(),
+    "termin-bearbeiten": (el) => terminBearbeiten(el.getAttribute("data-id")),
     // Startseite: vergessene Stunde einer Klasse ansehen (Tracker-Start fragt nach)
     "offene-stunde": async (el) => {
       await go("klasse", { klasseId: el.getAttribute("data-id"), tab: "schueler" });

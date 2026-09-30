@@ -65,7 +65,7 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `db.js` – generischer IndexedDB-Wrapper (Promises, Schema-Versionierung)
   - `store.js` – Domänenmodell und Repositories (Kern des Namespace `Store`)
   - `store.einstellungen.js` – Standardwerte und App-Einstellungen
-  - `store.stundenplan.js` – Stundenplan (Versionen) und Wochennotizen
+  - `store.stundenplan.js` – Stundenplan (Versionen), Wochennotizen, Termine/Kalender
   - `store.migrationen.js` – Daten-Migrationen (`schemaVersion`)
   - `store.transfer.js` – Backup und Klassen-Export/-Import
   - `store.demo.js` – Demo-Daten beim ersten Start
@@ -74,7 +74,7 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `calc.mitarbeit.js` – Mitarbeits-Auswertung (Stundennoten-Modell)
   - `calc.tracker.js` – Heatmap, Stundenzeiten, vergessene Stunden
   - `calc.sitzplan.js` – Raumform-Vorlagen, Sitzregeln, automatisches Verteilen
-  - `calc.stundenplan.js` – Wochen, A/B-Wochen, Stundenplan-Versionen
+  - `calc.stundenplan.js` – Wochen, A/B-Wochen, Versionen, tatsächlicher Tag, Monat, Klassenfarben
     (alle `calc*.js` rein, ohne DOM/DB; geprüft in `tests.html`)
   - `csv.js` – CSV-Export/Import
   - `ui.js` – UI-Bausteine (Modal, Toast, Formfelder)
@@ -86,7 +86,8 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `views.sitzplan.js` – Reiter Sitzplan
   - `views.mitarbeit.js` – Reiter Mitarbeit inkl. Quartalsabschluss
   - `views.tracker.js` – Mitarbeits-Tracker
-  - `views.stundenplan.js` – Stundenplan auf der Startseite
+  - `views.stundenplan.js` – Stundenplan auf der Startseite (Wochenansicht)
+  - `views.kalender.js` – Monatsansicht, Termine, Ausfall/Verschieben/Hinweis
   - `views.dialoge.js` – allgemeine Dialoge
   - `views.js` – Aktions-Dispatcher (Action-Map, Delegation)
   - `app.js` – Bootstrap
@@ -109,7 +110,7 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
 ```
 klassen        { id, name, schuljahr, fach, typ('hauptfach'|'nebenfach'),
                  klassenstufe(5..13, null=Sek.I), anteilSchriftlich, anteilSonstige,
-                 mitarbeitSchwellen(null=global),
+                 mitarbeitSchwellen(null=global), farbe(Stundenplan/Kalender, null=berechnet),
                  abgeschlosseneQuartale[{quartal(1..4), datum}],
                  notizen, createdAt, updatedAt, lastOpenedAt }
 schueler       { id, klasseId, vorname, nachname, bemerkung, sortIndex, ... }
@@ -150,6 +151,13 @@ stundenplaene  { id, gueltigAb(YYYY-MM-DD, Montag | null = von Anfang an),
                  (je Datensatz eine Version des Wochenplans; gültig ist die mit dem
                  spätesten gueltigAb ≤ Datum, ältere als die heutige = Archiv)
 wochennotizen  { montag(YYYY-MM-DD), text, updatedAt }   (Notiz je Woche)
+termine        { id, art('klassenarbeit'|'test'|'konferenz'|'elternabend'|'aufsicht'|
+                 'vertretung'|'sonstiges'|'ferien'|'aenderung'), titel, datum, bis (Ferien),
+                 blockId | null (ganztägig), klasseId | null, notiz,
+                 aenderung('ausfall'|'verschoben'|'hinweis'), nachDatum, nachBlockId,
+                 createdAt, updatedAt }
+                 (Änderungen meinen eine Stunde über Datum + Block + Klasse bzw. Freitext;
+                 der Plan selbst bleibt unverändert)
 einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punkte'|'note6'),
                  stundenzeiten [{ id, art('stunde'|'pause'), name, start, ende, nr }]
                  (bis 1.15: stundenplan, wird beim Lesen umgewandelt),
@@ -165,7 +173,7 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
 
 - **Integrität:** Löschen einer Klasse/eines Schülers löscht kaskadierend alle
   abhängigen Datensätze (Leistungen, Noten, Ereignisse, Stunden, Abwesenheiten,
-  Sitzplatz-Zuweisung, Einträge im Stundenplan); das Löschen einer Kategorie oder einer Spalte nimmt die
+  Sitzplatz-Zuweisung, Einträge im Stundenplan, Termine); das Löschen einer Kategorie oder einer Spalte nimmt die
   darin erfassten Noten mit.
 - **App-Version:** `APP_VERSION` in `js/version.js` (Schema `MAJOR.MINOR.PATCH`,
   aktuell **1.15.0**) ist die sichtbare Programmversion: angezeigt unter
@@ -458,6 +466,19 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   gewählten Woche gilt (z. B. Halbjahreswechsel) – ältere Pläne bleiben im Archiv nur
   lesbar. Der Tracker-Start belegt den Raum laut Stundenplan vor und schlägt eine
   Doppelstunde vor, wenn die Klasse auch die folgende Stunde hat.
+- **Kalender** – Umschalter **Woche · Monat**. Die Woche zeigt den tatsächlichen Tag:
+  Ferien/freie Tage grau und ohne Unterricht, ganztägige Termine in eigener Zeile,
+  Termine mit Stunde in der Zelle. **＋ Termin**: Art (📝 Klassenarbeit · ✏️ Test ·
+  👥 Konferenz · 👪 Elternabend · 🦺 Aufsicht · 🔁 Vertretung · 📌 Sonstiges ·
+  🌴 Ferien / frei), Titel, Datum (Ferien von–bis), Stunde oder ganztägig, Klasse.
+  Tipp auf eine Zelle öffnet ein Menü: Klasse öffnen · Fällt aus (mit Grund) ·
+  Verschieben (anderes Datum/Stunde; liegt dort schon eine Stunde, **tauschen beide
+  die Plätze**) · Hinweis (z. B. Raumwechsel) · Termin in dieser Stunde – jeweils nur
+  für dieses Datum, wieder aufhebbar. Der Monat zeigt Ferien als Band und die
+  Termine; Tipp auf einen Tag springt in dessen Woche. Unter der Wochennotiz stehen
+  die **nächsten Termine** (14 Tage). Jede Klasse hat eine **eigene Farbe**
+  (Klassen-Dialog, Farbstreifen auf der Klassenkarte), die im Stundenplan und bei
+  Terminen der Klasse gilt.
 - **Klasse** – Tabs: *Schüler/innen · Noten · Kategorien · Sitzplan · Mitarbeit*.
   Oben schnell erreichbar: **Tracker**, **Besprechung**, **Exportieren** (Klasse als
   JSON), Bearbeiten. Im Bearbeiten-Dialog legt die **Klassenstufe** (5–13) fest,
@@ -586,7 +607,7 @@ Noten_Fritze/
    ├─ db.js                 IndexedDB-Wrapper
    ├─ store.js              Datenmodell + Repositories (Store-Kern)
    ├─ store.einstellungen.js Standardwerte + App-Einstellungen
-   ├─ store.stundenplan.js  Stundenplan (Versionen) + Wochennotizen
+   ├─ store.stundenplan.js  Stundenplan, Wochennotizen, Termine
    ├─ store.migrationen.js  Daten-Migrationen (schemaVersion)
    ├─ store.transfer.js     Backup + Klassen-Export/-Import
    ├─ store.demo.js         Demo-Daten beim ersten Start
@@ -595,7 +616,7 @@ Noten_Fritze/
    ├─ calc.mitarbeit.js     Mitarbeits-Auswertung
    ├─ calc.tracker.js       Heatmap, Stundenzeiten, vergessene Stunden
    ├─ calc.sitzplan.js      Raumform, Sitzregeln, automatisches Verteilen
-   ├─ calc.stundenplan.js   Wochen, A/B-Wochen, Stundenplan-Versionen
+   ├─ calc.stundenplan.js   Wochen, A/B, Versionen, Kalender-Tag, Monat
    ├─ csv.js                CSV-Export/Import
    ├─ ui.js                 Modal/Toast/Formfelder
    ├─ views.core.js         Views-Kern (State, Routing, Render)
@@ -607,7 +628,8 @@ Noten_Fritze/
    ├─ views.sitzplan.js     Reiter Sitzplan
    ├─ views.mitarbeit.js    Reiter Mitarbeit, Quartal abschließen
    ├─ views.tracker.js      Mitarbeits-Tracker
-   ├─ views.stundenplan.js  Stundenplan auf der Startseite
+   ├─ views.stundenplan.js  Stundenplan auf der Startseite (Woche)
+   ├─ views.kalender.js     Monat, Termine, Ausfall/Verschieben/Hinweis
    ├─ views.dialoge.js      allgemeine Dialoge
    ├─ views.js              Aktions-Dispatcher (Action-Map)
    └─ app.js                Bootstrap

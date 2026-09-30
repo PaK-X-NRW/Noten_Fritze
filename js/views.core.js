@@ -35,6 +35,8 @@
     // Startseite / Stundenplan: angezeigte Woche (Montag, "" = aktuelle) und Bearbeiten-Modus
     stundenplanWoche: "",
     stundenplanBearbeiten: false,
+    stundenplanAnsicht: "woche", // "woche" | "monat"
+    stundenplanMonat: "",        // angezeigter Monat "YYYY-MM" ("" = Monat der angezeigten Woche)
     settings: null
   };
 

@@ -1,31 +1,54 @@
 /* =========================================================================
-   views.stundenplan.js – Stundenplan auf der Startseite
+   views.stundenplan.js – Stundenplan auf der Startseite (Wochenansicht)
    - Wochenraster Mo–Fr × Stundenzeiten; Pausenzeilen nur mit Eintrag
      (im Bearbeiten-Modus alle), heute und laufende Stunde hervorgehoben
-   - Wochen blättern, A/B-Woche anzeigen und umstellen
+   - Kalender: der tatsächliche Tag (Ferien, Ausfall, Verschiebung, Hinweis,
+     Termine) laut Calc.tagesPlan; ganztägige Termine in eigener Zeile
+   - Wochen blättern, A/B-Woche anzeigen und umstellen, Umschalter Woche · Monat
    - Bearbeiten: Zelle antippen -> Klasse oder Freitext, jede Woche oder A/B
    - Versionen: „Neuer Stundenplan ab …“, ältere Pläne im Archiv (nur lesbar)
-   - Notiz je Woche (Wochenende / ToDos)
-   Die Rechnungen (Wochen, A/B, Versionen) liegen in calc.stundenplan.js.
+   - Notiz je Woche (Wochenende / ToDos), darunter die nächsten Termine
+   Monat, Termin- und Änderungs-Dialoge liegen in views.kalender.js, die
+   Rechnungen (Wochen, A/B, Versionen, Tagesplan) in calc.stundenplan.js.
    ========================================================================= */
 (function (global) {
   "use strict";
 
-  const { state, go, render, homeUmschalterHTML } = global.Views;
+  const { state, render, homeUmschalterHTML } = global.Views;
+  const api = global.Views;   // views.kalender.js lädt später
   const TAGE = ["Mo", "Di", "Mi", "Do", "Fr"];
 
-  // Dezente Farbe je Fach (gleiches Fach = gleiche Farbe)
-  function fachFarbe(fach) {
-    const s = String(fach || "").toLowerCase();
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
-    return "hsl(" + h + ", 55%, 90%)";
-  }
   function tagMonat(datum) {
     return datum.slice(8, 10) + "." + datum.slice(5, 7) + ".";
   }
   function datumLang(datum) {
     return tagMonat(datum) + datum.slice(0, 4);
+  }
+  // „Do 01.10.“
+  function tagKurz(datum) {
+    const p = datum.split("-");
+    const wt = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"][new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10)).getDay()];
+    return wt + " " + tagMonat(datum);
+  }
+  // Name eines Blocks der Stundenzeiten („3. Std“ bzw. Pausenname)
+  function blockName(blockId, kurz) {
+    const b = state.settings.stundenzeiten.find((x) => x.id === blockId);
+    if (!b) return "?";
+    return b.art === "stunde" ? b.nr + (kurz ? ". Std" : ". Stunde") : b.name;
+  }
+
+  // Termin: Symbol + Titel (sonst Art) + Klasse; Farbe der Klasse bzw. der Art
+  function terminText(t, klassen) {
+    const art = Store.TERMIN_ART_MAP[t.art] || Store.TERMIN_ART_MAP.sonstiges;
+    const k = t.klasseId && klassen[t.klasseId];
+    return art.icon + " " + (t.titel || art.label) + (k ? " · " + (k.name || "") : "");
+  }
+  function terminFarbe(t, klassen) {
+    const k = t.klasseId && klassen[t.klasseId];
+    return k ? Calc.klassenFarbe(k) : (Store.TERMIN_ART_MAP[t.art] || Store.TERMIN_ART_MAP.sonstiges).farbe;
+  }
+  function terminChipHTML(t, klassen) {
+    return '<div class="sp-termin" style="background:' + terminFarbe(t, klassen) + '">' + UI.esc(terminText(t, klassen)) + "</div>";
   }
 
   // Montag der angezeigten Woche ("" = aktuelle Woche)
@@ -46,7 +69,9 @@
   // =========================================================================
   async function ViewStundenplan() {
     const s = state.settings;
-    const [versionen, klassenListe] = await Promise.all([Store.Stundenplan.alle(), Store.Klassen.all()]);
+    const [versionen, klassenListe, termine] = await Promise.all([
+      Store.Stundenplan.alle(), Store.Klassen.all(), Store.Termine.alle()
+    ]);
     const klassen = {};
     klassenListe.forEach((k) => { klassen[k.id] = k; });
     const heute = Store.datumLokal();
@@ -54,20 +79,57 @@
     const version = Calc.versionFuer(versionen, montag);
     const archiv = !!(version && Calc.versionArchiviert(versionen, version, heute));
     const bearbeiten = !!(state.stundenplanBearbeiten && version && !archiv);
+    const monat = state.stundenplanAnsicht === "monat" && !bearbeiten;
+
+    const topbar =
+      '<div class="title-wrap"><h1 class="main">Noten-Fritze</h1><span class="sub">Stundenplan</span></div>' +
+      homeUmschalterHTML("stundenplan") +
+      '<div class="grow"></div>' +
+      '<button class="iconbtn" data-action="settings" title="Einstellungen">⚙️</button>' +
+      (bearbeiten ? "" : '<button class="btn" data-action="termin-neu">＋ Termin</button>') +
+      '<button class="btn" data-action="sp-archiv">🗂 Pläne</button>' +
+      (version && !archiv && !monat
+        ? '<button class="btn' + (bearbeiten ? " primary" : "") + '" data-action="sp-bearbeiten">' + (bearbeiten ? "✓ Fertig" : "✏️ Bearbeiten") + "</button>"
+        : "");
+    const ansichtTabs = bearbeiten ? "" : '<div class="tabs sp-ansicht">' +
+      [["woche", "Woche"], ["monat", "Monat"]].map(([id, l]) =>
+        '<button class="tab' + ((monat ? "monat" : "woche") === id ? " active" : "") + '" data-action="sp-ansicht" data-ansicht="' + id + '">' + l + "</button>"
+      ).join("") + "</div>";
+
+    if (monat) {
+      return { topbar, body: api.monatHTML(termine, klassen, ansichtTabs) +
+        '<p class="home-info"><a href="info.html">Was ist Noten-Fritze? · Anleitung · Datenschutz</a></p>' };
+    }
+
     const woche = Calc.abWoche(s.abWochen, montag);
-    const eintraege = bearbeiten ? (version.eintraege || []) : Calc.eintraegeDerWoche(version, woche);
+    const laufend = montag === Calc.montagVon(heute) ? laufenderBlockId(s.stundenzeiten) : null;
+    const heuteTag = montag === Calc.montagVon(heute) ? ((new Date().getDay() + 6) % 7) + 1 : 0;
+    const daten = TAGE.map((t, i) => Calc.datumPlusTage(montag, i));
+
+    // Beim Bearbeiten der reine Plan, sonst der tatsächliche Tag (Kalender)
+    const eintraege = bearbeiten ? (version.eintraege || []) : [];
+    const tage = bearbeiten ? [] : daten.map((d) => Calc.tagesPlan(versionen, s.abWochen, termine, d));
 
     // Zeilen: alle Stunden; Pausen nur mit Eintrag (beim Bearbeiten alle)
     const genutzt = {};
     eintraege.forEach((e) => { genutzt[e.blockId] = true; });
+    tage.forEach((p) => Object.keys(p.zellen).forEach((id) => { if (p.zellen[id].length) genutzt[id] = true; }));
     const bloecke = s.stundenzeiten.filter((b) => b.art === "stunde" || bearbeiten || genutzt[b.id]);
-    const laufend = montag === Calc.montagVon(heute) ? laufenderBlockId(s.stundenzeiten) : null;
-    const heuteTag = montag === Calc.montagVon(heute) ? ((new Date().getDay() + 6) % 7) + 1 : 0;
 
     const kopf = "<tr><th></th>" + TAGE.map((t, i) => {
-      const datum = Calc.datumPlusTage(montag, i);
-      return '<th class="' + (i + 1 === heuteTag ? "heute" : "") + '">' + t + ' <span class="muted">' + tagMonat(datum) + "</span></th>";
+      const frei = tage[i] && tage[i].frei;
+      return '<th class="' + (i + 1 === heuteTag ? "heute" : "") + (frei ? " frei" : "") + '">' + t +
+        ' <span class="muted">' + tagMonat(daten[i]) + "</span>" +
+        (frei ? '<span class="sp-frei-name">🌴 ' + UI.esc(frei.titel || "frei") + "</span>" : "") + "</th>";
     }).join("") + "</tr>";
+
+    // Ganztägige Termine in eigener Zeile über der 1. Stunde
+    const ganztags = tage.some((p) => p.ganztags.length)
+      ? '<tr class="ganztags"><th class="sp-zeit"><strong>Ganztägig</strong></th>' + tage.map((p, i) =>
+          '<td class="sp-zelle' + (i + 1 === heuteTag ? " heute" : "") + (p.frei ? " frei" : "") + '">' +
+            p.ganztags.map((t) => '<div data-action="termin-bearbeiten" data-id="' + UI.esc(t.id) + '">' + terminChipHTML(t, klassen) + "</div>").join("") +
+          "</td>").join("") + "</tr>"
+      : "";
 
     const zeilen = bloecke.map((b) => {
       const label = b.art === "stunde"
@@ -75,12 +137,15 @@
         : "<strong>" + UI.esc(b.name) + "</strong>";
       const zellen = TAGE.map((t, i) => {
         const tag = i + 1;
-        const inhalt = Calc.eintraegeDerZelle(eintraege, tag, b.id).map((e) => eintragHTML(e, klassen, bearbeiten)).join("");
-        const klick = bearbeiten || inhalt.indexOf("data-klasse") !== -1;
-        return '<td class="sp-zelle' + (tag === heuteTag ? " heute" : "") + (b.id === laufend && tag === heuteTag ? " jetzt" : "") +
-          (bearbeiten ? " bearbeiten" : "") + '"' +
-          (klick ? ' data-action="sp-zelle" data-tag="' + tag + '" data-block="' + UI.esc(b.id) + '"' : "") + ">" +
-          inhalt + "</td>";
+        const klasse = "sp-zelle" + (tag === heuteTag ? " heute" : "") + (b.id === laufend && tag === heuteTag ? " jetzt" : "");
+        if (bearbeiten) {
+          const inhalt = Calc.eintraegeDerZelle(eintraege, tag, b.id).map((e) => eintragHTML(e, klassen)).join("");
+          return '<td class="' + klasse + ' bearbeiten" data-action="sp-zelle" data-tag="' + tag + '" data-block="' + UI.esc(b.id) + '">' + inhalt + "</td>";
+        }
+        const p = tage[i];
+        const inhalt = (p.zellen[b.id] || []).map((item) => itemHTML(item, klassen)).join("");
+        return '<td class="' + klasse + (p.frei ? " frei" : "") + '" data-action="sp-zelle" data-datum="' + daten[i] +
+          '" data-block="' + UI.esc(b.id) + '">' + inhalt + "</td>";
       }).join("");
       return '<tr class="' + (b.art === "stunde" ? "" : "pause") + '"><th class="sp-zeit">' + label +
         '<span class="muted">' + b.start + "–" + b.ende + "</span></th>" + zellen + "</tr>";
@@ -96,6 +161,7 @@
         "</div>" +
         '<button class="iconbtn" data-action="sp-woche" data-schritt="1" title="Nächste Woche">▶</button>' +
         (montag !== Calc.montagVon(heute) ? '<button class="btn small" data-action="sp-woche" data-schritt="0">Heute</button>' : "") +
+        '<div class="grow"></div>' + ansichtTabs +
       "</div>";
 
     let hinweis = "";
@@ -117,22 +183,15 @@
     const body = hinweis + wochenKopf +
       '<div class="sp-layout">' +
         '<div class="table-wrap sp-wrap"><table class="sp-tabelle' + (bearbeiten ? " bearbeiten" : "") + '"><thead>' + kopf + "</thead><tbody>" +
-          zeilen + "</tbody></table></div>" +
-        '<div class="card sp-notiz"><h3>Wochenende &amp; ToDos</h3>' +
-          '<textarea id="sp-notiz" placeholder="Notizen für diese Woche …">' + UI.esc(notiz) + "</textarea>" +
-          '<div class="hint">Gehört zur KW ' + kw + ", wird automatisch gespeichert.</div></div>" +
+          ganztags + zeilen + "</tbody></table></div>" +
+        '<div class="sp-seite">' +
+          '<div class="card sp-notiz"><h3>Wochenende &amp; ToDos</h3>' +
+            '<textarea id="sp-notiz" placeholder="Notizen für diese Woche …">' + UI.esc(notiz) + "</textarea>" +
+            '<div class="hint">Gehört zur KW ' + kw + ", wird automatisch gespeichert.</div></div>" +
+          naechsteTermineHTML(termine, klassen, heute) +
+        "</div>" +
       "</div>" +
       '<p class="home-info"><a href="info.html">Was ist Noten-Fritze? · Anleitung · Datenschutz</a></p>';
-
-    const topbar =
-      '<div class="title-wrap"><h1 class="main">Noten-Fritze</h1><span class="sub">Stundenplan</span></div>' +
-      homeUmschalterHTML("stundenplan") +
-      '<div class="grow"></div>' +
-      '<button class="iconbtn" data-action="settings" title="Einstellungen">⚙️</button>' +
-      '<button class="btn" data-action="sp-archiv">🗂 Pläne</button>' +
-      (version && !archiv
-        ? '<button class="btn' + (bearbeiten ? " primary" : "") + '" data-action="sp-bearbeiten">' + (bearbeiten ? "✓ Fertig" : "✏️ Bearbeiten") + "</button>"
-        : "");
 
     return { topbar, body, mount: () => {
       const feld = UI.$("#sp-notiz");
@@ -143,16 +202,54 @@
     }};
   }
 
-  function eintragHTML(e, klassen, bearbeiten) {
-    const ab = bearbeiten && e.woche !== "alle" ? '<span class="sp-ab">' + e.woche + "</span>" : "";
+  // Die nächsten 14 Tage (ab heute) unter der Wochennotiz
+  function naechsteTermineHTML(termine, klassen, heute) {
+    const liste = Calc.naechsteTermine(termine, heute, 14);
+    return '<div class="card sp-naechste"><h3>Nächste Termine</h3>' +
+      (liste.length
+        ? liste.map((t) => '<div class="sp-naechster" data-action="termin-bearbeiten" data-id="' + UI.esc(t.id) + '">' +
+            '<span class="muted">' + (t.art === "ferien"
+              ? (t.datum < heute ? "bis " : tagKurz(t.datum) + " – ") + tagKurz(t.bis || t.datum)
+              : tagKurz(t.datum)) +
+            (t.blockId ? " · " + UI.esc(blockName(t.blockId, true)) : "") + "</span>" +
+            terminChipHTML(t, klassen) + "</div>").join("")
+        : '<p class="hint">In den nächsten 14 Tagen steht nichts an.</p>') +
+      "</div>";
+  }
+
+  // Eintrag des Plans (Bearbeiten-Modus): Klasse oder Freitext, A/B-Kennung
+  function eintragHTML(e, klassen) {
+    const ab = e.woche !== "alle" ? '<span class="sp-ab">' + e.woche + "</span>" : "";
     if (e.klasseId) {
       const k = klassen[e.klasseId];
       if (!k) return "";
-      return '<div class="sp-eintrag" data-klasse="' + UI.esc(k.id) + '" style="background:' + fachFarbe(k.fach) + '">' + ab +
+      return '<div class="sp-eintrag" style="background:' + Calc.klassenFarbe(k) + '">' + ab +
         '<span class="nm">' + UI.esc(k.name || "(ohne Namen)") + "</span>" +
         (k.fach ? '<span class="fach">' + UI.esc(k.fach) + "</span>" : "") + "</div>";
     }
     return '<div class="sp-eintrag frei">' + ab + '<span class="nm">' + UI.esc(e.titel || "") + "</span></div>";
+  }
+
+  // Eintrag des tatsächlichen Tages (Ansicht): Stunde mit Änderung oder Termin
+  function itemHTML(item, klassen) {
+    if (item.typ === "termin") return terminChipHTML(item.termin, klassen);
+    const k = item.klasseId ? klassen[item.klasseId] : null;
+    if (item.klasseId && !k) return "";
+    const a = item.aenderung;
+    const weg = a && (a.aenderung === "ausfall" || a.aenderung === "verschoben");
+    let zusatz = "";
+    if (a && a.aenderung === "ausfall") zusatz = '<span class="sp-vermerk">fällt aus' + (a.notiz ? ": " + UI.esc(a.notiz) : "") + "</span>";
+    else if (a && a.aenderung === "verschoben") zusatz = '<span class="sp-vermerk">→ ' + tagKurz(a.nachDatum) + " " + UI.esc(blockName(a.nachBlockId, true)) + "</span>";
+    else if (a && a.notiz) zusatz = '<span class="sp-vermerk">ℹ︎ ' + UI.esc(a.notiz) + "</span>";
+    if (item.verschobenVon) {
+      const v = item.verschobenVon;
+      zusatz = '<span class="sp-vermerk">↪ von ' + tagKurz(v.datum) + " " + UI.esc(blockName(v.blockId, true)) + "</span>" +
+        (v.notiz ? '<span class="sp-vermerk">ℹ︎ ' + UI.esc(v.notiz) + "</span>" : "");
+    }
+    const cls = "sp-eintrag" + (k ? "" : " frei") + (weg ? " weg" : "") + (item.verschobenVon ? " hergeschoben" : "");
+    return '<div class="' + cls + '"' + (k ? ' style="background:' + Calc.klassenFarbe(k) + '"' : "") + ">" +
+      '<span class="nm">' + UI.esc(k ? (k.name || "(ohne Namen)") : item.titel) + "</span>" +
+      (k && k.fach && !zusatz ? '<span class="fach">' + UI.esc(k.fach) + "</span>" : "") + zusatz + "</div>";
   }
 
   // =========================================================================
@@ -163,6 +260,7 @@
     if (!versionen.length) await Store.Stundenplan.neu(null);
     await ansichtSetzen("stundenplan");
     state.stundenplanWoche = "";
+    state.stundenplanAnsicht = "woche";
     state.stundenplanBearbeiten = true;
     render();
   }
@@ -181,12 +279,10 @@
     render();
   }
 
-  // Ansicht: Klasse öffnen. Bearbeiten: Zelle belegen.
+  // Ansicht: Menü der Zelle (views.kalender.js). Bearbeiten: Zelle belegen.
   async function stundenplanZelle(el) {
     if (!state.stundenplanBearbeiten) {
-      const k = el.querySelector("[data-klasse]");
-      if (k) go("klasse", { klasseId: k.getAttribute("data-klasse"), tab: "schueler" });
-      return;
+      return api.zellenMenue(el.getAttribute("data-datum"), el.getAttribute("data-block"));
     }
     const versionen = await Store.Stundenplan.alle();
     const version = Calc.versionFuer(versionen, angezeigterMontag());
@@ -357,8 +453,9 @@
     const box = m.box;
     const zeigen = (v) => {
       m.close();
-      state.stundenplanWoche = v.gueltigAb || Calc.montagVon(Calc.datumPlusTage(Calc.versionBis(versionen, v) || heute, 0));
+      state.stundenplanWoche = v.gueltigAb || Calc.montagVon(Calc.versionBis(versionen, v) || heute);
       state.stundenplanBearbeiten = false;
+      state.stundenplanAnsicht = "woche";
       render();
     };
     UI.$all("[data-zeigen]", box).forEach((b) => b.addEventListener("click", () =>
@@ -395,6 +492,8 @@
 
   Object.assign(global.Views, {
     ViewStundenplan, stundenplanEinrichten, ansichtSetzen, wocheBlaettern,
-    stundenplanZelle, abWocheUmstellen, plaeneDialog
+    stundenplanZelle, abWocheUmstellen, plaeneDialog,
+    // Bausteine für views.kalender.js
+    terminText, terminFarbe, terminChipHTML, tagMonat, datumLang, tagKurz, blockName, angezeigterMontag
   });
 })(window);

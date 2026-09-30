@@ -40,6 +40,7 @@ const ASSETS = [
   "./js/views.mitarbeit.js",
   "./js/views.tracker.js",
   "./js/views.stundenplan.js",
+  "./js/views.kalender.js",
   "./js/views.dialoge.js",
   "./js/views.js",
   "./js/app.js",

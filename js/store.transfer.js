@@ -20,7 +20,7 @@
   const DATEN_STORES = {
     klassen: "id", schueler: "id", kategorien: "id", leistungen: "id", noten: "id",
     sitzplaene: "klasseId", ereignisse: "id", abwesenheiten: "id", stunden: "id",
-    stundenplaene: "id", wochennotizen: "montag"
+    stundenplaene: "id", wochennotizen: "montag", termine: "id"
   };
   // Prüft eine Liste aus einer Import-Datei, bevor irgendetwas geschrieben
   // wird: fehlt sie, ist sie leer; ist sie kaputt, bricht der Import ab.
@@ -39,12 +39,12 @@
   // ---- Backup (Gesamt-Export/Import als JSON) ------------------------------
   async function exportAll() {
     const [klassen, schueler, kategorien, leistungen, noten, sitzplaene, ereignisse, abwesenheiten, stunden,
-      stundenplaene, wochennotizen, settings] = await Promise.all([
+      stundenplaene, wochennotizen, termine, settings] = await Promise.all([
       DB.getAll("klassen"), DB.getAll("schueler"), DB.getAll("kategorien"),
       DB.getAll("leistungen"),
       DB.getAll("noten"), DB.getAll("sitzplaene"), DB.getAll("ereignisse"),
       DB.getAll("abwesenheiten"), DB.getAll("stunden"),
-      DB.getAll("stundenplaene"), DB.getAll("wochennotizen"), getSettings()
+      DB.getAll("stundenplaene"), DB.getAll("wochennotizen"), DB.getAll("termine"), getSettings()
     ]);
     return {
       app: "noten-fritze", appVersion: APP_VERSION,
@@ -54,7 +54,7 @@
       dbVersion: DB.DB_VERSION, schemaVersion: SCHEMA_VERSION,
       exportedAt: new Date().toISOString(),
       data: { klassen, schueler, kategorien, leistungen, noten, sitzplaene, ereignisse, abwesenheiten, stunden,
-        stundenplaene, wochennotizen, settings }
+        stundenplaene, wochennotizen, termine, settings }
     };
   }
 

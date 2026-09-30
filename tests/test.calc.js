@@ -412,9 +412,69 @@
         { tag: 3, blockId: "std-4", woche: "alle", klasseId: "k" }
       ] }];
       const mittwoch = new Date(2026, 8, 30, 10, 0).getTime();   // 3. Stunde
-      const r = Calc.eintragJetzt(v, [], zeiten, "k", mittwoch);
+      const r = Calc.eintragJetzt(v, [], [], zeiten, "k", mittwoch);
       gleich([r.eintrag.sitzplanId, r.folgeGleich], ["raum2", true]);
-      gleich(Calc.eintragJetzt(v, [], zeiten, "andere", mittwoch), null);
+      gleich(Calc.eintragJetzt(v, [], [], zeiten, "andere", mittwoch), null);
+      const ausfall = [{ art: "aenderung", aenderung: "ausfall", datum: "2026-09-30", blockId: "std-4", klasseId: "k" }];
+      gleich(Calc.eintragJetzt(v, [], ausfall, zeiten, "k", mittwoch).folgeGleich, false, "4. Stunde fällt aus");
+      const ferien = [{ art: "ferien", datum: "2026-09-28", bis: "2026-10-02" }];
+      gleich(Calc.eintragJetzt(v, [], ferien, zeiten, "k", mittwoch), null, "in den Ferien kein Unterricht");
+    });
+  });
+
+  gruppe("Kalender: tatsächlicher Tag, Monat, Farben", () => {
+    const versionen = [{ id: "v", gueltigAb: null, eintraege: [
+      { tag: 1, blockId: "std-1", woche: "alle", klasseId: "k1", sitzplanId: "r1" },
+      { tag: 1, blockId: "std-2", woche: "alle", klasseId: "k2" },
+      { tag: 3, blockId: "std-3", woche: "alle", titel: "Aufsicht" }
+    ] }];
+    const namen = (liste) => (liste || []).map((i) => i.typ === "termin" ? "T:" + i.termin.titel : (i.klasseId || i.titel));
+    fall("Plan, Ausfall und Hinweis eines Tages", () => {
+      const termine = [
+        { art: "aenderung", aenderung: "ausfall", datum: "2026-09-28", blockId: "std-2", klasseId: "k2", notiz: "Wandertag" },
+        { art: "aenderung", aenderung: "hinweis", datum: "2026-09-28", blockId: "std-1", klasseId: "k1", notiz: "Raum 204" }
+      ];
+      const p = Calc.tagesPlan(versionen, [], termine, "2026-09-28");
+      gleich(namen(p.zellen["std-1"]), ["k1"]);
+      gleich(p.zellen["std-1"][0].aenderung.notiz, "Raum 204");
+      gleich(p.zellen["std-2"][0].aenderung.aenderung, "ausfall");
+      gleich(namen(Calc.stundenFinden(p, "std-2")), [], "ausgefallen findet nicht statt");
+      gleich(Calc.tagesPlan(versionen, [], termine, "2026-10-05").zellen["std-2"][0].aenderung, null, "nur an diesem Datum");
+    });
+    fall("Verschieben: am alten Platz vermerkt, am neuen Platz dabei (Raum bleibt)", () => {
+      const termine = [{ art: "aenderung", aenderung: "verschoben", datum: "2026-09-28", blockId: "std-1", klasseId: "k1",
+        nachDatum: "2026-10-01", nachBlockId: "std-5" }];
+      const mo = Calc.tagesPlan(versionen, [], termine, "2026-09-28");
+      gleich(namen(Calc.stundenFinden(mo, "std-1")), []);
+      const neu = Calc.tagesPlan(versionen, [], termine, "2026-10-01").zellen["std-5"][0];
+      gleich([neu.klasseId, neu.sitzplanId, !!neu.verschobenVon], ["k1", "r1", true]);
+    });
+    fall("Ferien: kein Unterricht, Termine und hergeschobene Stunden bleiben", () => {
+      const termine = [
+        { art: "ferien", titel: "Herbstferien", datum: "2026-09-28", bis: "2026-10-09" },
+        { art: "konferenz", titel: "Konferenz", datum: "2026-09-30", blockId: null },
+        { art: "klassenarbeit", titel: "KA", datum: "2026-09-30", blockId: "std-3", klasseId: "k1" }
+      ];
+      const p = Calc.tagesPlan(versionen, [], termine, "2026-09-30");
+      gleich(p.frei.titel, "Herbstferien");
+      gleich(namen(p.zellen["std-3"]), ["T:KA"], "Aufsicht entfällt, Termin bleibt");
+      gleich(p.ganztags.map((t) => t.titel), ["Konferenz"]);
+      gleich(Calc.ferienAm(termine, "2026-10-10"), null, "nach den Ferien");
+    });
+    fall("Monatsraster und nächste Termine", () => {
+      const r = Calc.monatsRaster("2026-10");
+      gleich([r.length, r[0][0], r[r.length - 1][6]], [5, "2026-09-28", "2026-11-01"]);
+      const termine = [
+        { art: "test", datum: "2026-10-20" }, { art: "test", datum: "2026-10-02" },
+        { art: "ferien", datum: "2026-09-21", bis: "2026-10-01" }, { art: "aenderung", datum: "2026-10-01" }
+      ];
+      gleich(Calc.naechsteTermine(termine, "2026-09-30", 14).map((t) => t.datum), ["2026-09-21", "2026-10-02"]);
+    });
+    fall("Farbe je Klasse: gewählt, sonst fest aus der ID; neue Klassen bekommen eine freie", () => {
+      gleich(Calc.klassenFarbe({ id: "x", farbe: "#123456" }), "#123456");
+      gleich(Calc.klassenFarbe({ id: "abc" }), Calc.klassenFarbe({ id: "abc" }));
+      const belegt = [{ id: "a", farbe: Calc.KLASSEN_FARBEN[0] }];
+      gleich(Calc.freieKlassenFarbe(belegt), Calc.KLASSEN_FARBEN[1]);
     });
   });
 

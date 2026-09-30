@@ -13,7 +13,8 @@
   //     "leistungId" auf noten
   // v5: neue Stores "stundenplaene" (Versionen des Wochen-Stundenplans) und
   //     "wochennotizen" (Notiz je Woche, Schlüssel = Montag)
-  const DB_VERSION = 5;
+  // v6: neuer Store "termine" (Kalender: Termine, Ferien, Änderungen einzelner Stunden)
+  const DB_VERSION = 6;
 
   // Definition der Object-Stores + Indizes. Zentral, damit Migrationen
   // (spätere DB_VERSION-Erhöhungen) übersichtlich bleiben.
@@ -56,6 +57,8 @@
     stundenplaene:{ keyPath: "id", indexes: [] },
     // Freie Notiz je Woche (z. B. ToDos fürs Wochenende), Schlüssel = Montag
     wochennotizen:{ keyPath: "montag", indexes: [] },
+    // Kalender: Termine, Ferien und Änderungen einzelner Stunden
+    termine:      { keyPath: "id", indexes: [{ name: "klasseId", keyPath: "klasseId" }] },
     einstellungen:{ keyPath: "key", indexes: [] }
   };
 

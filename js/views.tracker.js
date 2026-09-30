@@ -628,7 +628,7 @@
     const doppel = Calc.trackerSession(state.settings.stundenzeiten, jetzt, true);
     // Laut Stundenplan: Raum vorbelegen, Doppelstunde hervorheben
     const laut = Calc.eintragJetzt(await Store.Stundenplan.alle(), state.settings.abWochen,
-      state.settings.stundenzeiten, state.klasseId, jetzt);
+      await Store.Termine.alle(), state.settings.stundenzeiten, state.klasseId, jetzt);
     const doppelVorschlag = !!(laut && laut.folgeGleich && !offen);
     const info = (doppelVorschlag ? "Laut Stundenplan eine Doppelstunde. " : "") + (einzel.quelle === "plan"
       ? "Erkannt: " + einzel.stundeNr + ". Stunde laut Stundenzeiten (Ende " +

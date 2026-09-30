@@ -412,6 +412,45 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .sp-slot { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .sp-slot h4 { margin: 4px 0 0; }
 .sp-slot select, .sp-slot input { width: 100%; }
+/* Kalender: tatsächlicher Tag (Ferien, Änderungen, Termine) */
+.sp-ansicht { margin: 0; padding: 0; }
+.sp-tabelle th.frei, .sp-tabelle td.frei { background: #eef3ea; }
+.sp-frei-name { display: block; font-size: 12px; font-weight: 600; color: #4d6b45; }
+.sp-tabelle tr.ganztags td { height: auto; }
+.sp-eintrag.weg { opacity: .6; }
+.sp-eintrag.weg .nm { text-decoration: line-through; }
+.sp-eintrag.hergeschoben { box-shadow: inset 3px 0 0 var(--accent); }
+.sp-vermerk { display: block; font-size: 12px; color: var(--text); opacity: .8; }
+.sp-termin {
+  border-radius: 8px; padding: 3px 7px; margin-top: 4px; font-size: 13px; font-weight: 600;
+  line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border: 1px solid rgba(0, 0, 0, .08);
+}
+.sp-termin:first-child { margin-top: 0; }
+[data-action="termin-bearbeiten"] { cursor: pointer; }
+.sp-seite { display: flex; flex-direction: column; gap: var(--gap); }
+.sp-naechste h3 { margin: 0 0 8px; font-size: 16px; }
+.sp-naechster { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.sp-naechster:last-child { border-bottom: none; }
+.menue { display: flex; flex-direction: column; gap: 8px; }
+.menue h4 { margin: 8px 0 0; }
+.menue hr { border: none; border-top: 1px solid var(--line); margin: 6px 0 0; }
+.menue-knopf { width: 100%; justify-content: flex-start; }
+/* Monatsansicht */
+.mo-tabelle { table-layout: fixed; }
+.mo-tabelle th { text-transform: none; letter-spacing: 0; text-align: center; font-size: 14px; color: var(--text); }
+.mo-tabelle th.we { width: 9%; }
+.mo-tag { height: 96px; vertical-align: top; padding: 6px; white-space: normal; border-left: 1px solid var(--line); cursor: pointer; }
+.mo-tag.anders { opacity: .45; }
+.mo-tag.we { background: var(--surface-2); }
+.mo-tag.frei { background: #eef3ea; }
+.mo-tag.heute { box-shadow: inset 0 0 0 3px var(--accent); }
+.mo-nr { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+.mo-frei { font-size: 12px; font-weight: 600; color: #4d6b45; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Farbwahl im Klassen-Dialog */
+.farbwahl { display: flex; flex-wrap: wrap; gap: 8px; }
+.farbwahl .farbe { width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(0, 0, 0, .1); cursor: pointer; }
+.farbwahl .farbe.aktiv { border: 3px solid var(--text); }
 .home-info { text-align: center; margin: 32px 0 8px; font-size: 15px; }
 .home-info a { color: var(--text-muted); }
 .empty .big { font-size: 44px; margin-bottom: 8px; }
