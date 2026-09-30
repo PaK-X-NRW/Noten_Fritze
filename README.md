@@ -486,7 +486,7 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   Meldungen bleiben grau sichtbar), das 4. Quartal läuft noch, sodass sich
   „Quartal abschließen“ selbst ausprobieren lässt. Anders als „Demo-Daten neu
   laden“ funktioniert das auch bei bereits vorhandenen Klassen; gleichnamige
-  Klassen werden übersprungen. Der Ablauf ist in `Schuljahr-Schema.md` Schritt
+  Klassen werden übersprungen. Der Ablauf ist in `Dev/Schuljahr-Schema.md` (nur lokal) Schritt
   für Schritt mit Beispielzahlen beschrieben.
 
 ## 8. MVP-Funktionsumfang
@@ -514,7 +514,7 @@ Home-Kachel · JSON-Voll-Backup · PWA/Offline · Demo-Daten · Beispielklassen
 **Oberstufen-Gesamtansicht** über alle fünf Kurshalbjahre (11.1 · 11.2 · 12.1 ·
 12.2 · 13.1) in einer Tabelle – dafür müssen Klassen aufeinanderfolgender
 Schuljahre als ein Kurs verknüpft und dieselben Personen über die Schuljahre
-hinweg zugeordnet werden (siehe `plan.md`) ·
+hinweg zugeordnet werden (siehe `Dev/plan.md`, nur lokal) ·
 Drag&Drop-Sortierung (aktuell ▲▼-Buttons) · Noten-CSV-**Import** (nur Export + Schüler-Import) ·
 Perioden je Klasse · Verwaltungsansicht für vergangene Stunden
 (nachträglich korrigieren/löschen) · Abwesenheiten je Stunde statt je Tag ·
@@ -535,11 +535,7 @@ Noten_Fritze/
 ├─ google7af1e4cea435225b.html  Bestätigung für die Google Search Console (nicht löschen)
 ├─ manifest.webmanifest     PWA-Manifest
 ├─ service-worker.js        Offline-Cache
-├─ AGENTS.md                verbindliche Arbeitsanleitung für KI-Assistenten
-├─ Schuljahr-Schema.md      Ablauf eines Schuljahrs mit Beispielzahlen
-├─ Notenuebersicht.md       Beispielrechnung für die Zeugnisnote (Vorlage)
-├─ plan.md                  Auftrag für die nächste Sitzung
-├─ Prompt.md                Prompt-Vorlagen für neue KI-Sitzungen
+├─ CLAUDE.md                verbindliche Arbeitsanleitung für Claude Code
 ├─ css/styles.css           Styles (iPad-first)
 ├─ icons/icon.svg           App-Icon
 └─ js/

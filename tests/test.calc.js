@@ -1,6 +1,6 @@
 /* =========================================================================
    test.calc.js – Prüfungen der Rechenlogik (Calc)
-   Die Beispiele stammen aus AGENTS.md (Abschnitt 6) und Schuljahr-Schema.md.
+   Die Beispiele stammen aus CLAUDE.md (Abschnitt 6) und Dev/Schuljahr-Schema.md (nur lokal).
    Ändert sich hier ein erwarteter Wert, ändert sich eine Note – das darf nur
    bewusst und mit Rücksprache passieren.
    ========================================================================= */
@@ -16,7 +16,7 @@
     return { kategorieId, wert, quartal };
   }
   const KLASSE = { anteilSchriftlich: 50, anteilSonstige: 50 };
-  // Kategorien wie in Schuljahr-Schema.md (9a Mathematik, Hauptfach)
+  // Kategorien wie in Dev/Schuljahr-Schema.md (9a Mathematik, Hauptfach)
   const KATS = [
     kat("KA", "schriftlich", 1),
     kat("Mitarbeit", "sonstige", 2, { quelle: "mitarbeit" }),
@@ -138,7 +138,7 @@
     });
   });
 
-  gruppe("Halbjahres-Kette (Beispiele aus Schuljahr-Schema.md)", () => {
+  gruppe("Halbjahres-Kette (Beispiele aus Dev/Schuljahr-Schema.md)", () => {
     fall("Anna: Epochalnoten 2 / 2+, Zeugnis 2", () => {
       const e = Calc.halbjahrErgebnis(KATS, halbjahrNoten([2, 1.7], [2, 2, 1.3], [1.7, 1.7, 2]), KLASSE, 1, false);
       nahe(e.epochal[0].roh, 1.86, "Epochal 1 roh");

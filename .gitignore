@@ -14,3 +14,7 @@ bin/
 # Eigene Notizzettel / Zwischenablage
 tmp/
 temp/
+
+# Lokale Entwicklungsnotizen (Pläne, Prompts, Rechenbeispiele) – nur auf
+# diesem Rechner, werden nicht zu GitHub hochgeladen.
+Dev/

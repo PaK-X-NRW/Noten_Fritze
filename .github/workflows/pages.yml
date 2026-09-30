@@ -1,7 +1,7 @@
 # =========================================================================
 # pages.yml – Veröffentlichung auf GitHub Pages
 #
-# Die App ist reines HTML/CSS/JS ohne Build-Schritt (siehe AGENTS.md, 2.1).
+# Die App ist reines HTML/CSS/JS ohne Build-Schritt (siehe CLAUDE.md, 2.1).
 # Dieser Workflow baut deshalb nichts: Er lädt den Stand von `main` unverändert
 # hoch und veröffentlicht ihn. Kein Jekyll, keine Abhängigkeiten, keine
 # Umbenennung von Dateien – was im Repository liegt, liegt danach auf der Seite.
