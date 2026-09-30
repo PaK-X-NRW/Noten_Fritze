@@ -150,8 +150,16 @@
       if (k) { k.lastOpenedAt = now(); await DB.put("klassen", k); }
       return k;
     },
-    // Kaskadierendes Löschen aller abhängigen Daten (alles oder nichts)
-    remove: (id) => kaskade(klassenAbhaengige(id), [["sitzplaene", id], ["klassen", id]])
+    // Kaskadierendes Löschen aller abhängigen Daten (alles oder nichts),
+    // inkl. der Einträge der Klasse in allen Stundenplan-Versionen
+    async remove(id) {
+      const plaene = (await DB.getAll("stundenplaene"))
+        .filter((v) => (v.eintraege || []).some((e) => e.klasseId === id))
+        .map((v) => ["stundenplaene", Object.assign({}, v, {
+          eintraege: v.eintraege.filter((e) => e.klasseId !== id), updatedAt: now()
+        })]);
+      return kaskade(klassenAbhaengige(id), [["sitzplaene", id], ["klassen", id]], plaene);
+    }
   };
 
   // ---- Quartalsabschluss ---------------------------------------------------

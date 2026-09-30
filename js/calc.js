@@ -12,6 +12,8 @@
      calc.zeugnis.js   – Halbjahres-Kette: Einzelnoten -> Epochalnote -> Zeugnisnote
      calc.mitarbeit.js – Mitarbeits-Auswertung (Stundennoten-Modell), Schwellen
      calc.tracker.js   – Heatmap-Verfall und Stundenzeiten (Tracker)
+     calc.sitzplan.js  – Sitzplan: Gänge, Lage der Plätze, Sitzregeln
+     calc.stundenplan.js – Stundenplan: Wochen, A/B-Wochen, Versionen
    Alle Funktionen sind rein: kein DOM, keine Datenbank. Geprüft werden sie
    im Selbsttest tests.html.
    ========================================================================= */

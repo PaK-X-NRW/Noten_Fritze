@@ -52,12 +52,14 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/store.einstellungen.js` | `Store` | `DEFAULT_SETTINGS`, Stundenzeiten/Schwellen, `getSettings`/`saveSettings` |
 | `js/store.migrationen.js` | `Store` | `SCHEMA_VERSION`, `MIGRATION_STEPS`, `migrateSchema` |
 | `js/store.transfer.js` | `Store` | Backup (`exportAll`/`importAll`) und Klassen-Export/-Import |
+| `js/store.stundenplan.js` | `Store` | `Store.Stundenplan` (Versionen des Wochenplans), `Store.Wochennotizen` |
 | `js/store.demo.js` | `Store` | Demo-Daten (`seedDemoData`) beim ersten Start |
 | `js/calc.js` | `Calc` | Rechen-Kern: Notenskala (Eingabe, Drittel-/Zeugnisskala, Anzeige, MSS-Umrechnung), Kategorie-Helfer – **frei von DOM/DB** |
 | `js/calc.zeugnis.js` | `Calc` | Halbjahres-Kette: `berechneSchueler`, `halbjahrErgebnis`, `mitarbeitVorhanden` |
 | `js/calc.mitarbeit.js` | `Calc` | Mitarbeits-Auswertung (Stundennoten-Modell), Schwellen |
 | `js/calc.tracker.js` | `Calc` | Heatmap-Verfall/-Farbe, Stundenzeiten (`trackerSession`), vergessene Stunden (`stundeVergessen`, `erfassungsZeit`) |
 | `js/calc.sitzplan.js` | `Calc` | Sitzplan: Gang-Vorlagen, Lage der Plätze, Sitzregeln prüfen, `sitzplanVerteilen` |
+| `js/calc.stundenplan.js` | `Calc` | Stundenplan: Montag/KW, A/B-Wochen (`abWoche`), gültige Version (`versionFuer`), Archiv, `eintragJetzt` |
 | `js/csv.js` | `CSV` | CSV-Export/Import (UTF-8 mit BOM) |
 | `js/ui.js` | `UI` | UI-Bausteine: Modal, Toast, Formfelder, `esc`, `$`/`$all` |
 | `js/views.core.js` | `Views` | Views-Kern: State, Navigation (`go`), Render-Schleife (`render`), Zeitraum-Reiter |
@@ -69,6 +71,7 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/views.sitzplan.js` | `Views` | Reiter Sitzplan + Dialoge (Platz belegen, Räume) |
 | `js/views.mitarbeit.js` | `Views` | Reiter Mitarbeit + Dialoge (Schwellen, Herleitung, Quartal abschließen) |
 | `js/views.tracker.js` | `Views` | Mitarbeits-Tracker (Stunden, Kacheln, Modi, Heatmap, Restzeit, Tippen, Rückgängig) |
+| `js/views.stundenplan.js` | `Views` | Stundenplan auf der Startseite (Raster, Wochen, Bearbeiten, Pläne/Archiv, Wochennotiz) |
 | `js/views.dialoge.js` | `Views` | Allgemeine Dialoge (Klasse, Anteile, Schüler, Kategorie, Importe, Umzug-Empfang von der alten Adresse) |
 | `js/views.js` | `Views` | Aktions-Dispatcher: Action-Map + zentrale Delegation |
 | `js/app.js` | – | Bootstrap (DB öffnen, Demo-Daten, erster Render, SW-Registrierung) |
@@ -335,6 +338,29 @@ beim allerersten Start erscheint er bewusst nicht.
   Tagesende). In einem abgeschlossenen Quartal nur Beenden; `Store.quartalAbschliessen`
   beendet alle offenen Stunden des Quartals. Die Startseite zeigt je Klasse eine
   Leiste (`vergesseneStundenHTML`, Action `offene-stunde`).
+- **Stundenplan (Wochenplan, Startseite):** Store `stundenplaene` (seit `DB_VERSION` 5),
+  je Datensatz eine **Version** `{ id, gueltigAb, eintraege }`; `gueltigAb` ist ein
+  Montag, `null` beim ersten Plan (= von Anfang an). Gültig ist die Version mit dem
+  spätesten `gueltigAb` ≤ Datum (`Calc.versionFuer`); ältere als die heute gültige
+  sind **Archiv** (`Calc.versionArchiviert`) und nur lesbar – bearbeitet wird immer die
+  Version der angezeigten Woche. Einträge `{ tag 1–5, blockId, woche "alle"|"A"|"B",
+  klasseId | titel, sitzplanId }` verweisen über `blockId` auf die Stundenzeiten
+  (`std-<nr>` bzw. Pausen-ID) – eine Stunde wird also über ihre **Nummer**
+  angesprochen. Zugriff nur über `Store.Stundenplan` (`zelleSetzen` ersetzt eine
+  Zelle, `blockEntfernen` beim Löschen einer Pause/Stunde: nur aktuelle und künftige
+  Versionen, nach Rückfrage in `views.einstellungen.js`). **A/B-Wochen:**
+  `settings.abWochen` = Umschaltpunkte `{ abMontag, woche }`; `Calc.abWoche` zählt stur
+  im Wochenwechsel ab dem letzten Punkt (vorher rückwärts), `Calc.abWocheSetzen`
+  setzt ab einer Woche neu – frühere Wochen bleiben. Leer = keine A/B-Wochen; der
+  erste A/B-Eintrag fragt nach. `settings.startAnsicht` merkt die Ansicht der
+  Startseite (`ViewHome` delegiert an `ViewStundenplan`, Umschalter nur mit Plan).
+  Notiz je Woche im Store `wochennotizen` (Schlüssel = Montag, leerer Text löscht).
+  Kaskade: `Klassen.remove` entfernt die Einträge der Klasse aus **allen** Versionen
+  (gleiche Transaktion). Nicht im Klassen-Export (der Plan gehört der Lehrkraft),
+  aber im Backup. Tracker-Start: `Calc.eintragJetzt` belegt den Raum vor und macht
+  „Doppelstunde“ zum Hauptknopf, wenn die Klasse auch die folgende Stunde hat.
+  `db.js` meldet ein blockiertes Upgrade (anderes Fenster offen) per Toast und gibt
+  die eigene Verbindung bei `versionchange` frei.
 - **Heatmap-Zeit:** Der Verfall läuft **nur innerhalb einer laufenden Stunde**
   (Bezugszeit `min(jetzt, stunde.endeTs)`). Beim Öffnen/Fortsetzen wird
   `heatLastDecayAt` auf jetzt gesetzt (kein Nachhol-Verfall aus der Pause), beim

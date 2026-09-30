@@ -626,12 +626,16 @@
     const offen = offene.length ? offene[offene.length - 1] : null;
     const einzel = Calc.trackerSession(state.settings.stundenzeiten, jetzt, false);
     const doppel = Calc.trackerSession(state.settings.stundenzeiten, jetzt, true);
-    const info = einzel.quelle === "plan"
+    // Laut Stundenplan: Raum vorbelegen, Doppelstunde hervorheben
+    const laut = Calc.eintragJetzt(await Store.Stundenplan.alle(), state.settings.abWochen,
+      state.settings.stundenzeiten, state.klasseId, jetzt);
+    const doppelVorschlag = !!(laut && laut.folgeGleich && !offen);
+    const info = (doppelVorschlag ? "Laut Stundenplan eine Doppelstunde. " : "") + (einzel.quelle === "plan"
       ? "Erkannt: " + einzel.stundeNr + ". Stunde laut Stundenzeiten (Ende " +
         new Date(einzel.endeTs).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) +
         " Uhr, Doppelstunde bis " +
         new Date(doppel.endeTs).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr)."
-      : "Gerade läuft laut Stundenzeiten keine Stunde – es wird mit 45 bzw. 90 Min ab jetzt gerechnet.";
+      : "Gerade läuft laut Stundenzeiten keine Stunde – es wird mit 45 bzw. 90 Min ab jetzt gerechnet.");
 
     let offenText = "";
     if (offen) {
@@ -642,9 +646,12 @@
     }
 
     // Raum-Auswahl nur, wenn die Klasse mehrere Sitzpläne hat. Vorbelegt mit
-    // dem Plan der offenen Stunde, sonst dem zuletzt benutzten.
+    // dem Plan der offenen Stunde, sonst dem Raum laut Stundenplan, sonst dem
+    // zuletzt benutzten.
     const alle = await Store.Sitzplan.alle(state.klasseId);
-    const vorwahl = (offen && alle.plaene.some((p) => p.id === offen.sitzplanId)) ? offen.sitzplanId : alle.aktivId;
+    const gibt = (id) => !!id && alle.plaene.some((p) => p.id === id);
+    const vorwahl = offen && gibt(offen.sitzplanId) ? offen.sitzplanId
+      : laut && gibt(laut.eintrag.sitzplanId) ? laut.eintrag.sitzplanId : alle.aktivId;
     const raumHTML = alle.plaene.length > 1
       ? UI.field("Sitzplan (Raum)", "sitzplanId", vorwahl, { type: "select",
           options: alle.plaene.map((p) => ({ value: p.id, label: p.name })) })
@@ -664,7 +671,7 @@
         state.pendingStunde = offen; go("tracker");
       }});
     }
-    buttons.push({ label: "Einzelstunde", className: offen ? "" : "primary", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(einzel, offen, id); }});
+    buttons.push({ label: "Einzelstunde", className: offen || doppelVorschlag ? "" : "primary", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(einzel, offen, id); }});
     buttons.push({ label: "Doppelstunde", className: offen ? "" : "primary", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(doppel, offen, id); }});
     buttons.push({ label: "Ohne Zeitangabe", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(null, offen, id); }});
 

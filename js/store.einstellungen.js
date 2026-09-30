@@ -134,6 +134,11 @@
     // Stundenzeiten: Stunden und Pausen als Blöcke (siehe oben), gelten für
     // jeden Schultag gleich. Hieß bis 1.15 `stundenplan` (nur Stunden).
     stundenzeiten: defaultStundenzeiten(),
+    // Startseite: zuletzt gewählte Ansicht ("klassen" | "stundenplan")
+    startAnsicht: "klassen",
+    // A/B-Wochen: Umschaltpunkte [{ abMontag: "YYYY-MM-DD", woche: "A"|"B" }];
+    // leer = keine A/B-Wochen (siehe Calc.abWoche)
+    abWochen: [],
     // Reihenfolge der Schüler/innen in allen Listen:
     // "nachname" = alphabetisch (Nachname, dann Vorname), "manuell" = per ▲/▼ gepflegter sortIndex
     schuelerSortierung: "nachname",

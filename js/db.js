@@ -11,7 +11,9 @@
   // v3: neuer Store "stunden" (Unterrichtsstunden) + Index "stundeId" auf ereignisse
   // v4: neuer Store "leistungen" (eine Spalte der Notenübersicht) + Index
   //     "leistungId" auf noten
-  const DB_VERSION = 4;
+  // v5: neue Stores "stundenplaene" (Versionen des Wochen-Stundenplans) und
+  //     "wochennotizen" (Notiz je Woche, Schlüssel = Montag)
+  const DB_VERSION = 5;
 
   // Definition der Object-Stores + Indizes. Zentral, damit Migrationen
   // (spätere DB_VERSION-Erhöhungen) übersichtlich bleiben.
@@ -50,6 +52,10 @@
                       { name: "schuelerId", keyPath: "schuelerId" },
                       { name: "datum", keyPath: "datum" }
                     ] },
+    // Stundenplan: je Datensatz eine Version { id, gueltigAb, eintraege }
+    stundenplaene:{ keyPath: "id", indexes: [] },
+    // Freie Notiz je Woche (z. B. ToDos fürs Wochenende), Schlüssel = Montag
+    wochennotizen:{ keyPath: "montag", indexes: [] },
     einstellungen:{ keyPath: "key", indexes: [] }
   };
 
@@ -76,7 +82,21 @@
           });
         });
       };
-      req.onsuccess = () => resolve(req.result);
+      // Ein anderes offenes Fenster (Tab/PWA) mit älterer Version hält die
+      // Datenbank: das Upgrade wartet, bis es geschlossen ist – Hinweis zeigen.
+      req.onblocked = () => {
+        if (global.UI) UI.toast("Bitte andere geöffnete Noten-Fritze-Fenster schließen – die Datenbank wird aktualisiert.", { duration: 15000 });
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        // Will ein neueres Fenster upgraden, die eigene Verbindung freigeben
+        // (sonst bliebe es blockiert); dieses Fenster muss dann neu laden.
+        db.onversionchange = () => {
+          db.close();
+          if (global.UI) UI.toast("Noten-Fritze wurde in einem anderen Fenster aktualisiert – bitte neu laden.", { duration: 60000 });
+        };
+        resolve(db);
+      };
       req.onerror = () => reject(req.error);
     });
     return _dbPromise;

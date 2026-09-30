@@ -42,6 +42,24 @@
     if (meldung) UI.toast(meldung);
   }
 
+  // Hängen im Stundenplan Einträge an einer Zeit, die entfernt werden soll:
+  // nachfragen und sie aus dem aktuellen und künftigen Plänen entfernen (das
+  // Archiv bleibt unverändert). Rückgabe: false = abgebrochen.
+  async function blockEintraegeEntfernen(blockId, label) {
+    const versionen = await Store.Stundenplan.alle();
+    const heute = Store.datumLokal();
+    const offen = versionen.filter((v) => !Calc.versionArchiviert(versionen, v, heute));
+    const anzahl = offen.reduce((n, v) => n + (v.eintraege || []).filter((e) => e.blockId === blockId).length, 0);
+    if (!anzahl) return true;
+    const ok = await UI.confirmDialog(label + " entfernen?",
+      anzahl + (anzahl === 1 ? " Eintrag" : " Einträge") + " im Stundenplan " + (anzahl === 1 ? "hängt" : "hängen") +
+      " an dieser Zeit und " + (anzahl === 1 ? "wird" : "werden") + " mit entfernt. Ältere Pläne im Archiv bleiben unverändert.",
+      { okLabel: "Entfernen" });
+    if (!ok) return false;
+    await Store.Stundenplan.blockEntfernen(offen, blockId);
+    return true;
+  }
+
   // Knöpfe der Karte Stundenzeiten (Action "stundenzeiten", data-was).
   async function stundenzeitenAktion(was, id) {
     const liste = state.settings.stundenzeiten.map((b) => Object.assign({}, b));
@@ -58,6 +76,7 @@
     if (was === "stunde-minus") {
       if (stunden.length <= 1) return UI.toast("Mindestens eine Stunde muss bleiben");
       const weg = stunden[stunden.length - 1];
+      if (!await blockEintraegeEntfernen(weg.id, weg.nr + ". Stunde")) return;
       return stundenzeitenSpeichern(liste.filter((b) => b !== weg), weg.nr + ". Stunde entfernt");
     }
     if (was === "pause-plus") {
@@ -68,6 +87,8 @@
       return stundenzeitenSpeichern(liste, "Pause angelegt – Name und Zeiten anpassen");
     }
     if (was === "pause-weg") {
+      const pause = liste.find((b) => b.id === id);
+      if (pause && !await blockEintraegeEntfernen(id, "„" + pause.name + "“")) return;
       return stundenzeitenSpeichern(liste.filter((b) => b.id !== id), "Entfernt");
     }
     if (was === "luecken") {

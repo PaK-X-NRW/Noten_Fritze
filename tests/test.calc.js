@@ -366,6 +366,58 @@
     });
   });
 
+  gruppe("Stundenplan: Wochen, A/B-Wochen, Versionen", () => {
+    fall("Montag und Kalenderwoche", () => {
+      gleich(Calc.montagVon("2026-10-01"), "2026-09-28", "Donnerstag -> Montag");
+      gleich(Calc.montagVon("2026-10-04"), "2026-09-28", "Sonntag gehört zur Woche davor");
+      gleich(Calc.kalenderwoche("2026-09-28"), 40);
+      gleich(Calc.kalenderwoche("2026-01-01"), 1);
+      gleich(Calc.kalenderwoche("2027-01-01"), 53, "2026 hat 53 Kalenderwochen");
+      gleich(Calc.datumPlusTage("2026-10-30", 3), "2026-11-02", "über die Zeitumstellung");
+    });
+    fall("A/B wechselt stur jede Woche, auch rückwärts", () => {
+      const ab = [{ abMontag: "2026-09-28", woche: "A" }];
+      gleich(["2026-09-30", "2026-10-07", "2026-10-14", "2026-09-21"].map((d) => Calc.abWoche(ab, d)), ["A", "B", "A", "B"]);
+      gleich(Calc.abWoche([], "2026-09-30"), null, "ohne Einrichtung keine A/B-Wochen");
+    });
+    fall("Umstellen rechnet ab der Woche neu, frühere bleiben", () => {
+      let ab = [{ abMontag: "2026-09-28", woche: "A" }];
+      ab = Calc.abWocheSetzen(ab, "2026-10-21", "A");   // KW 43 wäre B
+      gleich(["2026-09-28", "2026-10-05", "2026-10-12", "2026-10-19", "2026-10-26"].map((d) => Calc.abWoche(ab, d)),
+        ["A", "B", "A", "A", "B"]);
+      gleich(Calc.abWocheSetzen(ab, "2026-10-26", "B").length, 2, "passt schon: kein neuer Umschaltpunkt");
+    });
+    fall("gültige Version und Archiv", () => {
+      const v = [{ id: "hj2", gueltigAb: "2027-02-01" }, { id: "erst", gueltigAb: null }];
+      gleich(Calc.versionFuer(v, "2026-09-28").id, "erst");
+      gleich(Calc.versionFuer(v, "2027-02-01").id, "hj2");
+      gleich(Calc.versionBis(v, v[1]), "2027-01-31");
+      wahr(!Calc.versionArchiviert(v, v[1], "2026-10-01"), "vor dem Wechsel aktuell");
+      wahr(Calc.versionArchiviert(v, v[1], "2027-03-01"), "danach im Archiv");
+      wahr(!Calc.versionArchiviert(v, v[0], "2026-10-01"), "künftiger Plan ist nicht archiviert");
+    });
+    fall("Einträge der Woche: jede Woche + passende A/B-Woche", () => {
+      const version = { eintraege: [
+        { tag: 1, blockId: "std-1", woche: "alle", klasseId: "k1" },
+        { tag: 1, blockId: "std-2", woche: "A", klasseId: "k2" },
+        { tag: 1, blockId: "std-2", woche: "B", titel: "AG" }
+      ] };
+      gleich(Calc.eintraegeDerWoche(version, "A").map((e) => e.klasseId || e.titel), ["k1", "k2"]);
+      gleich(Calc.eintraegeDerWoche(version, "B").map((e) => e.klasseId || e.titel), ["k1", "AG"]);
+    });
+    fall("Tracker: Eintrag der laufenden Stunde und Doppelstunde", () => {
+      const zeiten = Store.defaultStundenzeiten();
+      const v = [{ id: "v", gueltigAb: null, eintraege: [
+        { tag: 3, blockId: "std-3", woche: "alle", klasseId: "k", sitzplanId: "raum2" },
+        { tag: 3, blockId: "std-4", woche: "alle", klasseId: "k" }
+      ] }];
+      const mittwoch = new Date(2026, 8, 30, 10, 0).getTime();   // 3. Stunde
+      const r = Calc.eintragJetzt(v, [], zeiten, "k", mittwoch);
+      gleich([r.eintrag.sitzplanId, r.folgeGleich], ["raum2", true]);
+      gleich(Calc.eintragJetzt(v, [], zeiten, "andere", mittwoch), null);
+    });
+  });
+
   gruppe("Sitzplan: Raumform", () => {
     fall("Mittelgang nur bei ungerader Spaltenzahl", () => {
       gleich(Calc.sitzplanGaenge(7, "mittelgang"), [3]);

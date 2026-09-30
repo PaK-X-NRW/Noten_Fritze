@@ -1,6 +1,7 @@
 /* =========================================================================
    views.home-klasse.js – Home (Klassenübersicht, Hinweis auf nicht beendete
-   Stunden) und Klassenansicht mit den Tabs Schüler und Kategorien. Die Tabs Noten, Sitzplan und
+   Stunden, Umschalter Klassen · Stundenplan) und Klassenansicht mit den Tabs
+   Schüler und Kategorien. Die Stundenplan-Ansicht liegt in views.stundenplan.js. Die Tabs Noten, Sitzplan und
    Mitarbeit liegen in views.noten.js, views.sitzplan.js, views.mitarbeit.js.
    ========================================================================= */
 (function (global) {
@@ -12,7 +13,20 @@
   // =========================================================================
   //  HOME – Klassenübersicht
   // =========================================================================
+  // Umschalter der Startseite (nur, wenn ein Stundenplan eingerichtet ist)
+  function homeUmschalterHTML(aktiv) {
+    return '<div class="tabs home-tabs">' +
+      [["klassen", "Klassen"], ["stundenplan", "Stundenplan"]].map(([id, label]) =>
+        '<button class="tab' + (aktiv === id ? " active" : "") + '" data-action="home-ansicht" data-ansicht="' + id + '">' + label + "</button>"
+      ).join("") + "</div>";
+  }
+
   async function ViewHome() {
+    // Ist ein Stundenplan eingerichtet, zeigt die Startseite die zuletzt
+    // gewählte Ansicht (Klassen oder Stundenplan).
+    const plaene = await Store.Stundenplan.alle();
+    if (plaene.length && state.settings.startAnsicht === "stundenplan") return api.ViewStundenplan();
+
     const klassen = (await Store.Klassen.all())
       .sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0));
 
@@ -50,7 +64,9 @@
     const topbar =
       '<div class="title-wrap"><h1 class="main">Noten-Fritze</h1>' +
       '<span class="sub">' + klassen.length + " Klasse" + (klassen.length === 1 ? "" : "n") + "</span></div>" +
+      (plaene.length ? homeUmschalterHTML("klassen") : "") +
       '<div class="grow"></div>' +
+      (plaene.length ? "" : '<button class="btn" data-action="sp-einrichten">📅 Stundenplan einrichten</button>') +
       '<button class="iconbtn" data-action="settings" title="Einstellungen">⚙️</button>' +
       '<button class="btn" data-action="import-klasse">Klasse importieren</button>' +
       '<button class="btn primary" data-action="add-class">＋ Klasse</button>';
@@ -204,5 +220,5 @@
     );
   }
 
-  Object.assign(global.Views, { ViewHome, ViewKlasse });
+  Object.assign(global.Views, { ViewHome, ViewKlasse, homeUmschalterHTML });
 })(window);

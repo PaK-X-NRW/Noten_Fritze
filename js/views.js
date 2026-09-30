@@ -16,7 +16,8 @@
     schwellenDialog, mitarbeitHerleitungDialog, quartalAbschliessenDialog, klassenImportDialog,
     trackerStartDialog, trackerModusToggle, trackerModusEnde, trackerModusTap,
     trackerStundeBeenden, trackerVerlassen, trackerRaumDialog, trackerTap, trackerUndo, trackerHeatPause,
-    besprechungStep, stundenzeitenAktion
+    besprechungStep, stundenzeitenAktion,
+    stundenplanEinrichten, ansichtSetzen, wocheBlaettern, stundenplanZelle, abWocheUmstellen, plaeneDialog
   } = global.Views;
 
   // =========================================================================
@@ -131,6 +132,15 @@
 
     // Tracker / Besprechung Navigation
     "open-tracker": () => trackerStartDialog(),
+
+    // Startseite: Klassen · Stundenplan (views.stundenplan.js)
+    "home-ansicht": async (el) => { await ansichtSetzen(el.getAttribute("data-ansicht")); render(); },
+    "sp-einrichten": () => stundenplanEinrichten(),
+    "sp-woche": (el) => wocheBlaettern(el.getAttribute("data-schritt")),
+    "sp-bearbeiten": () => { state.stundenplanBearbeiten = !state.stundenplanBearbeiten; render(); },
+    "sp-zelle": (el) => stundenplanZelle(el),
+    "sp-ab": () => abWocheUmstellen(),
+    "sp-archiv": () => plaeneDialog(),
     // Startseite: vergessene Stunde einer Klasse ansehen (Tracker-Start fragt nach)
     "offene-stunde": async (el) => {
       await go("klasse", { klasseId: el.getAttribute("data-id"), tab: "schueler" });

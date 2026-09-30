@@ -32,6 +32,9 @@
     pendingNachtragen: false, // pendingStunde ist eine vergessene Stunde (Nachtrage-Modus)
     trackerModus: null,    // null | "abwesend" | "keineha" | "heat"
     sitzplanGestalten: false, // Reiter Sitzplan: Tippen schaltet Platz/Gang um
+    // Startseite / Stundenplan: angezeigte Woche (Montag, "" = aktuelle) und Bearbeiten-Modus
+    stundenplanWoche: "",
+    stundenplanBearbeiten: false,
     settings: null
   };
 
