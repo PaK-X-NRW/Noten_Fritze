@@ -630,6 +630,15 @@ liegen, gehen sie beim Löschen der Website-Daten verloren – regelmäßig sich
 2. **JSON-Datei auswählen** → alle Daten werden wiederhergestellt
 3. Optional: „Vorher alles löschen" aktivieren (für Neustart)
 
+### Umzug auf eine neue Adresse
+
+Die Daten gehören im Browser zur Adresse der App. Beim Wechsel von
+`noten-fritze.patrick-knapp.de` nach `noten-fritze.de` läuft unter der alten Adresse
+eine Umzugsseite (Repo `Noten_Fritze_Umzug`). Ihr Button „Daten übertragen“ öffnet die
+App unter der neuen Adresse mit `?umzug=1` und schickt das Backup per `postMessage`.
+Die App nimmt es nur vom öffnenden Fenster der alten Adresse an und ersetzt nach
+Rückfrage die Daten (`Views.umzugEmpfangen` in `views.dialoge.js`).
+
 ### Sicherheit
 
 ✅ **Alle Daten bleiben lokal** – kein Cloud-Upload, keine Übertragung  

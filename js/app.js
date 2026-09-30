@@ -29,6 +29,8 @@
 
     Views.initDelegation();
     await Views.render();
+    // Aufruf von der Umzugsseite der alten Adresse (?umzug=1): Daten empfangen
+    Views.umzugEmpfangen();
 
     // Service Worker nur bei echtem Hosting registrieren (nicht unter file://)
     if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {

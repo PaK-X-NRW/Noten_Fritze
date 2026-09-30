@@ -1,6 +1,7 @@
 /* =========================================================================
    views.dialoge.js – Allgemeine Dialoge (Klasse, Anteile, Schüler,
-   Kategorie, CSV-Import, Backup-Import, Klassen-Import). Dialoge eines
+   Kategorie, CSV-Import, Backup-Import, Klassen-Import, Umzug-Empfang von
+   der alten Adresse). Dialoge eines
    Reiters liegen bei ihm (views.noten/sitzplan/mitarbeit.js).
    ========================================================================= */
 (function (global) {
@@ -252,8 +253,78 @@
     } catch (e) { UI.toast("Fehler: " + e.message); }
   }
 
+  // ---- Umzug: Daten von der alten Adresse empfangen ------------------------
+  // Die Daten liegen in IndexedDB und gehören zur Adresse. Die Umzugsseite
+  // unter der alten Adresse (Repo Noten_Fritze_Umzug) öffnet die App mit
+  // ?umzug=1 und schickt ihr Backup per postMessage (Protokoll: README dort).
+  // Angenommen wird nur vom öffnenden Fenster mit genau dieser Adresse.
+  const ALTE_ADRESSE = "https://noten-fritze.patrick-knapp.de";
+
+  function umzugEmpfangen() {
+    if (!/[?&]umzug=1(&|$)/.test(location.search)) return;
+    // Parameter entfernen, damit ein Neuladen den Ablauf nicht erneut startet
+    history.replaceState(null, "", location.pathname + location.hash);
+    const alt = window.opener;
+    if (!alt) {
+      UI.toast("Die Übertragung konnte nicht starten. Bitte auf der alten Adresse " +
+        "„Backup herunterladen“ wählen und die Datei hier importieren.", { duration: 12000 });
+      return;
+    }
+    const antworten = (ok, fehler) => alt.postMessage(
+      { typ: "noten-fritze-umzug-fertig", ok: ok, fehler: fehler || null }, ALTE_ADRESSE);
+    function empfangen(e) {
+      if (e.origin !== ALTE_ADRESSE || e.source !== alt) return;
+      const m = e.data || {};
+      if (m.typ !== "noten-fritze-umzug-daten") return;
+      window.removeEventListener("message", empfangen);
+      umzugDialog(m.backup, antworten);
+    }
+    window.addEventListener("message", empfangen);
+    // Gibt es das Fenster nicht unter der alten Adresse, verwirft der Browser das
+    alt.postMessage({ typ: "noten-fritze-umzug-bereit" }, ALTE_ADRESSE);
+  }
+
+  async function umzugDialog(backup, antworten) {
+    const d = backup && backup.data;
+    if (!d || !Array.isArray(d.klassen) || !Array.isArray(d.schueler)) {
+      antworten(false, "Die Daten sind unvollständig angekommen. Bitte die Übertragung per Backup-Datei nutzen.");
+      UI.toast("Die Daten von der alten Adresse sind unvollständig angekommen.");
+      return;
+    }
+    const anzahl = (n, eins, mehr) => n + " " + (n === 1 ? eins : mehr);
+    const hier = await Store.Klassen.all();
+    const body =
+      "<p>Von der alten Adresse sind angekommen: <strong>" +
+        anzahl(d.klassen.length, "Klasse", "Klassen") + " mit " +
+        anzahl(d.schueler.length, "Schüler/in", "Schüler/innen") + "</strong>.</p>" +
+      (hier.length
+        ? '<p class="muted">Die Daten auf dieser Seite (' + anzahl(hier.length, "Klasse", "Klassen") +
+          ", z. B. die Demo-Klasse) werden dabei ersetzt.</p>"
+        : "") +
+      '<p class="muted">Unter der alten Adresse bleibt alles erhalten.</p>';
+    UI.modal({ title: "Daten übernehmen", bodyHTML: body, dismissible: false, buttons: [
+      { label: "Abbrechen", onClick: (close) => {
+        close();
+        antworten(false, "Auf noten-fritze.de abgebrochen. Es wurde nichts übertragen.");
+      }},
+      { label: "Übernehmen", className: "primary", onClick: async (close) => {
+        try {
+          await Store.importAll(backup, { replace: true });
+        } catch (e) {
+          UI.toast("Fehler: " + e.message);
+          antworten(false, "Fehler beim Übernehmen: " + e.message);
+          return;
+        }
+        close();
+        antworten(true);
+        await go("home");
+        UI.toast("Daten übernommen");
+      }}
+    ]});
+  }
+
   Object.assign(global.Views, {
     klasseDialog, splitsDialog, schuelerDialog, kategorieDialog,
-    importStudentsDialog, backupImportDialog, klassenImportDialog
+    importStudentsDialog, backupImportDialog, klassenImportDialog, umzugEmpfangen
   });
 })(window);

@@ -1,5 +1,5 @@
 /* =========================================================================
-   store.demo.js – Demo-Daten (Klasse 8b)
+   store.demo.js – Demo-Daten (Klasse „8b (Demo)“)
    Erweitert den Store-Namespace um seedDemoData(): legt beim allerersten
    Start (leere Datenbank) eine vollständige Beispielklasse an – Schüler,
    Kategorien, Spalten (Leistungen), Noten, Stunden, Ereignisse,
@@ -35,7 +35,7 @@
     }
 
     const k = neueKlasse({
-      name: "8b", schuljahr: "2025/26", fach: "Mathematik", typ: "hauptfach",
+      name: "8b (Demo)", schuljahr: "2025/26", fach: "Mathematik", typ: "hauptfach",
       anteilSchriftlich: 50, anteilSonstige: 50,
       notizen: "Demo-Klasse. Kann gefahrlos gelöscht werden."
     });
