@@ -408,6 +408,20 @@ beim allerersten Start erscheint er bewusst nicht.
   schreibt `daten64` (Base64) nur auf Wunsch; `importAll` behält bei fehlendem Inhalt einen
   vorhandenen lokalen Inhalt, sonst gilt die Datei als entfernt. Die Dateiauswahl muss
   **direkt im Tipp** geöffnet werden (`input.click()` synchron), sonst blockt iOS.
+- **Weiterschieben bei Ausfall:** `Calc.weiterschiebenZuege(…, vorher, nachher, …, modus)`
+  vergleicht die Reihe der stattfindenden Stunden einer Klasse (`Calc.stundenReihe`)
+  mit Terminen **ohne** und **mit** den Ausfällen: Inhalt der i-ten Stunde vorher →
+  i-te Stunde nachher; `modus "einheit"` rechnet je Einheitengröße getrennt
+  (Doppel → Doppel), `"stunde"` Stunde für Stunde. Aufheben = dieselbe Rechnung mit
+  vertauschten Terminlisten. Horizont: letzte Planung der Klasse + 60 Tage. Die
+  Ausfall-Datensätze tragen `verschiebeModus`; `Store.Termine.ausfallDatensaetze` baut
+  sie vorab (damit „nachher“ berechenbar ist), `ausfaelleSchreiben`/`ausfaelleAufheben`
+  schreiben Termine und Planungs-Umzug in einer Transaktion. Hierher verschobene
+  Stunden fallen an ihrem alten Platz aus; ohne Weiterschieben kehrt ihre Planung dorthin
+  zurück (`zurueckZuege`). Teil-Ausfall einer Doppelstunde → nur „stundenweise“.
+- **Dialoge mit Promise:** `UI.modal` ruft beim Schließen `onClose` auf. Wer in einem
+  Knopf `close()` und dann `resolve(wert)` aufruft, bekommt das `resolve` aus `onClose`
+  – also erst `resolve`, dann `close` (oder ein Merker wie in `abWocheDialog`).
 - **Heatmap-Zeit:** Der Verfall läuft **nur innerhalb einer laufenden Stunde**
   (Bezugszeit `min(jetzt, stunde.endeTs)`). Beim Öffnen/Fortsetzen wird
   `heatLastDecayAt` auf jetzt gesetzt (kein Nachhol-Verfall aus der Pause), beim

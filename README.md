@@ -157,6 +157,7 @@ termine        { id, art('klassenarbeit'|'test'|'konferenz'|'elternabend'|'aufsi
                  'vertretung'|'sonstiges'|'ferien'|'aenderung'), titel, datum, bis (Ferien),
                  blockId | null (ganztägig), klasseId | null, notiz,
                  aenderung('ausfall'|'verschoben'|'hinweis'), nachDatum, nachBlockId,
+                 verschiebeModus('einheit'|'stunde'|null = Planungen beim Ausfall weitergeschoben),
                  createdAt, updatedAt }
                  (Änderungen meinen eine Stunde über Datum + Block + Klasse bzw. Freitext;
                  der Plan selbst bleibt unverändert)
@@ -507,6 +508,15 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   14 Tage, oder nie; belegter Speicher; alles entfernen); nicht mehr benutzte Dateien werden
   gelöscht. Name und Größe bleiben im Fahrplan. Beim Backup-Export fragt die App, ob die
   Dateien mitgesichert werden sollen (Standard: nein).
+- **Weiterschieben bei Ausfall** – „Fällt aus …“ fragt (Häkchen vorbelegt), ob die
+  folgenden Planungen der Klasse weiterrücken: **in die nächste Doppel- bzw.
+  Einzelstunde** (Doppelstunden-Inhalte nur in Doppelstunden, Einzelstunden bleiben)
+  oder **stundenweise** (alles rückt Stunde für Stunde, eine Doppelstunde kann
+  auseinandergehen). Bei einer Doppelstunde lässt sich die ganze Einheit oder nur eine
+  Stunde ausfallen lassen (dann nur stundenweise). Ferien und andere Ausfälle werden
+  übersprungen. „Ausfall aufheben“ fragt, ob die Planungen zurückrücken. **🤒 Ich bin
+  krank** (Wochenkopf): alle Stunden aller Klassen (auch AG/Aufsicht) von–bis fallen aus,
+  die Planungen jeder Klasse rücken entsprechend weiter.
 - **Klasse** – Tabs: *Schüler/innen · Noten · Kategorien · Sitzplan · Mitarbeit*.
   Oben schnell erreichbar: **Tracker**, **Besprechung**, **Exportieren** (Klasse als
   JSON), Bearbeiten. Im Bearbeiten-Dialog legt die **Klassenstufe** (5–13) fest,

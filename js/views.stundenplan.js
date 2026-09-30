@@ -167,7 +167,9 @@
         "</div>" +
         '<button class="iconbtn" data-action="sp-woche" data-schritt="1" title="Nächste Woche">▶</button>' +
         (montag !== Calc.montagVon(heute) ? '<button class="btn small" data-action="sp-woche" data-schritt="0">Heute</button>' : "") +
-        '<div class="grow"></div>' + ansichtTabs +
+        '<div class="grow"></div>' +
+        '<button class="btn small" data-action="krank" title="Alle Stunden eines Zeitraums fallen aus, Planungen rücken weiter">🤒 Ich bin krank</button>' +
+        ansichtTabs +
       "</div>";
 
     let hinweis = "";
@@ -422,7 +424,10 @@
     const montag = angezeigterMontag();
     const aktuell = Calc.abWoche(state.settings.abWochen, montag);
     return new Promise((resolve) => {
+      // onClose meldet sonst schon beim Schließen „abgebrochen“
+      let gewaehlt = false;
       const setzen = (woche) => async (close) => {
+        gewaehlt = true;
         close();
         const s = await Store.getSettings();
         s.abWochen = Calc.abWocheSetzen(s.abWochen, montag, woche);
@@ -434,7 +439,7 @@
         title: ersteinrichtung ? "A/B-Wochen einrichten" : "A/B-Woche umstellen",
         bodyHTML: "<p>Ist die Woche vom " + datumLang(montag) + " (KW " + Calc.kalenderwoche(montag) + ") eine A- oder B-Woche?</p>" +
           '<p class="muted">Ab dieser Woche wechseln A und B jede Woche. Frühere Wochen bleiben, wie sie waren.</p>',
-        onClose: () => resolve(null),
+        onClose: () => { if (!gewaehlt) resolve(null); },
         buttons: [
           { label: "Abbrechen", onClick: (close) => { close(); resolve(null); } },
           { label: "A-Woche", className: aktuell === "A" ? "primary" : "", onClick: setzen("A") },

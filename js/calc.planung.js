@@ -136,8 +136,64 @@
     return { put, del };
   }
 
+  // ---- Weiterschieben bei Ausfall ----------------------------------------------------
+  // Reihe der Stunden einer Klasse, die von–bis tatsächlich stattfinden
+  // (Plan, A/B-Wochen, Ferien, Änderungen). Rückgabe: [{ datum, blockId, i }]
+  // (i = Position der Stunde am Tag, für das Bilden von Einheiten)
+  function stundenReihe(versionen, abWochen, termine, stundenzeiten, klasseId, von, bis) {
+    const stunden = nurStunden(stundenzeiten);
+    const out = [];
+    for (let d = von; d <= bis; d = Calc.datumPlusTage(d, 1)) {
+      const plan = Calc.tagesPlan(versionen, abWochen, termine, d);
+      stunden.forEach((b, i) => {
+        if (Calc.stundenFinden(plan, b.id).some((x) => x.klasseId === klasseId)) out.push({ datum: d, blockId: b.id, i });
+      });
+    }
+    return out;
+  }
+  // Einheiten: direkt aufeinanderfolgende Stunden eines Tages (Doppelstunde = 2)
+  function einheitenAus(reihe) {
+    const out = [];
+    reihe.forEach((h) => {
+      const letzte = out[out.length - 1];
+      const vor = letzte && letzte[letzte.length - 1];
+      if (vor && vor.datum === h.datum && vor.i + 1 === h.i) letzte.push(h);
+      else out.push([h]);
+    });
+    return out;
+  }
+
+  // Wohin wandern die Planungen einer Klasse, wenn Stunden ausfallen (oder ein
+  // Ausfall aufgehoben wird)? Verglichen wird die Reihe der Stunden vorher und
+  // nachher (Termine mit bzw. ohne die Ausfälle): Der Inhalt der i-ten Stunde
+  // von vorher kommt auf die i-te Stunde von nachher.
+  //   modus "stunde":  Stunde für Stunde (Doppelstunden können auseinandergehen)
+  //   modus "einheit": je Einheitengröße getrennt – Doppelstunden-Inhalte nur in
+  //                    Doppelstunden, Einzelstunden-Inhalte nur in Einzelstunden
+  // Rückgabe: Züge für Calc.planungenUmziehen (nur echte Ortswechsel)
+  function weiterschiebenZuege(versionen, abWochen, vorher, nachher, stundenzeiten, klasseId, von, bis, modus) {
+    const alt = stundenReihe(versionen, abWochen, vorher, stundenzeiten, klasseId, von, bis);
+    const neu = stundenReihe(versionen, abWochen, nachher, stundenzeiten, klasseId, von, bis);
+    const paare = [];
+    if (modus === "einheit") {
+      const ae = einheitenAus(alt), ne = einheitenAus(neu);
+      const groessen = ae.map((u) => u.length).filter((g, i, a) => a.indexOf(g) === i);
+      groessen.forEach((g) => {
+        const an = ne.filter((u) => u.length === g);
+        ae.filter((u) => u.length === g).forEach((u, k) => {
+          if (an[k]) u.forEach((h, j) => paare.push([h, an[k][j]]));
+        });
+      });
+    } else {
+      alt.forEach((h, k) => { if (neu[k]) paare.push([h, neu[k]]); });
+    }
+    return paare
+      .filter((p) => p[0].datum !== p[1].datum || p[0].blockId !== p[1].blockId)
+      .map((p) => ({ klasseId, von: { datum: p[0].datum, blockId: p[0].blockId }, nach: { datum: p[1].datum, blockId: p[1].blockId } }));
+  }
+
   Object.assign(global.Calc, {
     PHASEN, einheitBestimmen, fahrplanAusPlanungen, fahrplanAufteilen, minutenSumme,
-    vorherigeStunde, planungenUmziehen
+    vorherigeStunde, planungenUmziehen, stundenReihe, weiterschiebenZuege
   });
 })(window);

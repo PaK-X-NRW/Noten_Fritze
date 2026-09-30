@@ -525,6 +525,37 @@
     });
   });
 
+  gruppe("Stundenplanung: Weiterschieben bei Ausfall", () => {
+    // Beispiel aus der Absprache: Mo 1+2 (Doppel), Mi 3 (Einzel), Fr 5+6 (Doppel)
+    const zeiten = Store.defaultStundenzeiten();
+    const versionen = [{ id: "v", gueltigAb: null, eintraege: [
+      { tag: 1, blockId: "std-1", woche: "alle", klasseId: "k" }, { tag: 1, blockId: "std-2", woche: "alle", klasseId: "k" },
+      { tag: 3, blockId: "std-3", woche: "alle", klasseId: "k" },
+      { tag: 5, blockId: "std-5", woche: "alle", klasseId: "k" }, { tag: 5, blockId: "std-6", woche: "alle", klasseId: "k" }
+    ] }];
+    const ausfall = (datum, blockId) => ({ art: "aenderung", aenderung: "ausfall", datum, blockId, klasseId: "k" });
+    const moAus = [ausfall("2026-09-28", "std-1"), ausfall("2026-09-28", "std-2")];
+    const kurz = (z) => z.von.datum.slice(8) + "/" + z.von.blockId.slice(4) + "→" + z.nach.datum.slice(8) + "/" + z.nach.blockId.slice(4);
+    fall("In die nächste Doppelstunde: Doppel wandert in Doppel, Einzel bleibt", () => {
+      const z = Calc.weiterschiebenZuege(versionen, [], [], moAus, zeiten, "k", "2026-09-28", "2026-10-09", "einheit");
+      gleich(z.slice(0, 4).map(kurz), ["28/1→02/5", "28/2→02/6", "02/5→05/1", "02/6→05/2"]);
+      wahr(!z.some((x) => x.von.blockId === "std-3"), "Mi 3 (Einzel) bleibt");
+    });
+    fall("Stundenweise: alles rückt eine Stunde weiter, Doppel darf auseinandergehen", () => {
+      const z = Calc.weiterschiebenZuege(versionen, [], [], moAus, zeiten, "k", "2026-09-28", "2026-10-09", "stunde");
+      gleich(z.slice(0, 5).map(kurz), ["28/1→30/3", "28/2→02/5", "30/3→02/6", "02/5→05/1", "02/6→05/2"]);
+    });
+    fall("Aufheben: dieselbe Rechnung rückwärts", () => {
+      const z = Calc.weiterschiebenZuege(versionen, [], moAus, [], zeiten, "k", "2026-09-28", "2026-10-09", "einheit");
+      gleich(z.slice(0, 2).map(kurz), ["02/5→28/1", "02/6→28/2"]);
+    });
+    fall("Ferien werden übersprungen", () => {
+      const termine = [{ art: "ferien", datum: "2026-10-05", bis: "2026-10-09" }];
+      const z = Calc.weiterschiebenZuege(versionen, [], termine, termine.concat(moAus), zeiten, "k", "2026-09-28", "2026-10-16", "einheit");
+      gleich(z.slice(2, 4).map(kurz), ["02/5→12/1", "02/6→12/2"]);
+    });
+  });
+
   gruppe("Sitzplan: Raumform", () => {
     fall("Mittelgang nur bei ungerader Spaltenzahl", () => {
       gleich(Calc.sitzplanGaenge(7, "mittelgang"), [3]);

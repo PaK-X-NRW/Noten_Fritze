@@ -168,6 +168,35 @@
       v.updatedAt = now();
       return termineUndPlanungen([{ put: v }], await planungsUmzug(zuege));
     },
+    // Ausfall-Datensätze für mehrere Stunden bauen (noch nicht speichern), damit
+    // sich vorher ausrechnen lässt, wohin die Planungen weiterrücken.
+    //   eintraege: [{ item, datum, blockId }] (item aus Calc.tagesPlan)
+    //   modus: "stunde" | "einheit" (Planungen wurden weitergeschoben) | null
+    ausfallDatensaetze(eintraege, notiz, modus) {
+      return eintraege.map((e) => {
+        const alt = e.item.verschobenVon || e.item.aenderung;
+        const v = alt ? Object.assign({}, alt)
+          : neuerTermin({ art: "aenderung", datum: e.datum, blockId: e.blockId, klasseId: e.item.klasseId || null, titel: e.item.titel || "" });
+        return Object.assign(v, { aenderung: "ausfall", nachDatum: null, nachBlockId: null,
+          notiz: notiz || "", verschiebeModus: modus || null, updatedAt: now() });
+      });
+    },
+    // Ohne Weiterschieben: hierher verschobene Stunden fallen an ihrem alten
+    // Platz aus – ihre Planung kehrt dorthin zurück.
+    zurueckZuege(eintraege) {
+      return eintraege.filter((e) => e.item.verschobenVon && e.item.klasseId).map((e) => ({
+        klasseId: e.item.klasseId, von: { datum: e.datum, blockId: e.blockId },
+        nach: { datum: e.item.verschobenVon.datum, blockId: e.item.verschobenVon.blockId }
+      }));
+    },
+    // Ausfälle speichern und Planungen umziehen – eine Transaktion.
+    async ausfaelleSchreiben(datensaetze, zuege) {
+      return termineUndPlanungen(datensaetze.map((v) => ({ put: v })), await planungsUmzug(zuege));
+    },
+    // Ausfälle aufheben (Datensätze löschen), Planungen ggf. zurückrücken.
+    async ausfaelleAufheben(datensaetze, zuege) {
+      return termineUndPlanungen(datensaetze.map((v) => ({ del: v.id })), await planungsUmzug(zuege));
+    },
     // Verschiebung aufheben: Änderung löschen, die Planung kehrt an den alten Platz zurück.
     async verschiebungAufheben(v) {
       const zuege = v.aenderung === "verschoben"

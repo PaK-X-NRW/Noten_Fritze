@@ -5,6 +5,9 @@
      Stunde oder ganztägig, Klasse
    - Menü einer Zelle der Wochenansicht: Klasse öffnen, fällt aus, verschieben
      (auf eine belegte Stunde = Plätze tauschen), Hinweis, Termin anlegen
+   - Ausfall mit Weiterschieben der folgenden Planungen (in die nächste
+     Doppel-/Einzelstunde oder stundenweise), Aufheben mit Zurückrücken,
+     „Ich bin krank“ für einen Zeitraum (alle Klassen)
    Die Wochenansicht selbst liegt in views.stundenplan.js, die Rechnungen
    (tatsächlicher Tag, Monatsraster) in calc.stundenplan.js.
    ========================================================================= */
@@ -185,10 +188,13 @@
       if (k) aktionen.push({ gruppe, label: "Klasse öffnen", klasse: "primary", fn: () => go("klasse", { klasseId: k.id, tab: "schueler" }) });
       if (a && (a.aenderung === "ausfall" || a.aenderung === "verschoben")) {
         aktionen.push({ gruppe, label: a.aenderung === "ausfall" ? "Ausfall aufheben" : "Verschiebung aufheben",
-          fn: async () => { await Store.Termine.verschiebungAufheben(a); render(); } });
+          fn: async () => {
+            if (a.aenderung === "ausfall") await ausfallAufheben(a);
+            else await Store.Termine.verschiebungAufheben(a);
+            render();
+          } });
       } else {
-        aktionen.push({ gruppe, label: "Fällt aus …", fn: () => textDialog("Stunde fällt aus", name + " · " + tagKurz(datum) + " " + blockName(blockId, true),
-          "Grund (optional)", "", async (text) => { await Store.Termine.aenderungSetzen(item, datum, blockId, "ausfall", text); render(); }) });
+        aktionen.push({ gruppe, label: "Fällt aus …", fn: () => ausfallDialog(item, datum, blockId, name) });
         aktionen.push({ gruppe, label: "Verschieben …", fn: () => verschiebenDialog(item, datum, blockId, name) });
         if (item.verschobenVon) aktionen.push({ gruppe, label: "Zurück an den alten Platz",
           fn: async () => { await Store.Termine.verschiebungAufheben(item.verschobenVon); render(); } });
@@ -219,6 +225,179 @@
       m.close();
       Promise.resolve(aktionen[parseInt(b.getAttribute("data-i"), 10)].fn()).catch(UI.fehlerMelden);
     }));
+  }
+
+  // ---- Ausfall mit Weiterschieben ---------------------------------------------------
+  async function kalenderDaten() {
+    const [versionen, termine] = await Promise.all([Store.Stundenplan.alle(), Store.Termine.alle()]);
+    return { versionen, termine, abWochen: state.settings.abWochen, zeiten: state.settings.stundenzeiten };
+  }
+  // Bis wohin weitergeschoben wird: letzte Planung der Klasse + 60 Tage Luft
+  // (die letzte geplante Stunde braucht einen freien Platz dahinter).
+  async function schiebeBis(klasseId, von) {
+    const letzte = (await Store.Planungen.byKlasse(klasseId)).reduce((m, p) => (p.datum > m ? p.datum : m), "");
+    return letzte && letzte >= von ? Calc.datumPlusTage(letzte, 60) : null;
+  }
+  // Züge aller betroffenen Klassen (vorher/nachher = Termine ohne/mit den Ausfällen)
+  async function schiebeZuege(k, klassenIds, von, vorher, nachher, modus) {
+    let zuege = [];
+    for (const id of klassenIds) {
+      const bis = await schiebeBis(id, von);
+      if (bis) zuege = zuege.concat(Calc.weiterschiebenZuege(k.versionen, k.abWochen, vorher, nachher, k.zeiten, id, von, bis, modus));
+    }
+    return zuege;
+  }
+  function ersetzt(termine, datensaetze) {
+    const ids = datensaetze.map((d) => d.id);
+    return termine.filter((t) => ids.indexOf(t.id) === -1).concat(datensaetze);
+  }
+  // Auswahl „Weiterschieben“ (Häkchen + Art); groesse = Stunden der Einheit
+  function schiebeAuswahlHTML(groesse) {
+    const art = groesse > 1 ? "Doppelstunde" : "Einzelstunde";
+    return '<div class="field"><label class="hstack"><input type="checkbox" id="af-schieben" checked style="width:auto;min-height:auto">' +
+        " Folgende Planungen weiterschieben</label></div>" +
+      '<div class="seg af-modus"><button type="button" class="active" data-modus="einheit">In die nächste ' + art + "</button>" +
+        '<button type="button" data-modus="stunde">Stundenweise</button></div>' +
+      '<p class="hint af-erklaerung"></p>';
+  }
+  function schiebeAuswahlMount(box, groesse) {
+    const knoepfe = UI.$all(".af-modus button", box);
+    const erkl = box.querySelector(".af-erklaerung");
+    const art = groesse > 1 ? "Doppelstunden" : "Einzelstunden";
+    const zeigen = () => {
+      const an = box.querySelector("#af-schieben").checked;
+      box.querySelector(".af-modus").style.display = an ? "" : "none";
+      const modus = (knoepfe.find((b) => b.classList.contains("active")) || knoepfe[0]).getAttribute("data-modus");
+      erkl.textContent = !an ? "Die Planung bleibt an der ausgefallenen Stunde stehen."
+        : modus === "einheit" ? "Die Fahrpläne der " + art + " rücken jeweils in die nächste " + art.slice(0, -1) + " weiter; andere Stunden bleiben, wie sie sind."
+        : "Alle folgenden Fahrpläne rücken Stunde für Stunde weiter (eine Doppelstunde kann dabei auseinandergehen).";
+    };
+    knoepfe.forEach((b) => b.addEventListener("click", () => { knoepfe.forEach((x) => x.classList.toggle("active", x === b)); zeigen(); }));
+    box.querySelector("#af-schieben").addEventListener("change", zeigen);
+    zeigen();
+    return () => box.querySelector("#af-schieben").checked
+      ? (knoepfe.find((b) => b.classList.contains("active")) || knoepfe[0]).getAttribute("data-modus") : null;
+  }
+
+  // Eine Stunde (bei Doppelstunde wahlweise beide) fällt aus
+  async function ausfallDialog(item, datum, blockId, name) {
+    const k = await kalenderDaten();
+    const plan = Calc.tagesPlan(k.versionen, k.abWochen, k.termine, datum);
+    const einheit = item.klasseId ? Calc.einheitBestimmen(plan, k.zeiten, item.klasseId, blockId) : [];
+    const doppel = einheit.length > 1;
+    UI.modal({
+      title: "Stunde fällt aus",
+      bodyHTML: '<p class="muted">' + UI.esc(name) + " · " + tagKurz(datum) + " " + UI.esc(blockName(blockId, true)) + "</p>" +
+        UI.field("Grund (optional)", "grund", "", { placeholder: "z. B. Wandertag, krank" }) +
+        (doppel ? '<div class="field"><label class="hstack"><input type="checkbox" id="af-ganz" checked style="width:auto;min-height:auto"> Die ganze ' +
+          (einheit.length === 2 ? "Doppelstunde" : einheit.length + "-fach-Stunde") + " (" + einheit.map((b) => b.nr + ".").join(" + ") + " Stunde)</label></div>" : "") +
+        (item.klasseId && !item.verschobenVon ? schiebeAuswahlHTML(doppel ? einheit.length : 1) : ""),
+      onMount: (box) => {
+        box._modus = item.klasseId && !item.verschobenVon ? schiebeAuswahlMount(box, doppel ? einheit.length : 1) : () => null;
+        const ganz = box.querySelector("#af-ganz");
+        // Fällt nur eine Stunde einer Doppelstunde aus, passt nur „stundenweise“
+        if (ganz) ganz.addEventListener("change", () => {
+          const e = box.querySelector('.af-modus [data-modus="einheit"]');
+          if (!e) return;
+          e.style.display = ganz.checked ? "" : "none";
+          if (!ganz.checked) box.querySelector('.af-modus [data-modus="stunde"]').click();
+        });
+      },
+      buttons: [
+        { label: "Abbrechen" },
+        { label: "Fällt aus", className: "primary", onClick: async (close, box) => {
+          const grund = box.querySelector('[name="grund"]').value.trim();
+          const ganz = box.querySelector("#af-ganz");
+          const modus = box._modus();
+          close();
+          const bloecke = ganz && ganz.checked ? einheit.map((b) => b.id) : [blockId];
+          const eintraege = bloecke.map((id) => ({
+            datum, blockId: id,
+            item: id === blockId ? item : (plan.zellen[id] || []).find((i) => i.typ === "stunde" && i.klasseId === item.klasseId)
+          })).filter((e) => e.item);
+          const saetze = Store.Termine.ausfallDatensaetze(eintraege, grund, modus);
+          const zuege = modus
+            ? await schiebeZuege(k, [item.klasseId], datum, k.termine, ersetzt(k.termine, saetze), modus)
+            : Store.Termine.zurueckZuege(eintraege);
+          await Store.Termine.ausfaelleSchreiben(saetze, zuege);
+          render();
+          UI.toast((eintraege.length > 1 ? eintraege.length + " Stunden fallen aus" : "Stunde fällt aus") +
+            (modus ? " – Planungen weitergeschoben" : ""));
+        }}
+      ]
+    });
+  }
+
+  // Ausfall aufheben; wurden dabei Planungen weitergeschoben, nachfragen, ob sie
+  // zurückrücken sollen. Ausfälle derselben Klasse am selben Tag, die gemeinsam
+  // weitergeschoben wurden (Doppelstunde), werden zusammen aufgehoben.
+  async function ausfallAufheben(a) {
+    const k = await kalenderDaten();
+    const gruppe = a.verschiebeModus && a.klasseId
+      ? k.termine.filter((t) => t.art === "aenderung" && t.aenderung === "ausfall" && t.klasseId === a.klasseId &&
+          t.datum === a.datum && t.verschiebeModus === a.verschiebeModus)
+      : [a];
+    let zuege = [];
+    if (a.verschiebeModus && a.klasseId) {
+      const zurueck = await new Promise((resolve) => UI.modal({
+        title: "Ausfall aufheben",
+        bodyHTML: "<p>Beim Ausfall wurden die folgenden Planungen weitergeschoben. Sollen sie wieder zurückrücken?</p>" +
+          (gruppe.length > 1 ? '<p class="muted">Aufgehoben wird der Ausfall aller ' + gruppe.length + " Stunden dieses Tages.</p>" : ""),
+        onClose: () => resolve(null),
+        buttons: [
+          { label: "Abbrechen", onClick: (close) => { close(); resolve(null); } },
+          { label: "Nur aufheben", onClick: (close) => { resolve(false); close(); } },
+          { label: "Zurückrücken", className: "primary", onClick: (close) => { resolve(true); close(); } }
+        ]
+      }));
+      if (zurueck === null) return;
+      if (zurueck) zuege = await schiebeZuege(k, [a.klasseId], a.datum, k.termine, k.termine.filter((t) => gruppe.indexOf(t) === -1), a.verschiebeModus);
+    }
+    await Store.Termine.ausfaelleAufheben(gruppe, zuege);
+    UI.toast("Ausfall aufgehoben" + (zuege.length ? " – Planungen zurückgerückt" : ""));
+  }
+
+  // „Ich bin krank“: alle Stunden aller Klassen (auch AG, Aufsicht) von–bis
+  // fallen aus; die Planungen jeder Klasse rücken entsprechend weiter.
+  function krankDialog() {
+    const heute = Store.datumLokal();
+    UI.modal({
+      title: "🤒 Ich bin krank",
+      bodyHTML: '<p class="muted">Alle Stunden im Zeitraum werden als ausgefallen eingetragen – in allen Klassen, auch AGs und Aufsichten.</p>' +
+        '<div class="form-row">' + UI.field("Von", "von", heute, { type: "date" }) + UI.field("Bis", "bis", heute, { type: "date" }) + "</div>" +
+        UI.field("Grund", "grund", "krank") +
+        schiebeAuswahlHTML(2).replace("In die nächste Doppelstunde", "Doppel-/Einzelstunden getrennt"),
+      onMount: (box) => { box._modus = schiebeAuswahlMount(box, 2); box.querySelector(".af-erklaerung").textContent = ""; },
+      buttons: [
+        { label: "Abbrechen" },
+        { label: "Eintragen", className: "primary", onClick: async (close, box) => {
+          const von = box.querySelector('[name="von"]').value, bis = box.querySelector('[name="bis"]').value || von;
+          if (!von || bis < von) { UI.toast("Bitte einen gültigen Zeitraum wählen"); return; }
+          const grund = box.querySelector('[name="grund"]').value.trim();
+          const modus = box._modus();
+          const k = await kalenderDaten();
+          const eintraege = [];
+          for (let d = von; d <= bis; d = Calc.datumPlusTage(d, 1)) {
+            const plan = Calc.tagesPlan(k.versionen, k.abWochen, k.termine, d);
+            k.zeiten.forEach((b) => Calc.stundenFinden(plan, b.id).forEach((item) => eintraege.push({ item, datum: d, blockId: b.id })));
+          }
+          if (!eintraege.length) { UI.toast("In diesem Zeitraum liegen keine Stunden"); return; }
+          const klassenIds = eintraege.map((e) => e.item.klasseId).filter((x, i, a) => x && a.indexOf(x) === i);
+          if (!await UI.confirmDialog("Ausfall eintragen?", eintraege.length + " Stunden (" + klassenIds.length + (klassenIds.length === 1 ? " Klasse" : " Klassen") +
+            (eintraege.length > eintraege.filter((e) => e.item.klasseId).length ? " und weitere Einträge wie Aufsichten" : "") +
+            ") fallen vom " + tagKurz(von) + " bis " + tagKurz(bis) + " aus." + (modus ? " Die folgenden Planungen rücken weiter." : ""),
+            { okLabel: "Eintragen", danger: false })) return;
+          close();
+          const saetze = Store.Termine.ausfallDatensaetze(eintraege, grund, modus);
+          const zuege = modus
+            ? await schiebeZuege(k, klassenIds, von, k.termine, ersetzt(k.termine, saetze), modus)
+            : Store.Termine.zurueckZuege(eintraege);
+          await Store.Termine.ausfaelleSchreiben(saetze, zuege);
+          render();
+          UI.toast(eintraege.length + " Stunden als ausgefallen eingetragen" + (modus ? ", Planungen weitergeschoben" : "") + " – gute Besserung!", { duration: 6000 });
+        }}
+      ]
+    });
   }
 
   // Einfacher Text-Dialog (Ausfall-Grund, Hinweis)
@@ -275,6 +454,6 @@
 
   Object.assign(global.Views, {
     monatHTML, monatBlaettern, monatTag, ansichtWechseln,
-    terminDialog, terminBearbeiten, terminNeu, zellenMenue
+    terminDialog, terminBearbeiten, terminNeu, zellenMenue, krankDialog
   });
 })(window);

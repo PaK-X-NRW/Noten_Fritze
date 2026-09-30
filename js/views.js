@@ -18,7 +18,7 @@
     trackerStundeBeenden, trackerVerlassen, trackerRaumDialog, trackerTap, trackerUndo, trackerHeatPause,
     besprechungStep, stundenzeitenAktion,
     stundenplanEinrichten, ansichtSetzen, wocheBlaettern, stundenplanZelle, abWocheUmstellen, plaeneDialog,
-    monatBlaettern, monatTag, ansichtWechseln, terminBearbeiten, terminNeu,
+    monatBlaettern, monatTag, ansichtWechseln, terminBearbeiten, terminNeu, krankDialog,
     bausteinNeu, planungZurueck, planungKlasse, planungTracker, planungMenue, planungUebernehmen, fahrplanDialog
   } = global.Views;
 
@@ -148,6 +148,7 @@
     "mo-blaettern": (el) => monatBlaettern(el.getAttribute("data-schritt")),
     "mo-tag": (el) => monatTag(el.getAttribute("data-datum")),
     "termin-neu": () => terminNeu(),
+    "krank": () => krankDialog(),
     "termin-bearbeiten": (el) => terminBearbeiten(el.getAttribute("data-id")),
     // Stundenplanung (views.planung.js)
     "planung-neu": (el) => bausteinNeu(el.getAttribute("data-typ")),
@@ -200,7 +201,7 @@
           onClose: () => resolve(null),
           buttons: [
             { label: "Abbrechen", onClick: (close) => { close(); resolve(null); } },
-            { label: "Exportieren", className: "primary", onClick: (close, box) => { const v = box.querySelector("#bk-dateien").checked; close(); resolve(v); } }
+            { label: "Exportieren", className: "primary", onClick: (close, box) => { const v = box.querySelector("#bk-dateien").checked; resolve(v); close(); } }
           ]
         }));
         if (wahl === null) return;
