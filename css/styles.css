@@ -465,6 +465,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .pl-phase { width: 170px; }
 .pl-min { width: 80px; }
 .pl-baustein textarea { width: 100%; min-height: 0; }
+.pl-baustein.datei { border-left: 4px solid #b9770e; }
+.pl-datei { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.pl-datei-pin.aktiv { background: var(--accent-soft); border-color: var(--accent); }
+.pl-entfernt { color: var(--text-muted); font-size: 13px; }
 .pl-link { display: flex; gap: 8px; align-items: center; }
 .pl-link input { flex: 1; }
 .pl-trenner { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-muted); font-weight: 600; font-size: 14px; }

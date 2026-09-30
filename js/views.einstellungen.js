@@ -166,7 +166,9 @@
     sitzplanKachelSpalten: { art: "zahl", min: 6, max: 15, ersatz: 9, meldung: "Gespeichert" },
     heatStartWert: { art: "zahl", min: 0, max: 100, meldung: "Startwert gespeichert" },
     heatVerfallPunkte: { art: "zahl", min: 0, meldung: "Heatmap-Verfall gespeichert" },
-    heatVerfallMinuten: { art: "zahl", min: 1, ersatz: 5, meldung: "Heatmap-Verfall gespeichert" }
+    heatVerfallMinuten: { art: "zahl", min: 1, ersatz: 5, meldung: "Heatmap-Verfall gespeichert" },
+    dateiAufbewahrung: { art: "auswahl", werte: ["frist", "nie"], meldung: "Gespeichert" },
+    dateiFristTage: { art: "zahl", min: 1, max: 365, ersatz: 14, meldung: "Frist gespeichert" }
   };
   // Je Ereignistyp: Mitarbeitspunkte, bei Meldungen zusätzlich Heatmap-Punkte
   Store.EVENT_TYPES.forEach((t) => {
@@ -237,6 +239,9 @@
     const ordnerApi = !!window.showDirectoryPicker;
     const ordnerHandle = ordnerApi ? await CSV.exportOrdner() : null;
     const punkte = Store.EVENT_TYPES.map((t) => zahlZeile(t.label, "mitarbeitPunkte." + t.id, s)).join("");
+    const dateien = await Store.Dateien.alle();
+    const mitInhalt = dateien.filter((d) => d.daten);
+    const belegt = mitInhalt.reduce((n, d) => n + (d.groesse || 0), 0);
     const heatpunkte = Store.EVENT_TYPES.filter((t) => t.heatSetting)
       .map((t) => zahlZeile(t.label, t.heatSetting, s)).join("");
 
@@ -283,6 +288,19 @@
         "Der Tracker erkennt damit die laufende Stunde, ihre Restzeit und Doppelstunden. " +
         "Pausen und sonstige Zeiten (z. B. Frühaufsicht) zählen nicht als Unterricht.</p>" +
         stundenzeitenHTML(s) +
+      "</div>" +
+      '<div class="card"><h2>Dateien der Stundenplanung</h2>' +
+        '<p class="muted">Angehängte Dateien werden als <strong>Kopie</strong> in der App gespeichert – das Original bleibt, ' +
+        "wo es war. Sie liegen dadurch doppelt auf dem Gerät und belegen Speicherplatz. Deshalb entfernt die App ihren Inhalt " +
+        "automatisch, sobald die letzte Stunde, in der eine Datei vorkommt, länger als die Frist zurückliegt. Mit 📌 markierte " +
+        "Dateien bleiben. Name und Größe bleiben im Fahrplan stehen – die Datei lässt sich dann neu hinzufügen.</p>" +
+        '<div class="form-row">' +
+          einstellungFeld("Inhalt automatisch entfernen", "dateiAufbewahrung", s, { type: "select", options: [
+            { value: "frist", label: "nach der Frist" }, { value: "nie", label: "nie" }] }) +
+          einstellungFeld("Frist (Tage nach der Stunde)", "dateiFristTage", s, { type: "number", inputmode: "numeric", hint: "Standard: 14 Tage" }) +
+        "</div>" +
+        '<p class="hint">Belegt: ' + Views.groesseText(belegt) + " in " + mitInhalt.length + (mitInhalt.length === 1 ? " Datei" : " Dateien") + ".</p>" +
+        (mitInhalt.length ? '<div class="btn-row"><button class="btn danger" data-action="dateien-entfernen">Inhalt aller Dateien jetzt entfernen</button></div>' : "") +
       "</div>" +
       '<div class="card"><h2>Export-Ordner</h2>' +
         '<p class="muted">Exporte (CSV/JSON) direkt in einen Ordner auf diesem Gerät speichern. ' +

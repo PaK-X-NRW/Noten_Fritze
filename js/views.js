@@ -187,13 +187,40 @@
 
     // Einstellungen / Backup
     "backup-export": async () => {
-      const data = await Store.exportAll();
+      // Anhänge nur auf Wunsch mitsichern (Standard: aus, das Backup bleibt klein)
+      const mitInhalt = (await Store.Dateien.alle()).filter((d) => d.daten);
+      let mitDateien = false;
+      if (mitInhalt.length) {
+        const groesse = mitInhalt.reduce((n, d) => n + (d.groesse || 0), 0);
+        const wahl = await new Promise((resolve) => UI.modal({
+          title: "Backup exportieren",
+          bodyHTML: '<p>In der Stundenplanung liegen ' + mitInhalt.length + " Datei(en) mit zusammen " + Views.groesseText(groesse) + ".</p>" +
+            '<div class="field"><label class="hstack"><input type="checkbox" id="bk-dateien" style="width:auto;min-height:auto"> Dateien mitsichern</label>' +
+            '<div class="hint">Ohne Häkchen enthält das Backup nur Name und Größe der Dateien.</div></div>',
+          onClose: () => resolve(null),
+          buttons: [
+            { label: "Abbrechen", onClick: (close) => { close(); resolve(null); } },
+            { label: "Exportieren", className: "primary", onClick: (close, box) => { const v = box.querySelector("#bk-dateien").checked; close(); resolve(v); } }
+          ]
+        }));
+        if (wahl === null) return;
+        mitDateien = wahl;
+      }
+      const data = await Store.exportAll({ mitDateien });
       const status = await CSV.speichern(
         "noten-fritze-backup-" + new Date().toISOString().slice(0, 10) + ".json",
         JSON.stringify(data, null, 2), "application/json");
       exportToast(status, "Backup");
     },
     "backup-import": () => backupImportDialog(),
+    "dateien-entfernen": async () => {
+      if (!await UI.confirmDialog("Inhalt aller Dateien entfernen?",
+        "Die Kopien in der App werden gelöscht (auch 📌 behaltene). Name und Größe bleiben im Fahrplan stehen; die Originale sind davon nicht betroffen.",
+        { okLabel: "Entfernen" })) return;
+      const n = await Store.Dateien.alleEntfernen(Store.datumLokal());
+      render();
+      UI.toast(n + (n === 1 ? " Datei" : " Dateien") + " entfernt");
+    },
     // Stundenzeiten: Stunde anhängen/entfernen, Pause anlegen/entfernen, Lücken füllen
     "stundenzeiten": (el) => stundenzeitenAktion(el.getAttribute("data-was"), el.getAttribute("data-id")),
 

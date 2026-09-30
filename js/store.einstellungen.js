@@ -139,6 +139,10 @@
     // A/B-Wochen: Umschaltpunkte [{ abMontag: "YYYY-MM-DD", woche: "A"|"B" }];
     // leer = keine A/B-Wochen (siehe Calc.abWoche)
     abWochen: [],
+    // Anhänge der Stundenplanung: Inhalt automatisch entfernen ("frist") oder
+    // nie ("nie"); Frist in Tagen nach der letzten Stunde, in der die Datei vorkommt
+    dateiAufbewahrung: "frist",
+    dateiFristTage: 14,
     // Reihenfolge der Schüler/innen in allen Listen:
     // "nachname" = alphabetisch (Nachname, dann Vorname), "manuell" = per ▲/▼ gepflegter sortIndex
     schuelerSortierung: "nachname",

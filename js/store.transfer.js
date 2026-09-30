@@ -20,8 +20,21 @@
   const DATEN_STORES = {
     klassen: "id", schueler: "id", kategorien: "id", leistungen: "id", noten: "id",
     sitzplaene: "klasseId", ereignisse: "id", abwesenheiten: "id", stunden: "id",
-    stundenplaene: "id", wochennotizen: "montag", termine: "id", planungen: "id"
+    stundenplaene: "id", wochennotizen: "montag", termine: "id", planungen: "id", dateien: "id"
   };
+  // Datei-Inhalte (ArrayBuffer) im JSON als Base64 – nur auf Wunsch im Backup
+  function zuBase64(buf) {
+    const b = new Uint8Array(buf);
+    let s = "";
+    for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+    return btoa(s);
+  }
+  function ausBase64(text) {
+    const s = atob(text);
+    const b = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+    return b.buffer;
+  }
   // Prüft eine Liste aus einer Import-Datei, bevor irgendetwas geschrieben
   // wird: fehlt sie, ist sie leer; ist sie kaputt, bricht der Import ab.
   function pruefeListe(d, name, schluessel, was) {
@@ -37,7 +50,9 @@
   }
 
   // ---- Backup (Gesamt-Export/Import als JSON) ------------------------------
-  async function exportAll() {
+  //   opts.mitDateien: Inhalte der Anhänge mitsichern (sonst nur Name/Größe)
+  async function exportAll(opts) {
+    const mitDateien = !!(opts && opts.mitDateien);
     const [klassen, schueler, kategorien, leistungen, noten, sitzplaene, ereignisse, abwesenheiten, stunden,
       stundenplaene, wochennotizen, termine, planungen, settings] = await Promise.all([
       DB.getAll("klassen"), DB.getAll("schueler"), DB.getAll("kategorien"),
@@ -46,6 +61,11 @@
       DB.getAll("abwesenheiten"), DB.getAll("stunden"),
       DB.getAll("stundenplaene"), DB.getAll("wochennotizen"), DB.getAll("termine"), DB.getAll("planungen"), getSettings()
     ]);
+    const dateien = (await DB.getAll("dateien")).map((d) => {
+      const x = Object.assign({}, d, { daten64: mitDateien && d.daten ? zuBase64(d.daten) : null });
+      delete x.daten;
+      return x;
+    });
     return {
       app: "noten-fritze", appVersion: APP_VERSION,
       // dbVersion = Struktur der Datenbank, schemaVersion = Form der Datensätze.
@@ -54,7 +74,7 @@
       dbVersion: DB.DB_VERSION, schemaVersion: SCHEMA_VERSION,
       exportedAt: new Date().toISOString(),
       data: { klassen, schueler, kategorien, leistungen, noten, sitzplaene, ereignisse, abwesenheiten, stunden,
-        stundenplaene, wochennotizen, termine, planungen, settings }
+        stundenplaene, wochennotizen, termine, planungen, dateien, settings }
     };
   }
 
@@ -86,6 +106,18 @@
     // Einstellungen aus dem Backup, sonst die bisherigen – jeweils mit der
     // Datenform des Backups, damit die Migration danach weiß, wo sie anfängt.
     const settings = Object.assign({}, backupSettings || settingsAktuell, { key: "app", schemaVersion: version });
+    // Anhänge: Inhalt aus Base64; fehlt er im Backup, bleibt ein vorhandener
+    // Inhalt auf diesem Gerät erhalten, sonst gilt die Datei als entfernt.
+    const lokal = {};
+    (await DB.getAll("dateien")).forEach((x) => { lokal[x.id] = x; });
+    daten.dateien = daten.dateien.map((x) => {
+      const d = Object.assign({}, x);
+      const inhalt = x.daten64 ? ausBase64(x.daten64) : (lokal[x.id] && lokal[x.id].daten) || null;
+      delete d.daten64;
+      d.daten = inhalt;
+      if (!inhalt && !d.entferntAm) d.entferntAm = "Backup ohne Dateien";
+      return d;
+    });
 
     const stores = Object.keys(DATEN_STORES).concat("einstellungen");
     await DB.atomar(stores, (os) => {

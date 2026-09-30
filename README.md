@@ -164,7 +164,9 @@ planungen      { id, klasseId, datum, blockId, thema, bausteine:[{ id, typ('text
                  phase, minuten, text, url, dateiId }], createdAt, updatedAt }
                  (je Stunde ein Datensatz; eine Doppelstunde = zwei Datensätze, im Fenster
                  ein Fahrplan mit Trennlinie; zieht beim Verschieben der Stunde mit)
-dateien        (ab 4b: Anhänge der Planung)
+dateien        { id, name, mime, groesse, daten(ArrayBuffer | null), behalten, entferntAm, erstelltAm }
+                 (Kopie einer angehängten Datei; den Inhalt entfernt der App-Start nach der Frist,
+                 Name/Größe bleiben – auch im Baustein; im Backup nur auf Wunsch, als Base64)
 einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punkte'|'note6'),
                  stundenzeiten [{ id, art('stunde'|'pause'), name, start, ende, nr }]
                  (bis 1.15: stundenplan, wird beim Lesen umgewandelt),
@@ -174,7 +176,8 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
                  sitzplanKachelSpalten(6..15, Standard 9),
                  mitarbeitPunkte, mitarbeitSchwellen,
                  heatPunkteEinfach, heatPunkteGut, heatPunkteSehrGut,
-                 heatStartWert, heatVerfallPunkte, heatVerfallMinuten, anteile }
+                 heatStartWert, heatVerfallPunkte, heatVerfallMinuten, anteile,
+                 dateiAufbewahrung('frist'|'nie'), dateiFristTage(Standard 14) }
                  (key:'export' = Handle des Export-Ordners, File System Access API)
 ```
 
@@ -497,7 +500,13 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   Oben erscheint die **Hausaufgabe der letzten Stunde** der Klasse, **📋 Übernehmen**
   hängt den Fahrplan einer anderen Stunde an, **▶ Tracker** startet die Erfassung, im
   Tracker zeigt **🗺 Fahrplan** den Plan der laufenden Stunde. Wird eine Stunde
-  verschoben (oder getauscht), zieht ihr Fahrplan mit.
+  verschoben (oder getauscht), zieht ihr Fahrplan mit. **＋ Datei** legt eine Kopie der
+  gewählten Datei in der App ab (Dateien, Fotos, Kamera): Öffnen, Teilen, 📌 behalten.
+  Beim App-Start wird der Inhalt entfernt, wenn die letzte Stunde mit dieser Datei länger
+  als die Frist zurückliegt (Einstellungen → „Dateien der Stundenplanung“: Frist, Standard
+  14 Tage, oder nie; belegter Speicher; alles entfernen); nicht mehr benutzte Dateien werden
+  gelöscht. Name und Größe bleiben im Fahrplan. Beim Backup-Export fragt die App, ob die
+  Dateien mitgesichert werden sollen (Standard: nein).
 - **Klasse** – Tabs: *Schüler/innen · Noten · Kategorien · Sitzplan · Mitarbeit*.
   Oben schnell erreichbar: **Tracker**, **Besprechung**, **Exportieren** (Klasse als
   JSON), Bearbeiten. Im Bearbeiten-Dialog legt die **Klassenstufe** (5–13) fest,

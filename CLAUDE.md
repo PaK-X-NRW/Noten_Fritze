@@ -398,6 +398,16 @@ beim allerersten Start erscheint er bewusst nicht.
   Sortieren per Pointer-Events am Griff (`touch-action: none`), wie `spaltenZiehen`.
   Kaskade: `Klassen.remove` löscht die Planungen (Index `klasseId`), nicht über
   `klassenAbhaengige`. Im Backup, nicht im Klassen-Export.
+- **Dateien der Planung:** Store `dateien` (`Store.Dateien`), Inhalt als **ArrayBuffer**
+  (nicht Blob – ältere iPad-Safaris), Name/Größe stehen zusätzlich im Baustein
+  (`{ typ: "datei", dateiId, name, groesse }`), damit sie ein Entfernen überleben.
+  `Store.Dateien.aufraeumen(frist, heute)` läuft in `app.js` nach den Migrationen: Datei
+  ohne Baustein → löschen; letzte Stunde mit der Datei älter als die Frist und nicht
+  `behalten` → `daten = null`, `entferntAm`. Einstellungen `dateiAufbewahrung`
+  ("frist"|"nie") und `dateiFristTage` (1–365, Standard 14). Backup: `exportAll({ mitDateien })`
+  schreibt `daten64` (Base64) nur auf Wunsch; `importAll` behält bei fehlendem Inhalt einen
+  vorhandenen lokalen Inhalt, sonst gilt die Datei als entfernt. Die Dateiauswahl muss
+  **direkt im Tipp** geöffnet werden (`input.click()` synchron), sonst blockt iOS.
 - **Heatmap-Zeit:** Der Verfall läuft **nur innerhalb einer laufenden Stunde**
   (Bezugszeit `min(jetzt, stunde.endeTs)`). Beim Öffnen/Fortsetzen wird
   `heatLastDecayAt` auf jetzt gesetzt (kein Nachhol-Verfall aus der Pause), beim

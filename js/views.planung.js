@@ -1,7 +1,8 @@
 /* =========================================================================
    views.planung.js – Stundenplanung (Fahrplan einer Stunde)
    - Vollbild-Ansicht, geöffnet per Tipp auf eine Klassenstunde im Stundenplan
-   - Thema + Bausteine (Phase, Minuten, Text; Link); Sortieren am Griff ⠿
+   - Thema + Bausteine (Phase, Minuten, Text; Link; Datei als Kopie in der App,
+     öffnen/teilen/📌 behalten); Sortieren am Griff ⠿
      (Pointer-Events, auch auf dem iPad), Speichern automatisch
    - Doppelstunde = ein Fahrplan mit verschiebbarer Trennlinie „— 2. Stunde —“
    - Hausaufgabe der letzten Stunde, Fahrplan einer anderen Stunde übernehmen
@@ -16,6 +17,16 @@
   const api = global.Views;
 
   let speicherTimer = null;
+
+  // „1,2 MB“ / „340 KB“
+  function groesseText(bytes) {
+    const n = Number(bytes) || 0;
+    if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1).replace(".", ",") + " MB";
+    return Math.max(1, Math.round(n / 1024)) + " KB";
+  }
+  function datumDeutsch(d) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(d || "")) ? d.slice(8, 10) + "." + d.slice(5, 7) + "." + d.slice(0, 4) : String(d || "");
+  }
 
   // =========================================================================
   //  ANSICHT
@@ -39,10 +50,11 @@
     }
     const blockIds = einheit.map((b) => b.id);
     const planungen = await Store.Planungen.derStunden(k.id, slot.datum, blockIds);
+    const liste = Calc.fahrplanAusPlanungen(einheit, planungen);
     state.planung = {
-      klasseId: k.id, datum: slot.datum, einheit, blockIds,
-      liste: Calc.fahrplanAusPlanungen(einheit, planungen),
-      thema: (planungen.find((p) => p.thema) || {}).thema || ""
+      klasseId: k.id, datum: slot.datum, einheit, blockIds, liste,
+      thema: (planungen.find((p) => p.thema) || {}).thema || "",
+      dateien: await dateiStatus(liste)
     };
 
     // Hinweise: Ausfall dieser Stunde, Hausaufgabe der letzten Stunde
@@ -85,6 +97,8 @@
       '<div class="btn-row pl-neu">' +
         '<button class="btn" data-action="planung-neu" data-typ="text">＋ Text</button>' +
         '<button class="btn" data-action="planung-neu" data-typ="link">＋ Link</button>' +
+        '<button class="btn" data-action="planung-neu" data-typ="datei">＋ Datei</button>' +
+        '<input type="file" id="pl-datei" multiple hidden>' +
       "</div>";
 
     return { topbar, body, fullWidth: false, mount: mountPlanung };
@@ -102,14 +116,28 @@
         '<button class="iconbtn plain danger-text pl-weg" title="Baustein entfernen">🗑</button>' +
       "</div>";
     let inhalt = "";
-    if (x.typ === "link") {
+    if (x.typ === "datei") {
+      const d = (state.planung.dateien || {})[x.dateiId];
+      const da = !!(d && d.daten);
+      inhalt = '<div class="pl-datei">📄 <strong>' + UI.esc(x.name || "Datei") + "</strong>" +
+        ' <span class="muted">' + groesseText(x.groesse) + "</span>" +
+        (da
+          ? '<div class="grow"></div><button class="btn small pl-datei-oeffnen">Öffnen</button>' +
+            (navigator.share ? '<button class="btn small pl-datei-teilen">Teilen</button>' : "") +
+            '<button class="btn small pl-datei-pin' + (d.behalten ? " aktiv" : "") + '" title="' +
+              (d.behalten ? "Wird behalten – nicht automatisch entfernen" : "Behalten (nicht automatisch entfernen)") + '">📌</button>'
+          : ' <span class="pl-entfernt">entfernt' + (d && d.entferntAm ? " (" + UI.esc(datumDeutsch(d.entferntAm)) + ")" : "") +
+            " – bei Bedarf aus der Dateien-App neu hinzufügen</span>") +
+        "</div>" +
+        '<textarea data-feld="text" rows="2" placeholder="Wofür? (optional)">' + UI.esc(x.text || "") + "</textarea>";
+    } else if (x.typ === "link") {
       inhalt = '<div class="pl-link"><input type="url" data-feld="url" placeholder="https://…" value="' + UI.esc(x.url || "") + '">' +
         '<button class="btn small pl-oeffnen">Öffnen</button></div>' +
         '<textarea data-feld="text" rows="2" placeholder="Wofür? (optional)">' + UI.esc(x.text || "") + "</textarea>";
     } else {
       inhalt = '<textarea data-feld="text" rows="3" placeholder="Was passiert in dieser Phase?">' + UI.esc(x.text || "") + "</textarea>";
     }
-    return '<div class="pl-baustein' + (x.typ === "link" ? " link" : "") + '" data-id="' + UI.esc(x.id) + '">' + kopf + inhalt + "</div>";
+    return '<div class="pl-baustein' + (x.typ === "link" || x.typ === "datei" ? " " + x.typ : "") + '" data-id="' + UI.esc(x.id) + '">' + kopf + inhalt + "</div>";
   }
   function trennerHTML(block, fest) {
     return '<div class="pl-trenner' + (fest ? " fest" : "") + '" data-id="' + (fest ? "kopf" : "trenner-" + UI.esc(block.id)) + '">' +
@@ -184,7 +212,18 @@
         zeichnen(); speichern().catch(UI.fehlerMelden);
       } else if (ev.target.closest(".pl-oeffnen")) {
         linkOeffnen(eintrag(ev.target).url);
+      } else if (ev.target.closest(".pl-datei-oeffnen")) {
+        dateiOeffnen(eintrag(ev.target).dateiId);
+      } else if (ev.target.closest(".pl-datei-teilen")) {
+        dateiTeilen(eintrag(ev.target).dateiId);
+      } else if (ev.target.closest(".pl-datei-pin")) {
+        dateiBehalten(eintrag(ev.target).dateiId);
       }
+    });
+    UI.$("#pl-datei").addEventListener("change", (ev) => {
+      const files = Array.prototype.slice.call(ev.target.files || []);
+      ev.target.value = "";
+      dateienHinzufuegen(files).catch(UI.fehlerMelden);
     });
     ziehenAktivieren(box);
   }
@@ -239,7 +278,13 @@
   function bausteinNeu(typ) {
     const p = state.planung;
     if (!p) return;
-    const x = { id: Store.uid(), typ: typ === "link" ? "link" : "text", phase: "", minuten: "", text: "", url: "" };
+    // Datei: Auswahl öffnen (muss direkt im Tipp passieren, sonst blockt iOS)
+    if (typ === "datei") { const f = UI.$("#pl-datei"); if (f) f.click(); return; }
+    einfuegen({ id: Store.uid(), typ: typ === "link" ? "link" : "text", phase: "", minuten: "", text: "", url: "" });
+  }
+  // Neuen Baustein einsortieren, zeichnen, speichern, Feld fokussieren
+  function einfuegen(x) {
+    const p = state.planung;
     // Ans Ende der ersten Stunde, die laut Minuten noch nicht voll ist (so füllt
     // sich eine Doppelstunde von oben); sind alle voll, ganz ans Ende.
     const m = Calc.minutenSumme(p.einheit, p.liste);
@@ -249,8 +294,61 @@
     if (pos >= 0) p.liste.splice(pos, 0, x); else p.liste.push(x);
     zeichnen();
     speichern().catch(UI.fehlerMelden);
-    const el = UI.$('#pl-liste [data-id="' + x.id + '"] ' + (typ === "link" ? '[data-feld="url"]' : '[data-feld="phase"]'));
+    const el = UI.$('#pl-liste [data-id="' + x.id + '"] ' + (x.typ === "link" ? '[data-feld="url"]' : '[data-feld="phase"]'));
     if (el) { el.scrollIntoView({ block: "center" }); el.focus(); }
+  }
+
+  // ---- Dateien -------------------------------------------------------------------
+  // Status der Dateien eines Fahrplans (Inhalt vorhanden?, 📌, entfernt am)
+  async function dateiStatus(liste) {
+    const ids = liste.filter((x) => x.typ === "datei" && x.dateiId).map((x) => x.dateiId);
+    const out = {};
+    for (const id of ids) {
+      const d = await Store.Dateien.get(id);
+      if (d) out[id] = { daten: !!d.daten, behalten: !!d.behalten, entferntAm: d.entferntAm };
+    }
+    return out;
+  }
+  async function dateienHinzufuegen(files) {
+    const p = state.planung;
+    for (const f of files) {
+      if (f.size > 50 * 1024 * 1024 && !await UI.confirmDialog("Große Datei",
+        "„" + f.name + "“ ist " + groesseText(f.size) + " groß und wird als Kopie in der App gespeichert. Trotzdem hinzufügen?",
+        { okLabel: "Hinzufügen", danger: false })) continue;
+      const d = await Store.Dateien.neu(f);
+      p.dateien[d.id] = { daten: true, behalten: false, entferntAm: null };
+      einfuegen({ id: Store.uid(), typ: "datei", dateiId: d.id, name: d.name, groesse: d.groesse, phase: "", minuten: "", text: "" });
+    }
+    await speichern();
+    if (files.length) UI.toast(files.length === 1 ? "Datei hinzugefügt" : files.length + " Dateien hinzugefügt");
+  }
+  async function dateiOeffnen(id) {
+    const d = await Store.Dateien.get(id);
+    if (!d || !d.daten) { UI.toast("Der Inhalt dieser Datei wurde entfernt"); return; }
+    const url = URL.createObjectURL(Store.Dateien.blob(d));
+    const fenster = global.open(url, "_blank");
+    if (!fenster) {
+      // Popup blockiert: als Download anbieten
+      const a = document.createElement("a");
+      a.href = url; a.download = d.name; document.body.appendChild(a); a.click(); a.remove();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+  async function dateiTeilen(id) {
+    const d = await Store.Dateien.get(id);
+    if (!d || !d.daten) { UI.toast("Der Inhalt dieser Datei wurde entfernt"); return; }
+    const file = new File([d.daten], d.name, { type: d.mime });
+    if (!(navigator.canShare && navigator.canShare({ files: [file] }))) { UI.toast("Teilen wird auf diesem Gerät nicht unterstützt"); return; }
+    try { await navigator.share({ files: [file], title: d.name }); } catch (e) { /* abgebrochen */ }
+  }
+  async function dateiBehalten(id) {
+    const d = await Store.Dateien.get(id);
+    if (!d) return;
+    d.behalten = !d.behalten;
+    await Store.Dateien.save(d);
+    state.planung.dateien[id] = { daten: !!d.daten, behalten: d.behalten, entferntAm: d.entferntAm };
+    zeichnen();
+    UI.toast(d.behalten ? "📌 Wird behalten – nicht automatisch entfernt" : "Wird nach der Frist automatisch entfernt");
   }
 
   async function planungZurueck() {
@@ -329,17 +427,19 @@
           (x.minuten ? ' <span class="muted">' + UI.esc(x.minuten) + " Min</span>" : "") + "</div>" +
           (x.typ === "link" && x.url ? '<a href="' + UI.esc(/^https?:\/\//i.test(x.url) ? x.url : "https://" + x.url) +
             '" target="_blank" rel="noopener">' + UI.esc(x.url) + "</a>" : "") +
+          (x.typ === "datei" ? '<div>📄 <button class="btn small" data-datei="' + UI.esc(x.dateiId) + '">' + UI.esc(x.name || "Datei") + "</button></div>" : "") +
           (x.text ? '<div class="pl-text">' + UI.esc(x.text) + "</div>" : "") + "</div>").join("");
-    UI.modal({
+    const m = UI.modal({
       title: "🗺 Fahrplan" + (thema ? " · " + thema : ""),
       bodyHTML: liste.some((x) => x.typ !== "trenner") ? '<div class="pl-lesenliste">' + inhalt + "</div>"
         : '<p class="muted">Für diese Stunde gibt es keinen Fahrplan' + (nr ? "" : " (die Stunde hat keine Stundennummer)") + ".</p>",
       buttons: [{ label: "Schließen" }]
     });
+    UI.$all("[data-datei]", m.box).forEach((b) => b.addEventListener("click", () => dateiOeffnen(b.getAttribute("data-datei"))));
   }
 
   Object.assign(global.Views, {
     ViewPlanung, bausteinNeu, planungZurueck, planungKlasse, planungTracker, planungMenue,
-    planungUebernehmen, fahrplanDialog
+    planungUebernehmen, fahrplanDialog, groesseText
   });
 })(window);

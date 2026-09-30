@@ -10,6 +10,7 @@
      Ausfall, Verschieben mit Platztausch, Hinweis) und TERMIN_ARTEN
    - Store.Planungen: Fahrplan je Stunde (Store „planungen“); beim Verschieben
      einer Stunde ziehen ihre Planungen in derselben Transaktion mit um
+   - Store.Dateien: Anhänge (Kopie in der App), Aufräumen nach Frist
    Die Einträge verweisen auf die Stundenzeiten (blockId: "std-3" bzw. die
    ID einer Pause) und auf eine Klasse – oder tragen einen freien Titel.
    ========================================================================= */
@@ -220,6 +221,74 @@
     }
   };
 
+  // ---- Dateien (Anhänge der Planung) ------------------------------------------------
+  // Datensatz: { id, name, mime, groesse, daten (ArrayBuffer | null), behalten,
+  //              entferntAm ("YYYY-MM-DD" | null), erstelltAm }
+  // Die Datei ist eine Kopie – das Original bleibt, wo es war. Den Inhalt
+  // entfernt aufraeumen() nach der Frist; Name und Größe bleiben (auch im
+  // Baustein), damit man weiß, was benutzt wurde. ArrayBuffer statt Blob:
+  // ältere iPad-Safaris konnten Blobs nicht zuverlässig in IndexedDB ablegen.
+  function dateiLesen(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = () => reject(r.error || new Error("Datei konnte nicht gelesen werden"));
+      r.readAsArrayBuffer(file);
+    });
+  }
+  const Dateien = {
+    alle: () => DB.getAll("dateien"),
+    get: (id) => DB.get("dateien", id),
+    save: (d) => DB.put("dateien", d),
+    // Legt eine Kopie der gewählten Datei an. Rückgabe: Datensatz
+    async neu(file) {
+      const d = {
+        id: uid(), name: file.name || "Datei", mime: file.type || "application/octet-stream",
+        groesse: file.size || 0, daten: await dateiLesen(file),
+        behalten: false, entferntAm: null, erstelltAm: now()
+      };
+      await DB.put("dateien", d);
+      return d;
+    },
+    blob: (d) => new Blob([d.daten], { type: d.mime || "application/octet-stream" }),
+    // Belegter Speicher (nur Dateien mit Inhalt), in Bytes
+    async belegt() {
+      return (await Dateien.alle()).reduce((n, d) => n + (d.daten ? (d.groesse || d.daten.byteLength || 0) : 0), 0);
+    },
+    // Aufräumen (beim App-Start): Dateien ohne Baustein werden gelöscht; der
+    // Inhalt einer Datei wird entfernt, wenn die letzte Stunde, in der sie
+    // vorkommt, länger als fristTage zurückliegt – außer sie ist 📌 behalten.
+    //   fristTage: Zahl oder null (= nie automatisch entfernen)
+    // Rückgabe: { entfernt, geloescht }
+    async aufraeumen(fristTage, heute) {
+      const [dateien, planungen] = await Promise.all([Dateien.alle(), DB.getAll("planungen")]);
+      const letzte = {};
+      planungen.forEach((p) => (p.bausteine || []).forEach((b) => {
+        if (b.typ === "datei" && b.dateiId && (!letzte[b.dateiId] || letzte[b.dateiId] < p.datum)) letzte[b.dateiId] = p.datum;
+      }));
+      const erg = { entfernt: 0, geloescht: 0 };
+      const grenze = fristTage == null ? null : Calc.datumPlusTage(heute, -fristTage);
+      await DB.atomar(["dateien"], (os) => {
+        dateien.forEach((d) => {
+          if (!letzte[d.id]) { os("dateien").delete(d.id); erg.geloescht += 1; return; }
+          if (d.daten && !d.behalten && grenze && letzte[d.id] < grenze) {
+            os("dateien").put(Object.assign({}, d, { daten: null, entferntAm: heute }));
+            erg.entfernt += 1;
+          }
+        });
+      });
+      return erg;
+    },
+    // Inhalt aller Dateien entfernen (Einstellungen), 📌 eingeschlossen
+    async alleEntfernen(heute) {
+      const dateien = (await Dateien.alle()).filter((d) => d.daten);
+      await DB.atomar(["dateien"], (os) => {
+        dateien.forEach((d) => os("dateien").put(Object.assign({}, d, { daten: null, entferntAm: heute })));
+      });
+      return dateien.length;
+    }
+  };
+
   const Wochennotizen = {
     get: (montag) => DB.get("wochennotizen", montag).then((n) => (n && n.text) || ""),
     // Leerer Text löscht die Notiz der Woche
@@ -232,6 +301,6 @@
 
   Object.assign(global.Store, {
     Stundenplan, Wochennotizen, neuerPlanEintrag,
-    Termine, neuerTermin, TERMIN_ARTEN, TERMIN_ART_MAP, Planungen
+    Termine, neuerTermin, TERMIN_ARTEN, TERMIN_ART_MAP, Planungen, Dateien
   });
 })(window);

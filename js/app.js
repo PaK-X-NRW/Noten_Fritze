@@ -27,6 +27,12 @@
     window.addEventListener("unhandledrejection", (ev) => UI.fehlerMelden(ev.reason));
     window.addEventListener("error", (ev) => { if (ev.error) UI.fehlerMelden(ev.error); });
 
+    // Anhänge der Stundenplanung aufräumen (Frist abgelaufen, nicht mehr benutzt)
+    try {
+      const s = await Store.getSettings();
+      await Store.Dateien.aufraeumen(s.dateiAufbewahrung === "nie" ? null : s.dateiFristTage, Store.datumLokal());
+    } catch (e) { console.warn("Dateien aufräumen:", e); }
+
     Views.initDelegation();
     await Views.render();
     // Aufruf von der Umzugsseite der alten Adresse (?umzug=1): Daten empfangen
