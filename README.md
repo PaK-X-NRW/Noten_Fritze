@@ -71,13 +71,13 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `calc.js` – Rechen-Kern: Notenskala, Drittel-/Zeugnisskala, MSS (Namespace `Calc`)
   - `calc.zeugnis.js` – Halbjahres-Kette bis zur Zeugnisnote
   - `calc.mitarbeit.js` – Mitarbeits-Auswertung (Stundennoten-Modell)
-  - `calc.tracker.js` – Heatmap und Stundenplan
+  - `calc.tracker.js` – Heatmap, Stundenzeiten, vergessene Stunden
   - `calc.sitzplan.js` – Raumform-Vorlagen, Sitzregeln, automatisches Verteilen
     (alle `calc*.js` rein, ohne DOM/DB; geprüft in `tests.html`)
   - `csv.js` – CSV-Export/Import
   - `ui.js` – UI-Bausteine (Modal, Toast, Formfelder)
   - `views.core.js` – Views-Kern (State, Routing, Render-Schleife)
-  - `views.einstellungen.js` – Einstellungen inkl. Stundenplan
+  - `views.einstellungen.js` – Einstellungen inkl. Stundenzeiten
   - `views.besprechung.js` – Besprechungsmodus
   - `views.home-klasse.js` – Home + Klassenansicht (Reiter Schüler, Kategorien)
   - `views.noten.js` / `views.noten.eingabe.js` – Reiter Noten (Tabelle, Dialoge / Eingabe, Nummernpad)
@@ -136,9 +136,14 @@ stunden        { id, klasseId, datum(YYYY-MM-DD), startTs, endeTs, dauerMin, stu
                  halbjahr(1|2, abgeleitet),
                  status('offen'|'beendet'), beendetAt, sitzplanId (Raum der Stunde),
                  createdAt, updatedAt }
+                 (Ereignisse, die in einer vergessenen Stunde nachgetragen werden,
+                 tragen als timestamp die Zeit der Stunde und in erfasstAm den
+                 echten Zeitpunkt)
 abwesenheiten  { id(schuelerId_datum), klasseId, schuelerId, datum(YYYY-MM-DD), createdAt }
 einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punkte'|'note6'),
-                 stundenplan, schuelerSortierung('nachname'|'manuell'),
+                 stundenzeiten [{ id, art('stunde'|'pause'), name, start, ende, nr }]
+                 (bis 1.15: stundenplan, wird beim Lesen umgewandelt),
+                 schuelerSortierung('nachname'|'manuell'),
                  sitzplanKachelSpalten(6..15, Standard 9),
                  mitarbeitPunkte, mitarbeitSchwellen,
                  heatPunkteEinfach, heatPunkteGut, heatPunkteSehrGut,
@@ -301,8 +306,17 @@ Stundennoten (`3+`, nicht `2,8`).
 - **Unterrichtsstunde als Einheit:** Der Tracker erfasst immer *in* einer Stunde.
   Beim Start wird eine Stunde angelegt (Datum, Klasse, Start/Ende, Stundennummer);
   wurde der Tracker unterbrochen, bietet der Start-Dialog **„Stunde fortsetzen“**
-  für die offene Stunde des heutigen Tages an. „Stunde beenden“ schließt sie
-  endgültig ab. Alle Ereignisse hängen über `stundeId` an ihrer Stunde.
+  an, solange die Stunde noch läuft. „Stunde beenden“ schließt sie endgültig ab.
+  Alle Ereignisse hängen über `stundeId` an ihrer Stunde.
+- **Vergessene Stunden:** Eine Stunde, die nach ihrem Ende (ohne Zeitangabe: ab
+  dem Folgetag) noch offen ist, beendet die App nie stillschweigend. Die
+  Startseite zeigt je Klasse eine Leiste „Stunde vom … nicht beendet“, und der
+  Tracker-Start fragt: **„Letzte Stunde wurde nicht beendet – noch etwas
+  nachtragen?“** „Ja“ öffnet den Tracker für genau diese Stunde
+  (**Nachtrage-Modus**: Nachträge tragen Datum und Quartal der Stunde, die
+  Heatmap bleibt unverändert), „Nein“ beendet sie. Liegt die Stunde in einem
+  abgeschlossenen Quartal, bleibt nur das Beenden; „Quartal abschließen“ beendet
+  alle noch offenen Stunden dieses Quartals.
 - **Erfassung:** Jede Schüler-Kachel trägt die 4 Ereignis-Buttons (Wortmeldung,
   Gute/Sehr gute Meldung, Störung) direkt in sich – als Piktogramme
   (★ / ★★ / ★★★ / ⚡), farbcodiert, mit Zähler je Typ **für die laufende Stunde**;
@@ -322,10 +336,13 @@ Stundennoten (`3+`, nicht `2,8`).
   diese Stunde vermerken (erneutes Tippen entfernt den Vermerk) oder den
   Heatmap-Wert per Slider setzen. Beendet wird ein
   Modus über „Fertig“, den Topbar-Button oder `Esc`.
-- **Stundenplan & Stundendauer:** In den Einstellungen liegt ein Stundenplan aus
-  10 Stunden (Start/Ende je Stunde), der für jeden Schultag gleich gilt. Beim
-  Tracker-Start wird nach **Einzel- oder Doppelstunde** gefragt; daraus und aus dem
-  Stundenplan zeigt die Topbar die **Restzeit** der laufenden Stunde. Der
+- **Stundenzeiten & Stundendauer:** In den Einstellungen liegen die Stundenzeiten
+  (bis 1.15 „Stundenplan“): Stunden (Standard 10, bis 14 anhängbar) und Pausen bzw.
+  sonstige Zeiten mit eigenem Namen (z. B. Frühaufsicht), zeitlich sortiert und für
+  jeden Schultag gleich. „Pausen aus Lücken anlegen“ füllt freie Lücken zwischen
+  den Stunden. Pausen zählen nie als Unterricht. Beim
+  Tracker-Start wird nach **Einzel- oder Doppelstunde** gefragt; daraus und aus den
+  Stundenzeiten zeigt die Topbar die **Restzeit** der laufenden Stunde. Der
   Heatmap-Verfall (Y Punkte pro X Minuten, bezogen auf eine 45-Min-Stunde) skaliert
   auf die tatsächliche Stundendauer.
 - **Abwesenheit:** Schüler/innen lassen sich für den Tag als krank/abwesend markieren
@@ -466,7 +483,8 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   ⚠️ am Knopf „Regeln“ zeigt, wenn der aktuelle Plan eine Regel verletzt.
   Beim Tracker-Start wählt man den Raum; im Tracker wechselt der Knopf 🏫 mit dem
   Raumnamen den Plan mitten in der Stunde (Zähler und Heatmap bleiben).
-- **Tracker** – Start-Dialog (Stunde fortsetzen / Einzel- / Doppelstunde), Restzeit
+- **Tracker** – Start-Dialog (Stunde fortsetzen / Einzel- / Doppelstunde, Nachfrage bei
+  vergessenen Stunden mit Nachtrage-Modus), Restzeit
   und Modi (Abwesend · Verweigerung · Keine HA · Heatmap) in der Topbar, Kacheln je
   Schüler/in mit 4 direkten Ereignis-Buttons als Piktogramme (★/★★/★★★/⚡ =
   Wortmeldung, Gute/Sehr gute Meldung, Störung), Zähler je Typ für die Stunde,
@@ -476,7 +494,7 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   die Zeugnisnote groß und darunter die komplette Herleitung Schritt für Schritt.
 - **Einstellungen** – aktuelles Quartal, Reihenfolge der Schüler/innen,
   Wertung vergessener Hausaufgaben (HA-Modus),
-  Stundenplan (10 Stunden,
+  Stundenzeiten (Stunden und Pausen,
   täglich gleich), Mitarbeitspunkte, Notenschwellen, Heatmap-Punktverfall,
   Export-Ordner, Backup/Restore, Demo-Daten, Beispielklassen, alles löschen.
 - **Beispielklassen** – Knopf „Beispielklassen anlegen“ (Einstellungen) legt
@@ -495,7 +513,7 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
 Klassen/Schüler/Kategorien CRUD · Notenübersicht je Halbjahr mit einer Spalte
 je Leistung und Excel-artiger Eingabe · Epochalnoten je Quartal, Drittelrundung
 und Zeugnis-/Jahresnote · Quartale (1.–4. Q) für die Mitarbeit · Sitzplan-Editor ·
-Tracker mit Stunden (anlegen/fortsetzen/beenden), Stundenplan/Restzeit
+Tracker mit Stunden (anlegen/fortsetzen/nachtragen/beenden), Stundenzeiten/Restzeit
 (Einzel-/Doppelstunde), Piktogramm-Buttons, Tap/Undo/Heatmap, kompakte Kacheln,
 Modi für Abwesend/Leistungsverweigerung/Keine HA/Heatmap ·
 Abwesenheiten (tageweise, beeinflusst Heatmap & Mitarbeitsnote) ·
@@ -548,12 +566,12 @@ Noten_Fritze/
    ├─ calc.js               Rechen-Kern (Notenskala)
    ├─ calc.zeugnis.js       Halbjahres-Kette bis zur Zeugnisnote
    ├─ calc.mitarbeit.js     Mitarbeits-Auswertung
-   ├─ calc.tracker.js       Heatmap und Stundenplan
+   ├─ calc.tracker.js       Heatmap, Stundenzeiten, vergessene Stunden
    ├─ calc.sitzplan.js      Raumform, Sitzregeln, automatisches Verteilen
    ├─ csv.js                CSV-Export/Import
    ├─ ui.js                 Modal/Toast/Formfelder
    ├─ views.core.js         Views-Kern (State, Routing, Render)
-   ├─ views.einstellungen.js Einstellungen inkl. Stundenplan
+   ├─ views.einstellungen.js Einstellungen inkl. Stundenzeiten
    ├─ views.besprechung.js  Besprechungsmodus
    ├─ views.home-klasse.js  Home + Klassenansicht (Schüler, Kategorien)
    ├─ views.noten.js        Reiter Noten (Tabelle, Spalten-/Schüler-Dialog)

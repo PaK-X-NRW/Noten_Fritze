@@ -314,9 +314,9 @@
     });
   });
 
-  gruppe("Tracker: Stundenplan und Heatmap", () => {
-    const plan = Store.defaultStundenplan();
-    fall("laufende Stunde laut Stundenplan", () => {
+  gruppe("Tracker: Stundenzeiten und Heatmap", () => {
+    const plan = Store.defaultStundenzeiten();
+    fall("laufende Stunde laut Stundenzeiten", () => {
       const dienstag = new Date(2025, 8, 16, 8, 10).getTime();
       const s = Calc.trackerSession(plan, dienstag, false);
       gleich(s.quelle, "plan");
@@ -331,6 +331,33 @@
       const s = Calc.trackerSession(plan, samstag, true);
       gleich(s.quelle, "fallback");
       gleich(s.dauerMin, 90);
+    });
+    fall("Pausen zählen nicht als Stunde, Doppelstunde überspringt sie", () => {
+      const grossePause = new Date(2025, 8, 16, 9, 40).getTime();
+      gleich(Calc.aktuelleStunde(plan, grossePause), null, "Große Pause 09:35–09:55");
+      const zweite = new Date(2025, 8, 16, 9, 0).getTime();
+      const d = Calc.trackerSession(plan, zweite, true);
+      gleich(d.stundeNr, 2);
+      gleich(d.dauerMin, 45 + 20 + 45, "2. Stunde + Große Pause + 3. Stunde");
+    });
+    fall("vergessene Stunde: mit Zeitangabe ab dem Ende, ohne ab dem Folgetag", () => {
+      const start = new Date(2025, 8, 16, 8, 0).getTime();
+      const mit = { status: "offen", startTs: start, endeTs: start + 45 * 60000, datum: "2025-09-16" };
+      wahr(!Calc.stundeVergessen(mit, start + 30 * 60000), "läuft noch");
+      wahr(Calc.stundeVergessen(mit, start + 45 * 60000), "vorbei");
+      wahr(!Calc.stundeVergessen(Object.assign({}, mit, { status: "beendet" }), start + 90 * 60000), "beendet ist nie vergessen");
+      const ohne = { status: "offen", startTs: start, endeTs: null, datum: "2025-09-16" };
+      wahr(!Calc.stundeVergessen(ohne, new Date(2025, 8, 16, 23, 59).getTime()), "gleicher Tag");
+      wahr(Calc.stundeVergessen(ohne, new Date(2025, 8, 17, 0, 0).getTime()), "Folgetag");
+    });
+    fall("Nachtrag trägt die Zeit der Stunde, nicht die des Nachtragens", () => {
+      const start = new Date(2025, 8, 16, 8, 0).getTime();
+      const st = { startTs: start, endeTs: start + 45 * 60000 };
+      gleich(Calc.erfassungsZeit(st, start + 10 * 60000), start + 10 * 60000, "während der Stunde: jetzt");
+      const spaeter = new Date(2025, 9, 20, 11, 0).getTime();
+      gleich(Calc.erfassungsZeit(st, spaeter), start + 45 * 60000 - 1000, "Wochen später: letzte Sekunde der Stunde");
+      gleich(Store.datumLokal(new Date(Calc.erfassungsZeit({ startTs: start, endeTs: null }, spaeter))), "2025-09-16",
+        "ohne Zeitangabe: Tag der Stunde");
     });
     fall("Heatmap-Verfall: Y Punkte je X Minuten", () => {
       const t0 = new Date(2025, 8, 16, 9, 0).getTime();

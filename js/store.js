@@ -163,12 +163,16 @@
     const liste = (klasse && klasse.abgeschlosseneQuartale) || [];
     return liste.find((a) => a && a.quartal === quartal) || null;
   }
+  // Noch offene Stunden dieses Quartals werden dabei beendet – nachtragen
+  // lässt sich danach nichts mehr.
   async function quartalAbschliessen(klasse, quartal, datum) {
     if (!Array.isArray(klasse.abgeschlosseneQuartale)) klasse.abgeschlosseneQuartale = [];
     const vorhanden = abschlussVon(klasse, quartal);
     if (vorhanden) vorhanden.datum = datum || datumLokal();
     else klasse.abgeschlosseneQuartale.push({ quartal, datum: datum || datumLokal() });
     await Klassen.save(klasse);
+    const offene = (await Stunden.offene(klasse.id)).filter((st) => Number(st.quartal) === Number(quartal));
+    for (const st of offene) await Stunden.beenden(st.id);
     return klasse;
   }
   async function abschlussAufheben(klasse, quartal) {
@@ -601,21 +605,22 @@
       if (!st || st.status === "beendet") return st;
       st.status = "beendet";
       st.beendetAt = now();
-      if (!st.endeTs) st.endeTs = st.beendetAt;
+      // Stunde ohne Zeitangabe: endet spätestens am Ende ihres Tages, auch
+      // wenn sie erst Tage später beendet wird
+      if (!st.endeTs) {
+        const d = new Date(st.startTs);
+        st.endeTs = Math.min(st.beendetAt, new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime() - 1);
+      }
       return Stunden.save(st);
     },
-    // Offene Stunde der Klasse vom heutigen Tag (zum Fortsetzen), sonst null.
-    // Ältere offene Stunden werden dabei automatisch beendet.
-    async offeneVonHeute(klasseId) {
-      const heute = datumLokal();
-      const list = await Stunden.byKlasse(klasseId);
-      const offen = list.filter((st) => st.status === "offen");
-      for (const st of offen) {
-        if (st.datum !== heute) await Stunden.beenden(st.id);
-      }
-      const heutige = offen.filter((st) => st.datum === heute);
-      return heutige.length ? heutige[heutige.length - 1] : null;
-    }
+    // Offene (nicht beendete) Stunden der Klasse, älteste zuerst. Beendet wird
+    // hier nichts: Ob eine Stunde vergessen wurde, entscheidet der Tracker
+    // (Calc.stundeVergessen) und fragt vor dem Beenden nach.
+    offene: (klasseId) => Stunden.byKlasse(klasseId)
+      .then((list) => list.filter((st) => st.status === "offen")),
+    // Offene Stunden aller Klassen (Hinweis auf der Startseite)
+    alleOffenen: () => DB.getAll("stunden")
+      .then((list) => list.filter((st) => st.status === "offen").sort((a, b) => a.startTs - b.startTs))
   };
 
   // ---- Abwesenheiten ---------------------------------------------------------

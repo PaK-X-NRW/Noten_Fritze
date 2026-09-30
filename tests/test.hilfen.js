@@ -58,10 +58,48 @@
       const s = Store.schwellenNormalisieren([{ note: 3, abPunkte: "1" }, { note: 1, abPunkte: "2,5" }, { note: 9, abPunkte: 0 }]);
       gleich(s, [{ abPunkte: 2.5, note: 1 }, { abPunkte: 1, note: 3 }, { abPunkte: 0, note: 5 }]);
     });
-    fall("Standard-Stundenplan: 10 Stunden à 45 Minuten ab 08:00", () => {
-      const p = Store.defaultStundenplan();
-      gleich(p.length, 10);
-      gleich([p[0].start, p[0].ende], ["08:00", "08:45"]);
+    fall("Standard-Stundenzeiten: 10 Stunden à 45 Minuten ab 08:00, Pausen dazwischen", () => {
+      const p = Store.defaultStundenzeiten();
+      const stunden = p.filter((b) => b.art === "stunde");
+      gleich(stunden.length, 10);
+      gleich([stunden[0].id, stunden[0].start, stunden[0].ende], ["std-1", "08:00", "08:45"]);
+      const pausen = p.filter((b) => b.art === "pause");
+      gleich(pausen.length, 9);
+      gleich(pausen.filter((b) => b.name === "Große Pause").map((b) => b.start + "–" + b.ende), ["09:35–09:55"]);
+      gleich(p[1].art, "pause", "zeitlich sortiert: nach der 1. Stunde die Pause");
+    });
+    fall("Stundenzeiten: sortiert, Stunden neu nummeriert, höchstens 14", () => {
+      const liste = [
+        { art: "stunde", start: "09:00", ende: "09:45" },
+        { art: "pause", id: "p1", name: "Frühaufsicht", start: "07:45", ende: "08:00" },
+        { art: "stunde", start: "08:00", ende: "08:45" },
+        { art: "stunde", start: "kaputt", ende: "10:00" }
+      ];
+      const n = Store.stundenzeitenNormalisieren(liste);
+      gleich(n.map((b) => b.id), ["p1", "std-1", "std-2"]);
+      gleich(n[2].start, "09:00");
+      const viele = [];
+      for (let i = 0; i < 16; i++) viele.push({ art: "stunde", start: Store.minZuHHMM(420 + i * 50), ende: Store.minZuHHMM(465 + i * 50) });
+      gleich(Store.stundenzeitenNormalisieren(viele).length, 14);
+      gleich(Store.stundenzeitenNormalisieren([]).filter((b) => b.art === "stunde").length, 10, "ohne Stunde: Standard");
+    });
+    fall("altes Feld `stundenplan` wird zu Stunden ohne Pausen", () => {
+      const alt = { stundenplan: [{ nr: 1, start: "07:50", ende: "08:35" }, { nr: 2, start: "08:40", ende: "09:25" }] };
+      const n = Store.stundenzeitenNormalisieren(Store.stundenzeitenLesen(alt));
+      gleich(n.map((b) => b.art + " " + b.start), ["stunde 07:50", "stunde 08:40"]);
+      gleich(Store.stundenzeitenLesen({ stundenzeiten: n }), n, "neues Feld hat Vorrang");
+      gleich(Store.stundenzeitenLesen(null), null);
+    });
+    fall("Pausen aus Lücken: nur freie Lücken, ab 15 Minuten „Große Pause“", () => {
+      const liste = [
+        { art: "stunde", start: "08:00", ende: "08:45" },
+        { art: "stunde", start: "08:50", ende: "09:35" },
+        { art: "stunde", start: "09:55", ende: "10:40" },
+        { art: "pause", id: "a", name: "Aufsicht", start: "09:35", ende: "09:55" }
+      ];
+      const n = Store.pausenAusLuecken(liste);
+      gleich(n.filter((b) => b.art === "pause").map((b) => b.name + " " + b.start), ["Pause 08:45", "Aufsicht 09:35"]);
+      gleich(Store.pausenAusLuecken(n).length, n.length, "zweimal anlegen legt nichts doppelt an");
     });
   });
 

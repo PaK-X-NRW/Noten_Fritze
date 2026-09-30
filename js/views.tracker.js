@@ -6,6 +6,8 @@
    - Abwesend / Verweigerung / keine HA / Heatmap laufen als Modi über die Topbar
    - Heatmap verfällt nur innerhalb einer laufenden Stunde (dazwischen eingefroren)
    - Pausetaste hält den Verfall an, bis sie gelöst oder der Tracker verlassen wird
+   - Vergessene (nicht beendete) Stunden: Start-Dialog fragt nach, ob noch
+     etwas nachzutragen ist (Nachtrage-Modus: Heatmap bleibt unverändert)
    ========================================================================= */
 (function (global) {
   "use strict";
@@ -28,11 +30,13 @@
     // Einstieg = über den Start-Dialog betreten (neue oder fortgesetzte Stunde);
     // ein bloßes render() (z. B. Moduswechsel) ist kein Einstieg.
     const einstieg = !!state.pendingStunde;
+    const nachtragen = einstieg && state.pendingNachtragen;
+    state.pendingNachtragen = false;
     const stunde = await aktuelleTrackerStunde(k);
     // Sitzplan (Raum) dieser Stunde; ohne Angabe der zuletzt benutzte
     const alle = await Store.Sitzplan.alle(k.id);
     const plan = await Store.Sitzplan.get(k.id, stunde.sitzplanId);
-    const t = await trackerZustand(k, stunde, einstieg);
+    const t = await trackerZustand(k, stunde, einstieg, nachtragen);
 
     // Legende erklärt Farbe + Kurzlabel der Buttons auf den Kacheln
     const legende = Store.KACHEL_EVENT_TYPES.map((typ) =>
@@ -57,19 +61,23 @@
         ? '<button class="btn small" data-action="tracker-raum" title="Sitzplan (Raum) wechseln">🏫 ' + UI.esc(plan.name) + "</button>"
         : "") +
       '<div class="modusbar">' + modusBtns + "</div>" +
-      (stunde.endeTs ? '<span class="chip accent" id="tracker-restzeit" style="align-self:center">' + restzeitText() + "</span>" : "") +
+      (stunde.endeTs && !t.nachtragen ? '<span class="chip accent" id="tracker-restzeit" style="align-self:center">' + restzeitText() + "</span>" : "") +
       '<button class="btn small" data-action="tracker-undo" id="undo-btn" title="Lang drücken bzw. Rechtsklick: alle Einträge dieser Stunde"' + (t.undoStack.length ? "" : " disabled") + ">↶ Rückgängig</button>" +
       '<button class="btn small" data-action="tracker-stunde-beenden">Stunde beenden</button>';
 
+    // Beim Nachtragen steht die Heatmap still – die Pausetaste entfällt dort
+    const pauseBtn = t.nachtragen ? "" :
+      '<button class="btn heatpause' + (t.heatPause ? " aktiv" : "") + '" data-action="tracker-heat-pause"' +
+        ' title="' + (t.heatPause ? "Verfall läuft ab dem jetzigen Stand weiter" : "Farben bleiben stehen, Meldungen zählen weiter") + '">' +
+        (t.heatPause ? "▶︎ Heatmap fortsetzen" : "⏸ Heatmap pausieren") + "</button>";
+
     const body =
+      nachtragenHinweisHTML(t) +
       modusBannerHTML() +
       '<div class="plan-toolbar tracker-toolbar">' +
         '<div class="tracker-legend">' + legende + "</div>" +
         '<div class="grow"></div>' +
-        '<div class="legend">' +
-          '<button class="btn heatpause' + (t.heatPause ? " aktiv" : "") + '" data-action="tracker-heat-pause"' +
-            ' title="' + (t.heatPause ? "Verfall läuft ab dem jetzigen Stand weiter" : "Farben bleiben stehen, Meldungen zählen weiter") + '">' +
-            (t.heatPause ? "▶︎ Heatmap fortsetzen" : "⏸ Heatmap pausieren") + "</button>" +
+        '<div class="legend">' + pauseBtn +
           'viel <span class="bar"></span> wenig</div>' +
       "</div>" +
       // Bei vielen Spalten schrumpfen die Kacheln bis zur eingestellten Grenze, danach scrollt das Raster
@@ -78,6 +86,14 @@
       ohnePlatzHinweis(plan, t.students);
 
     return { topbar, body, mount: mountTracker, fullWidth: true };
+  }
+
+  // Hinweisleiste im Nachtrage-Modus (vergessene Stunde wird nachbearbeitet)
+  function nachtragenHinweisHTML(t) {
+    if (!t.nachtragen) return "";
+    return '<div class="hint-box"><strong>Nachtragen für ' + UI.esc(stundeLabel(t.stunde, true)) + "</strong><br>" +
+      "Erfassungen zählen für diese Stunde, die Heatmap bleibt dabei unverändert. " +
+      "Wenn alles stimmt: „Stunde beenden“.</div>";
   }
 
   // Wer in diesem Sitzplan keinen Platz hat, taucht im Tracker nicht auf –
@@ -187,11 +203,12 @@
   // Baut den flüchtigen Tracker-Zustand auf – aber nur, wenn sich Klasse oder
   // Stunde geändert haben. Sonst bleiben Zähler und Undo-Stack erhalten
   // (z. B. beim Umschalten eines Modus, das ein render() auslöst).
-  async function trackerZustand(k, stunde, einstieg) {
+  //   nachtragen: Einstieg über „Letzte Stunde wurde nicht beendet“
+  async function trackerZustand(k, stunde, einstieg, nachtragen) {
     const alt = state.tracker;
     if (alt && alt.klasseId === k.id && alt.stunde && alt.stunde.id === stunde.id) {
       alt.stunde = stunde;
-      if (einstieg) await heatUhrNachziehen(alt.students);
+      if (einstieg) { alt.nachtragen = !!nachtragen; await heatUhrNachziehen(alt.students); }
       return alt;
     }
 
@@ -219,14 +236,16 @@
 
     // Rückgängig kennt alle Kachel-Einträge dieser Stunde – auch nach dem
     // Fortsetzen, nicht nur die seit dem Öffnen des Trackers getippten.
+    // Nachträge tragen die Zeit der Stunde, erfasstAm den echten Zeitpunkt.
     const undoStack = ereignisse
       .filter((e) => Store.EVENT_TYPE_MAP[e.typ] && Store.EVENT_TYPE_MAP[e.typ].aufKachel)
-      .sort((a, b) => a.timestamp - b.timestamp);
+      .sort((a, b) => (a.timestamp - b.timestamp) || ((a.erfasstAm || 0) - (b.erfasstAm || 0)));
 
     state.tracker = {
       klasseId: k.id, stunde, counts, typeCounts, keineHA, verweigerung, names, students,
       undoStack, heatTimer: null, abwesend,
-      heatPause: false   // Pausetaste: Verfall ruht, bis sie gelöst oder der Tracker verlassen wird
+      heatPause: false,  // Pausetaste: Verfall ruht, bis sie gelöst oder der Tracker verlassen wird
+      nachtragen: !!nachtragen // vergessene Stunde: Heatmap ruht, Nachträge tragen die Zeit der Stunde
     };
 
     await heatUhrNachziehen(students);
@@ -243,13 +262,17 @@
     await Store.Schueler.saveAlle(liste);
   }
 
-  // Kurzbeschreibung der Stunde für die Topbar / den Start-Dialog.
-  function stundeLabel(st) {
+  // Kurzbeschreibung der Stunde für die Topbar / den Start-Dialog. Liegt die
+  // Stunde nicht auf heute (oder mitDatum), steht der Tag davor („Fr., 12.09.“).
+  function stundeLabel(st, mitDatum) {
     if (!st) return "";
     const start = new Date(st.startTs);
     const hhmm = (d) => ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2);
+    const tag = (mitDatum || st.datum !== Store.datumLokal())
+      ? start.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" }) + " · "
+      : "";
     const nr = st.stundeNr ? st.stundeNr + ". Stunde · " : "";
-    return nr + hhmm(start) + (st.endeTs ? "–" + hhmm(new Date(st.endeTs)) + " Uhr" : " Uhr");
+    return tag + nr + hhmm(start) + (st.endeTs ? "–" + hhmm(new Date(st.endeTs)) + " Uhr" : " Uhr");
   }
 
   // Effektive Heatmap-Verfallszeit im Tracker: heatVerfallMinuten aus den
@@ -273,9 +296,11 @@
     return jetzt;
   }
 
-  // Während der Pause gilt die Uhr der Kachel als Bezugszeit: kein Verfall.
+  // Während der Pause (und beim Nachtragen) gilt die Uhr der Kachel als
+  // Bezugszeit: kein Verfall.
   function heatAktuell(s) {
-    const pause = state.tracker && state.tracker.heatPause && s.heatLastDecayAt;
+    const t = state.tracker;
+    const pause = t && (t.heatPause || t.nachtragen) && s.heatLastDecayAt;
     return Calc.heatPunkteAktuell(s.heatPoints, s.heatLastDecayAt, trackerVerfallMinuten(),
       state.settings.heatVerfallPunkte, pause ? s.heatLastDecayAt : heatBezugsZeit());
   }
@@ -299,11 +324,12 @@
   }
 
   // Heatmap-Punkte gutschreiben/abziehen. Rechnet mit der Stunden-Bezugszeit,
-  // damit nach dem Stundenende kein zusätzlicher Verfall einfließt.
+  // damit nach dem Stundenende kein zusätzlicher Verfall einfließt. Beim
+  // Nachtragen bleibt die Heatmap unverändert (sie zeigt den heutigen Stand).
   async function trackerHeatAddieren(sid, delta) {
     const t = state.tracker;
     const s = t && t.students ? t.students[sid] : null;
-    if (!s) return null;
+    if (!s || t.nachtragen) return s;
     s.heatPoints = Math.max(0, Math.min(100, Math.round(heatAktuell(s).heatPoints + (Number(delta) || 0))));
     s.heatLastDecayAt = Store.now();
     await Store.Schueler.save(s);
@@ -510,8 +536,7 @@
       if (t.typeCounts[sid]) t.typeCounts[sid][typ] = Math.max(0, (t.typeCounts[sid][typ] || 1) - 1);
       UI.toast(name + "Vermerk entfernt");
     } else {
-      e = Store.neuesEreignis(state.klasseId, sid, typ, punkte, t.stunde.id,
-        state.settings.aktuellesQuartal);
+      e = neuesTrackerEreignis(t, sid, typ, punkte);
       await Store.Ereignisse.save(e);
       t[feld][sid] = e.id;
       t.counts[sid] = (t.counts[sid] || 0) + 1;
@@ -582,30 +607,37 @@
 
   // ---- Stunde starten / fortsetzen / beenden --------------------------------
   async function trackerStartDialog() {
+    const klasse = await Store.Klassen.get(state.klasseId);
+    const jetzt = Store.now();
+    // Eine vergessene (nicht beendete) Stunde zuerst klären – vor dem Beenden
+    // lässt sich darin noch etwas nachtragen.
+    const offene = await Store.Stunden.offene(state.klasseId);
+    const vergessen = offene.find((st) => Calc.stundeVergessen(st, jetzt));
+    if (vergessen) return vergesseneStundeDialog(klasse, vergessen);
+
     // In einem abgeschlossenen Quartal wird nichts mehr erfasst – dort gehört
     // keine neue Stunde mehr hinein (Abschluss im Mitarbeit-Tab aufhebbar).
-    const klasse = await Store.Klassen.get(state.klasseId);
     const aktuellesQ = parseInt(state.settings.aktuellesQuartal, 10) || 1;
     if (klasse && Store.abschlussVon(klasse, aktuellesQ)) {
       UI.toast(aktuellesQ + ". Quartal ist abgeschlossen – im Reiter Mitarbeit erst den Abschluss aufheben");
       return;
     }
-    const offen = await Store.Stunden.offeneVonHeute(state.klasseId);
-    const jetzt = Store.now();
-    const einzel = Calc.trackerSession(state.settings.stundenplan, jetzt, false);
-    const doppel = Calc.trackerSession(state.settings.stundenplan, jetzt, true);
+    // Noch laufende Stunde (fortsetzbar)
+    const offen = offene.length ? offene[offene.length - 1] : null;
+    const einzel = Calc.trackerSession(state.settings.stundenzeiten, jetzt, false);
+    const doppel = Calc.trackerSession(state.settings.stundenzeiten, jetzt, true);
     const info = einzel.quelle === "plan"
-      ? "Erkannt: " + einzel.stundeNr + ". Stunde laut Stundenplan (Ende " +
+      ? "Erkannt: " + einzel.stundeNr + ". Stunde laut Stundenzeiten (Ende " +
         new Date(einzel.endeTs).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) +
         " Uhr, Doppelstunde bis " +
         new Date(doppel.endeTs).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }) + " Uhr)."
-      : "Gerade läuft laut Stundenplan keine Stunde – es wird mit 45 bzw. 90 Min ab jetzt gerechnet.";
+      : "Gerade läuft laut Stundenzeiten keine Stunde – es wird mit 45 bzw. 90 Min ab jetzt gerechnet.";
 
     let offenText = "";
     if (offen) {
       const erfasst = await Store.Ereignisse.byStunde(offen.id);
-      offenText = '<p><strong>Offene Stunde von heute:</strong> ' + UI.esc(stundeLabel(offen)) +
-        " · " + erfasst.length + " Erfassung" + (erfasst.length === 1 ? "" : "en") +
+      offenText = '<p><strong>Laufende Stunde:</strong> ' + UI.esc(stundeLabel(offen)) +
+        " · " + erfassungenText(erfasst.length) +
         '</p><p class="muted">Fortsetzen führt die Zählung dieser Stunde weiter. Eine neue Stunde beendet sie.</p>';
     }
 
@@ -639,6 +671,46 @@
     UI.modal({
       title: "Tracker starten",
       bodyHTML: offenText + raumHTML + "<p>Wie lange dauert die neue Stunde?</p>" + '<p class="muted">' + info + "</p>",
+      buttons
+    });
+  }
+
+  function erfassungenText(n) {
+    return n + " Erfassung" + (n === 1 ? "" : "en");
+  }
+
+  // „Letzte Stunde wurde nicht beendet“: Vor dem Beenden lässt sich darin
+  // noch etwas nachtragen (Nachtrage-Modus). Liegt die Stunde in einem
+  // abgeschlossenen Quartal, bleibt nur das Beenden.
+  async function vergesseneStundeDialog(klasse, st) {
+    const erfasst = await Store.Ereignisse.byStunde(st.id);
+    const gesperrt = !!(klasse && Store.abschlussVon(klasse, Number(st.quartal)));
+    const beenden = async () => {
+      await Store.Stunden.beenden(st.id);
+      if (state.tracker && state.tracker.stunde && state.tracker.stunde.id === st.id) state.tracker = null;
+      UI.toast("Stunde beendet");
+      await trackerStartDialog();   // weiter wie gewohnt (neue Stunde)
+    };
+    const buttons = [{ label: "Abbrechen" }];
+    if (!gesperrt) {
+      buttons.push({ label: "Ja, Änderungen vornehmen", className: "primary", onClick: async (close) => {
+        close();
+        if (st.sitzplanId) await Store.Sitzplan.setAktiv(state.klasseId, st.sitzplanId);
+        state.pendingStunde = st;
+        state.pendingNachtragen = true;
+        state.trackerModus = null;
+        go("tracker");
+      }});
+    }
+    buttons.push({ label: gesperrt ? "Stunde beenden" : "Nein, Stunde beenden", className: gesperrt ? "primary" : "",
+      onClick: (close) => { close(); beenden(); } });
+    UI.modal({
+      title: "Letzte Stunde wurde nicht beendet",
+      bodyHTML: "<p><strong>" + UI.esc(stundeLabel(st, true)) + "</strong> · " + erfassungenText(erfasst.length) + "</p>" +
+        (gesperrt
+          ? '<p class="muted">Das ' + st.quartal + ". Quartal ist abgeschlossen – nachtragen lässt sich darin nichts mehr. Die Stunde wird nur noch beendet.</p>"
+          : "<p>Möchtest du noch etwas nachtragen oder ändern, bevor die Stunde beendet wird?</p>" +
+            '<p class="muted">Nachträge zählen für diese Stunde. Die Heatmap bleibt dabei unverändert.</p>'),
       buttons
     });
   }
@@ -683,6 +755,19 @@
   }
 
   // ---- Tracker: Tap & Undo -------------------------------------------------
+  // Ereignis der laufenden Stunde: Es trägt das Quartal der Stunde (nicht das
+  // eingestellte – ein Nachtrag vom September gehört ins 1. Quartal). Beim
+  // Nachtragen bekommt es die Zeit der Stunde, erfasstAm den echten Zeitpunkt.
+  function neuesTrackerEreignis(t, sid, typ, punkte) {
+    const e = Store.neuesEreignis(state.klasseId, sid, typ, punkte, t.stunde.id,
+      t.stunde.quartal || state.settings.aktuellesQuartal);
+    if (t.nachtragen) {
+      e.erfasstAm = e.timestamp;
+      e.timestamp = Calc.erfassungsZeit(t.stunde, e.timestamp);
+    }
+    return e;
+  }
+
   async function trackerTap(el) {
     const sid = el.getAttribute("data-sid");
     if (state.trackerModus) return; // im Modus zählt der Tap auf die ganze Kachel
@@ -694,9 +779,8 @@
       ? Math.max(0, parseInt(state.settings[typDef.heatSetting], 10) || 0)
       : 0;
     const t = state.tracker;
-    const e = Store.neuesEreignis(state.klasseId, sid, typ, punkte, t && t.stunde ? t.stunde.id : null,
-      state.settings.aktuellesQuartal);
-    e.heatDelta = heatDelta;
+    const e = neuesTrackerEreignis(t, sid, typ, punkte);
+    e.heatDelta = t.nachtragen ? 0 : heatDelta;
     await Store.Ereignisse.save(e);
 
     if (heatDelta > 0) await trackerHeatAddieren(sid, heatDelta);

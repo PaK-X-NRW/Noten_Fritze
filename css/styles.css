@@ -191,6 +191,9 @@ a.btn { text-decoration: none; color: inherit; } /* Link im Knopf-Stil (z. B. In
   border: 1px solid var(--line); background: var(--surface-2); color: var(--text-muted); font-size: 15px;
 }
 .hint-box strong { color: var(--text); }
+/* Startseite: nicht beendete Stunden, je Klasse eine Zeile */
+.offen-zeile { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.offen-zeile + .offen-zeile { margin-top: 8px; }
 table { border-collapse: collapse; width: 100%; font-size: 16px; }
 th, td { padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
 th { background: var(--surface-2); font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--text-muted); position: sticky; top: 0; }
@@ -304,16 +307,19 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .form-row { display: flex; gap: 12px; flex-wrap: wrap; }
 .form-row > .field { flex: 1; min-width: 160px; }
 
-/* Stundenplan (Einstellungen): 10 Stunden kompakt nebeneinander */
-.sp-grid { display: flex; flex-wrap: wrap; gap: 10px; }
-.sp-stunde {
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  padding: 8px 10px;
+/* Stundenzeiten (Einstellungen): Stunden und Pausen als Zeilen, zeitlich sortiert */
+.sz-liste { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.sz-zeile {
+  display: grid; grid-template-columns: minmax(110px, 1fr) auto auto auto 44px;
+  align-items: center; gap: 8px;
+  padding: 4px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
-  background: var(--surface-2);
+  background: var(--surface);
 }
-.sp-stunde input[type="time"] { width: 100px; min-height: 44px; padding: 6px; text-align: center; }
+.sz-zeile.pause { background: var(--surface-2); }
+.sz-zeile input[type="time"] { width: 110px; min-height: 44px; padding: 6px; text-align: center; }
+.sz-zeile input.sz-name { min-height: 44px; min-width: 0; }
 .seg { display: flex; border: 1px solid var(--line); border-radius: var(--radius-sm); overflow: hidden; }
 .seg button { flex: 1; min-height: var(--tap); border: none; background: var(--surface); font-weight: 600; cursor: pointer; }
 .seg button.active { background: var(--accent); color: #fff; }

@@ -16,7 +16,7 @@
     schwellenDialog, mitarbeitHerleitungDialog, quartalAbschliessenDialog, klassenImportDialog,
     trackerStartDialog, trackerModusToggle, trackerModusEnde, trackerModusTap,
     trackerStundeBeenden, trackerVerlassen, trackerRaumDialog, trackerTap, trackerUndo, trackerHeatPause,
-    besprechungStep
+    besprechungStep, stundenzeitenAktion
   } = global.Views;
 
   // =========================================================================
@@ -131,6 +131,11 @@
 
     // Tracker / Besprechung Navigation
     "open-tracker": () => trackerStartDialog(),
+    // Startseite: vergessene Stunde einer Klasse ansehen (Tracker-Start fragt nach)
+    "offene-stunde": async (el) => {
+      await go("klasse", { klasseId: el.getAttribute("data-id"), tab: "schueler" });
+      await trackerStartDialog();
+    },
     "open-besprechung": () => { state.selectedSchuelerId = null; go("besprechung"); },
     "back-to-class": async () => { if (state.view === "tracker") await trackerVerlassen(); go("klasse"); },
     "tracker-tap": (el) => trackerTap(el),
@@ -163,6 +168,8 @@
       exportToast(status, "Backup");
     },
     "backup-import": () => backupImportDialog(),
+    // Stundenzeiten: Stunde anhängen/entfernen, Pause anlegen/entfernen, Lücken füllen
+    "stundenzeiten": (el) => stundenzeitenAktion(el.getAttribute("data-was"), el.getAttribute("data-id")),
 
     // Klasse exportieren / importieren / löschen
     "export-klasse": async (el) => {

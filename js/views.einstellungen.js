@@ -1,23 +1,99 @@
 /* =========================================================================
-   views.einstellungen.js – Einstellungen inkl. Stundenplan-Verwaltung
+   views.einstellungen.js – Einstellungen inkl. Stundenzeiten (Stunden und Pausen)
    ========================================================================= */
 (function (global) {
   "use strict";
 
-  const { state } = global.Views;
+  const { state, render } = global.Views;
 
-  // ---- Stundenplan (Einstellungen) ------------------------------------------
-  // Flacher Plan: genau 10 Stunden, die jeden Schultag gleich gelten.
-  function stundenplanHTML(s) {
-    const plan = Array.isArray(s.stundenplan) ? s.stundenplan : [];
-    const zellen = plan.map((h, i) =>
-      '<div class="sp-stunde">' +
-        '<span class="muted">' + (i + 1) + ".</span>" +
-        '<input type="time" lang="de-DE" data-sp-idx="' + i + '" data-sp-feld="start" value="' + UI.esc(h.start || "") + '">' +
-        '<input type="time" lang="de-DE" data-sp-idx="' + i + '" data-sp-feld="ende" value="' + UI.esc(h.ende || "") + '">' +
-      "</div>"
-    ).join("");
-    return '<div class="sp-grid">' + zellen + "</div>";
+  // ---- Stundenzeiten (Einstellungen) ----------------------------------------
+  // Zeitlich sortierte Blöcke: Stunden (automatisch nummeriert) und Pausen
+  // bzw. sonstige Zeiten mit freiem Namen. Gelten jeden Schultag gleich.
+  function stundenzeitenHTML(s) {
+    const zeit = (b, feld) => '<input type="time" lang="de-DE" data-sz-id="' + UI.esc(b.id) + '" data-sz-feld="' + feld +
+      '" value="' + UI.esc(b[feld] || "") + '" aria-label="' + (feld === "start" ? "Beginn" : "Ende") + '">';
+    const zeilen = s.stundenzeiten.map((b) => {
+      const stunde = b.art === "stunde";
+      return '<div class="sz-zeile' + (stunde ? "" : " pause") + '">' +
+        (stunde
+          ? '<span class="sz-name"><strong>' + b.nr + ". Stunde</strong></span>"
+          : '<input type="text" class="sz-name" data-sz-id="' + UI.esc(b.id) + '" data-sz-feld="name" value="' +
+            UI.esc(b.name) + '" aria-label="Name der Pause">') +
+        zeit(b, "start") + '<span class="muted">–</span>' + zeit(b, "ende") +
+        (stunde
+          ? "<span></span>"
+          : '<button class="iconbtn plain danger-text" data-action="stundenzeiten" data-was="pause-weg" data-id="' +
+            UI.esc(b.id) + '" title="Entfernen">🗑</button>') +
+      "</div>";
+    }).join("");
+    const knopf = (was, label) => '<button class="btn" data-action="stundenzeiten" data-was="' + was + '">' + label + "</button>";
+    return '<div class="sz-liste">' + zeilen + "</div>" +
+      '<div class="btn-row">' +
+        knopf("stunde-plus", "＋ Stunde anhängen") + knopf("stunde-minus", "Letzte Stunde entfernen") +
+        knopf("pause-plus", "＋ Pause / Zeit") + knopf("luecken", "Pausen aus Lücken anlegen") +
+      "</div>";
+  }
+
+  async function stundenzeitenSpeichern(liste, meldung) {
+    const s = await Store.getSettings();
+    s.stundenzeiten = Store.stundenzeitenNormalisieren(liste);
+    await Store.saveSettings(s);
+    await render();
+    if (meldung) UI.toast(meldung);
+  }
+
+  // Knöpfe der Karte Stundenzeiten (Action "stundenzeiten", data-was).
+  async function stundenzeitenAktion(was, id) {
+    const liste = state.settings.stundenzeiten.map((b) => Object.assign({}, b));
+    const stunden = liste.filter((b) => b.art === "stunde");
+    const letzte = liste[liste.length - 1];
+    const voll = liste.length >= Store.MAX_BLOECKE;
+    if (was === "stunde-plus") {
+      if (stunden.length >= Store.MAX_STUNDEN) return UI.toast("Mehr als " + Store.MAX_STUNDEN + " Stunden sind nicht möglich");
+      if (voll) return UI.toast("Mehr als " + Store.MAX_BLOECKE + " Einträge sind nicht möglich");
+      const start = Store.hhmmZuMinuten(stunden[stunden.length - 1].ende) + 5;
+      liste.push({ art: "stunde", start: Store.minZuHHMM(start), ende: Store.minZuHHMM(start + 45) });
+      return stundenzeitenSpeichern(liste, (stunden.length + 1) + ". Stunde angehängt");
+    }
+    if (was === "stunde-minus") {
+      if (stunden.length <= 1) return UI.toast("Mindestens eine Stunde muss bleiben");
+      const weg = stunden[stunden.length - 1];
+      return stundenzeitenSpeichern(liste.filter((b) => b !== weg), weg.nr + ". Stunde entfernt");
+    }
+    if (was === "pause-plus") {
+      if (voll) return UI.toast("Mehr als " + Store.MAX_BLOECKE + " Einträge sind nicht möglich");
+      const start = Store.hhmmZuMinuten(letzte.ende);
+      liste.push({ id: "p-" + Store.uid(), art: "pause", name: "Pause",
+        start: Store.minZuHHMM(start), ende: Store.minZuHHMM(start + 15) });
+      return stundenzeitenSpeichern(liste, "Pause angelegt – Name und Zeiten anpassen");
+    }
+    if (was === "pause-weg") {
+      return stundenzeitenSpeichern(liste.filter((b) => b.id !== id), "Entfernt");
+    }
+    if (was === "luecken") {
+      const neu = Store.pausenAusLuecken(liste);
+      const anzahl = neu.length - liste.length;
+      if (!anzahl) return UI.toast("Keine freien Lücken zwischen den Stunden");
+      return stundenzeitenSpeichern(neu, anzahl + (anzahl === 1 ? " Pause" : " Pausen") + " angelegt");
+    }
+  }
+
+  // Zeit oder Name eines Blocks geändert
+  async function stundenzeitFeldGeaendert(inp) {
+    const liste = state.settings.stundenzeiten.map((b) => Object.assign({}, b));
+    const b = liste.find((x) => x.id === inp.getAttribute("data-sz-id"));
+    if (!b) return;
+    const feld = inp.getAttribute("data-sz-feld");
+    const alt = b[feld];
+    const wert = feld === "name" ? inp.value.trim() : inp.value;
+    if (feld !== "name" && !wert) { inp.value = alt; return; }
+    b[feld] = wert;
+    if (feld !== "name" && Store.hhmmZuMinuten(b.ende) <= Store.hhmmZuMinuten(b.start)) {
+      inp.value = alt;
+      UI.toast("Das Ende muss nach dem Beginn liegen");
+      return;
+    }
+    await stundenzeitenSpeichern(liste, "Stundenzeiten gespeichert");
   }
 
   // ---- Notenschwellen (global und je Klasse gleiches Markup) ----------------
@@ -181,9 +257,11 @@
           zahlFeld("heatVerfallPunkte", s) + zahlFeld("heatVerfallMinuten", s, "X Minuten") +
         "</div>" +
       "</div>" +
-      '<div class="card"><h2>Stundenplan</h2>' +
-        '<p class="muted">Gilt für jeden Schultag gleich. Der Tracker erkennt damit die laufende Stunde und ihre Restzeit.</p>' +
-        stundenplanHTML(s) +
+      '<div class="card"><h2>Stundenzeiten</h2>' +
+        '<p class="muted">Beginn und Ende der Stunden und Pausen – gilt für jeden Schultag gleich. ' +
+        "Der Tracker erkennt damit die laufende Stunde, ihre Restzeit und Doppelstunden. " +
+        "Pausen und sonstige Zeiten (z. B. Frühaufsicht) zählen nicht als Unterricht.</p>" +
+        stundenzeitenHTML(s) +
       "</div>" +
       '<div class="card"><h2>Export-Ordner</h2>' +
         '<p class="muted">Exporte (CSV/JSON) direkt in einen Ordner auf diesem Gerät speichern. ' +
@@ -230,7 +308,7 @@
       // Einfache Einstellungen: alle nach dem Bauplan (EINSTELLUNGEN)
       UI.$all("[data-einstellung]").forEach((feld) =>
         feld.addEventListener("change", () => einstellungSpeichern(s, feld)));
-      // Zusammengesetzte Einstellungen: Notenschwellen und Stundenplan
+      // Zusammengesetzte Einstellungen: Notenschwellen und Stundenzeiten
       const schwellenBox = UI.$("#schwellen-global");
       if (schwellenBox) UI.$all("[data-schwelle]", schwellenBox).forEach((inp) => inp.addEventListener("change", async () => {
         const liste = schwellenAusFormular(schwellenBox);
@@ -238,15 +316,9 @@
         s.mitarbeitSchwellen = liste;
         await Store.saveSettings(s); UI.toast("Notenschwellen gespeichert");
       }));
-      UI.$all("[data-sp-feld]").forEach((inp) => inp.addEventListener("change", async () => {
-        const idx = parseInt(inp.getAttribute("data-sp-idx"), 10);
-        const stunde = Array.isArray(s.stundenplan) && s.stundenplan[idx];
-        if (!stunde) return;
-        stunde[inp.getAttribute("data-sp-feld")] = inp.value;
-        await Store.saveSettings(s); UI.toast("Stundenplan gespeichert");
-      }));
+      UI.$all("[data-sz-feld]").forEach((inp) => inp.addEventListener("change", () => stundenzeitFeldGeaendert(inp)));
     }};
   }
 
-  Object.assign(global.Views, { ViewEinstellungen, schwellenFelderHTML, schwellenAusFormular, EINSTELLUNGEN });
+  Object.assign(global.Views, { ViewEinstellungen, schwellenFelderHTML, schwellenAusFormular, EINSTELLUNGEN, stundenzeitenAktion });
 })(window);

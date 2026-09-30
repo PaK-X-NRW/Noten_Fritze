@@ -1,6 +1,6 @@
 /* =========================================================================
-   views.home-klasse.js – Home (Klassenübersicht) und Klassenansicht
-   mit den Tabs Schüler und Kategorien. Die Tabs Noten, Sitzplan und
+   views.home-klasse.js – Home (Klassenübersicht, Hinweis auf nicht beendete
+   Stunden) und Klassenansicht mit den Tabs Schüler und Kategorien. Die Tabs Noten, Sitzplan und
    Mitarbeit liegen in views.noten.js, views.sitzplan.js, views.mitarbeit.js.
    ========================================================================= */
 (function (global) {
@@ -39,7 +39,8 @@
       );
     }).join("");
 
-    const body = (klassen.length
+    const body = await vergesseneStundenHTML(klassen) +
+      (klassen.length
       ? '<div class="grid cards">' + cards + "</div>"
       : '<div class="empty"><div class="big">🎓</div><p>Noch keine Klassen vorhanden.</p>' +
         '<button class="btn primary" data-action="add-class">Erste Klasse anlegen</button></div>') +
@@ -55,6 +56,25 @@
       '<button class="btn primary" data-action="add-class">＋ Klasse</button>';
 
     return { topbar, body };
+  }
+
+  // Dezente Leiste über den Klassen: Stunden, die nicht beendet wurden
+  // (je Klasse die älteste). „Ansehen“ öffnet den Tracker-Start der Klasse,
+  // der vor dem Beenden fragt, ob noch etwas nachzutragen ist.
+  async function vergesseneStundenHTML(klassen) {
+    const jetzt = Store.now();
+    const namen = {};
+    klassen.forEach((k) => { namen[k.id] = k.name || "(ohne Namen)"; });
+    const jeKlasse = {};
+    (await Store.Stunden.alleOffenen()).forEach((st) => {
+      if (namen[st.klasseId] !== undefined && !jeKlasse[st.klasseId] && Calc.stundeVergessen(st, jetzt)) jeKlasse[st.klasseId] = st;
+    });
+    const zeilen = Object.keys(jeKlasse).map((id) => {
+      const tag = new Date(jeKlasse[id].startTs).toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
+      return '<div class="offen-zeile"><span><strong>' + UI.esc(namen[id]) + "</strong>: Stunde vom " + UI.esc(tag) + " nicht beendet</span>" +
+        '<button class="btn small" data-action="offene-stunde" data-id="' + UI.esc(id) + '">Ansehen</button></div>';
+    }).join("");
+    return zeilen ? '<div class="hint-box offen-box">' + zeilen + "</div>" : "";
   }
 
   // =========================================================================

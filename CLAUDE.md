@@ -49,19 +49,19 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/version.js` | `APP_VERSION` | App-Version `MAJOR.MINOR.PATCH` (Single Source of Truth) |
 | `js/db.js` | `DB` | Generischer IndexedDB-Wrapper (Promises, Schema-Versionierung) |
 | `js/store.js` | `Store` | Store-Kern: Ereignistypen, Quartals-/Heat-Helfer, Repositories je Entität (inkl. Leistungen) |
-| `js/store.einstellungen.js` | `Store` | `DEFAULT_SETTINGS`, Stundenplan/Schwellen, `getSettings`/`saveSettings` |
+| `js/store.einstellungen.js` | `Store` | `DEFAULT_SETTINGS`, Stundenzeiten/Schwellen, `getSettings`/`saveSettings` |
 | `js/store.migrationen.js` | `Store` | `SCHEMA_VERSION`, `MIGRATION_STEPS`, `migrateSchema` |
 | `js/store.transfer.js` | `Store` | Backup (`exportAll`/`importAll`) und Klassen-Export/-Import |
 | `js/store.demo.js` | `Store` | Demo-Daten (`seedDemoData`) beim ersten Start |
 | `js/calc.js` | `Calc` | Rechen-Kern: Notenskala (Eingabe, Drittel-/Zeugnisskala, Anzeige, MSS-Umrechnung), Kategorie-Helfer – **frei von DOM/DB** |
 | `js/calc.zeugnis.js` | `Calc` | Halbjahres-Kette: `berechneSchueler`, `halbjahrErgebnis`, `mitarbeitVorhanden` |
 | `js/calc.mitarbeit.js` | `Calc` | Mitarbeits-Auswertung (Stundennoten-Modell), Schwellen |
-| `js/calc.tracker.js` | `Calc` | Heatmap-Verfall/-Farbe, Stundenplan (`trackerSession`) |
+| `js/calc.tracker.js` | `Calc` | Heatmap-Verfall/-Farbe, Stundenzeiten (`trackerSession`), vergessene Stunden (`stundeVergessen`, `erfassungsZeit`) |
 | `js/calc.sitzplan.js` | `Calc` | Sitzplan: Gang-Vorlagen, Lage der Plätze, Sitzregeln prüfen, `sitzplanVerteilen` |
 | `js/csv.js` | `CSV` | CSV-Export/Import (UTF-8 mit BOM) |
 | `js/ui.js` | `UI` | UI-Bausteine: Modal, Toast, Formfelder, `esc`, `$`/`$all` |
 | `js/views.core.js` | `Views` | Views-Kern: State, Navigation (`go`), Render-Schleife (`render`), Zeitraum-Reiter |
-| `js/views.einstellungen.js` | `Views` | Einstellungen inkl. Stundenplan, Schwellen-Felder (`schwellenFelderHTML`) |
+| `js/views.einstellungen.js` | `Views` | Einstellungen inkl. Stundenzeiten, Schwellen-Felder (`schwellenFelderHTML`) |
 | `js/views.besprechung.js` | `Views` | Besprechungsmodus + Noten-Aufschlüsselung (`breakdownHTML`) |
 | `js/views.home-klasse.js` | `Views` | Home (Klassenübersicht) + Klassenansicht mit Tabs Schüler/Kategorien |
 | `js/views.noten.js` | `Views` | Reiter Noten: Spaltenmodell, Tabelle, Dialoge Spalte + Schüler-Detail |
@@ -307,11 +307,34 @@ beim allerersten Start erscheint er bewusst nicht.
   gemittelt. Schriftlich läuft unverändert über den ganzen Zeitraum.
 - **Stunden (Store `stunden`) sind die Erfassungseinheit des Trackers:** Beim Start
   wird eine Stunde angelegt (`Store.neueStunde` aus `Calc.trackerSession`,
-  Einzel-/Doppelstunde) oder die offene Stunde von heute fortgesetzt
-  (`Store.Stunden.offeneVonHeute`); „Stunde beenden“ setzt `status:"beendet"`.
-  Ereignisse tragen `stundeId`. Die Restzeit kommt aus `stunde.endeTs`, der
+  Einzel-/Doppelstunde) oder eine noch laufende offene Stunde fortgesetzt
+  (`Store.Stunden.offene`); „Stunde beenden“ setzt `status:"beendet"`.
+  Ereignisse tragen `stundeId` und das Quartal **ihrer Stunde** (`neuesTrackerEreignis`).
+  Die Restzeit kommt aus `stunde.endeTs`, der
   Heatmap-Verfall skaliert auf `stunde.dauerMin` (`heatVerfallMinuten` gilt bezogen
   auf eine 45-Min-Stunde).
+- **Stundenzeiten** (`settings.stundenzeiten`, bis 1.15 `stundenplan`): zeitlich
+  sortierte Blöcke `{ id, art: "stunde"|"pause", name, start, ende, nr }`, jeden
+  Schultag gleich. Stunden werden nach Lage nummeriert (`id` = `"std-<nr>"`, 1–14),
+  Pausen/sonstige Zeiten (Frühaufsicht …) tragen einen Namen und eine feste
+  `p-…`-ID; höchstens 40 Blöcke. `Store.stundenzeitenNormalisieren` sortiert und
+  nummeriert, `Store.stundenzeitenLesen` wandelt das alte Feld beim Lesen um (nur
+  Stunden, **keine** Pausen – bestehende Nutzer legen sie per „Pausen aus Lücken
+  anlegen“ = `Store.pausenAusLuecken` an; der Standard für neue Installationen hat
+  sie). Deshalb kein Migrationsschritt. `Calc.aktuelleStunde`/`trackerSession`
+  sehen nur die Stunden; eine Doppelstunde reicht bis zum Ende der nächsten Stunde.
+- **Vergessene Stunden:** Offene Stunden werden **nie stillschweigend** beendet.
+  `Calc.stundeVergessen` (offen und Ende vorbei; ohne Zeitangabe ab dem Folgetag)
+  → `trackerStartDialog` zeigt zuerst `vergesseneStundeDialog` („Letzte Stunde wurde
+  nicht beendet“): „Ja“ öffnet den Tracker im **Nachtrage-Modus**
+  (`state.pendingNachtragen` → `state.tracker.nachtragen`): Heatmap ohne Verfall und
+  ohne Punkte (`heatDelta` 0), Ereignisse bekommen `timestamp` =
+  `Calc.erfassungsZeit` (innerhalb der Stunde, wichtig für Tages-Zuordnung und
+  Abwesenheiten) und `erfasstAm` = echter Zeitpunkt. „Nein“ beendet
+  (`Stunden.beenden` setzt bei fehlender Zeitangabe das Ende höchstens aufs
+  Tagesende). In einem abgeschlossenen Quartal nur Beenden; `Store.quartalAbschliessen`
+  beendet alle offenen Stunden des Quartals. Die Startseite zeigt je Klasse eine
+  Leiste (`vergesseneStundenHTML`, Action `offene-stunde`).
 - **Heatmap-Zeit:** Der Verfall läuft **nur innerhalb einer laufenden Stunde**
   (Bezugszeit `min(jetzt, stunde.endeTs)`). Beim Öffnen/Fortsetzen wird
   `heatLastDecayAt` auf jetzt gesetzt (kein Nachhol-Verfall aus der Pause), beim
@@ -551,7 +574,7 @@ Aufgabe:
   `max`, `ersatz`, `werte`, `meldung`, `danach`). 3) Feld mit
   `einstellungFeld(...)` bzw. `zahlZeile(...)` in eine Karte setzen. Speichern,
   Prüfen und Rückmeldung übernimmt dann der gemeinsame Handler – keine eigenen
-  Listener je Feld. Zusammengesetzte Werte (Schwellen, Stundenplan) behalten
+  Listener je Feld. Zusammengesetzte Werte (Schwellen, Stundenzeiten) behalten
   eigene Handler. Die Einstellung in README (Datenmodell) und ggf. info.html nennen.
 - **Fehler nicht verschlucken:** Aktionen aus der Action-Map und unbehandelte
   Promise-Fehler landen über `UI.fehlerMelden` als Toast (plus Konsole). Eigene

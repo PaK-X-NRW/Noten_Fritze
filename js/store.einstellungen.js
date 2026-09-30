@@ -1,13 +1,13 @@
 /* =========================================================================
    store.einstellungen.js – Standardwerte und App-Einstellungen
    Erweitert den Store-Namespace (store.js lädt davor) um DEFAULT_SETTINGS,
-   den Default-Stundenplan, die Normalisierung von Stundenplan und
-   Notenschwellen sowie das Laden/Speichern der Einstellungen.
+   die Stundenzeiten (Stunden und Pausen als Blöcke), die Normalisierung von
+   Stundenzeiten und Notenschwellen sowie das Laden/Speichern der Einstellungen.
    ========================================================================= */
 (function (global) {
   "use strict";
 
-  const { EVENT_TYPES, datumLokal, quartalAusDatum } = global.Store;
+  const { EVENT_TYPES, datumLokal, quartalAusDatum, uid } = global.Store;
 
   // ---- Standard-Einstellungen ----------------------------------------------
   function hhmmZuMinuten(v) {
@@ -18,27 +18,90 @@
     return ("0" + (Math.floor(min / 60) % 24)).slice(-2) + ":" + ("0" + (min % 60)).slice(-2);
   }
 
-  // Default-Stundenplan: 10 Stunden à 45 Min ab 08:00 – gilt jeden Schultag
-  // gleich (5-Min-Pausen, nach der 2. Stunde 20 Min).
-  function defaultStundenplan() {
-    const starts = ["08:00", "08:50", "09:55", "10:45", "11:35", "12:25", "13:15", "14:05", "14:55", "15:45"];
-    return starts.map((start, i) => ({ nr: i + 1, start, ende: minZuHHMM(hhmmZuMinuten(start) + 45) }));
+  // ---- Stundenzeiten ---------------------------------------------------------
+  // Zeitlich sortierte Liste von Blöcken, gilt jeden Schultag gleich:
+  //   { id, art: "stunde" | "pause", name, start: "HH:MM", ende: "HH:MM", nr }
+  // Stunden werden nach ihrer Lage durchnummeriert (nr, id "std-<nr>"), damit
+  // „3. Stunde“ immer dieselbe Kennung hat. Pausen (auch Frühaufsicht o. Ä.)
+  // tragen einen freien Namen und zählen nie als Unterricht.
+  const MAX_STUNDEN = 14;
+  const MAX_BLOECKE = 40;
+
+  function neuerBlock(art, start, ende, name) {
+    return {
+      id: art === "stunde" ? "" : "p-" + uid(),
+      art, name: name || "", start, ende
+    };
   }
 
-  // Bringt einen Stundenplan auf genau 10 Einträge { nr, start, ende }:
-  // ungültige Einträge raus, fehlende Stunden ans Ende gehängt
-  // (letzte Stunde + 5 Min Pause, 45 Min).
-  function stundenplanNormalisieren(liste) {
-    const plan = (Array.isArray(liste) ? liste : [])
-      .filter((h) => h && h.start && h.ende)
-      .slice(0, 10)
-      .map((h, i) => ({ nr: i + 1, start: h.start, ende: h.ende }));
-    while (plan.length < 10) {
-      const letzte = plan[plan.length - 1];
-      const startMin = letzte ? hhmmZuMinuten(letzte.ende) + 5 : 8 * 60;
-      plan.push({ nr: plan.length + 1, start: minZuHHMM(startMin), ende: minZuHHMM(startMin + 45) });
+  // Legt zwischen zwei aufeinanderfolgenden Stunden eine Pause an, wo noch
+  // kein Block liegt („Pause“, ab 15 Min „Große Pause“). Rückgabe: neue Liste.
+  function pausenAusLuecken(liste) {
+    const bloecke = (liste || []).slice();
+    const stunden = bloecke.filter((b) => b.art === "stunde")
+      .sort((a, b) => hhmmZuMinuten(a.start) - hhmmZuMinuten(b.start));
+    for (let i = 0; i + 1 < stunden.length && bloecke.length < MAX_BLOECKE; i++) {
+      const von = hhmmZuMinuten(stunden[i].ende), bis = hhmmZuMinuten(stunden[i + 1].start);
+      if (bis <= von) continue;
+      const belegt = bloecke.some((b) => b.art !== "stunde" &&
+        hhmmZuMinuten(b.start) < bis && hhmmZuMinuten(b.ende) > von);
+      if (belegt) continue;
+      bloecke.push(neuerBlock("pause", minZuHHMM(von), minZuHHMM(bis), bis - von >= 15 ? "Große Pause" : "Pause"));
     }
-    return plan;
+    return stundenzeitenNormalisieren(bloecke);
+  }
+
+  // Standard: 10 Stunden à 45 Min ab 08:00 mit 5-Min-Pausen, nach der 2. Stunde
+  // 20 Min (Große Pause). Die Pausen stehen als eigene Blöcke dazwischen.
+  function defaultStundenzeiten() {
+    const starts = ["08:00", "08:50", "09:55", "10:45", "11:35", "12:25", "13:15", "14:05", "14:55", "15:45"];
+    return pausenAusLuecken(starts.map((start) =>
+      neuerBlock("stunde", start, minZuHHMM(hhmmZuMinuten(start) + 45))));
+  }
+
+  // Bringt die Blockliste in eine gültige Form: Blöcke ohne Zeiten raus,
+  // nach Beginn sortiert, höchstens 14 Stunden und 40 Blöcke, Stunden neu
+  // durchnummeriert. Ohne eine einzige Stunde gilt der Standard.
+  function stundenzeitenNormalisieren(liste) {
+    const hhmm = /^\d{1,2}:\d{2}$/;
+    let stunden = 0;
+    const bloecke = (Array.isArray(liste) ? liste : [])
+      .filter((b) => b && hhmm.test(b.start) && hhmm.test(b.ende))
+      .map((b, i) => ({ b, i }))
+      // Bei gleichem Beginn: Pause (z. B. Aufsicht) vor der Stunde, sonst stabil
+      .sort((x, y) => (hhmmZuMinuten(x.b.start) - hhmmZuMinuten(y.b.start)) ||
+        ((x.b.art === "stunde") - (y.b.art === "stunde")) || (x.i - y.i))
+      .map((x) => x.b)
+      .filter((b) => b.art !== "stunde" || ++stunden <= MAX_STUNDEN)
+      .slice(0, MAX_BLOECKE);
+    if (!bloecke.some((b) => b.art === "stunde")) return defaultStundenzeiten();
+    let nr = 0;
+    return bloecke.map((b) => {
+      if (b.art === "stunde") {
+        nr += 1;
+        return { id: "std-" + nr, art: "stunde", name: "", start: b.start, ende: b.ende, nr };
+      }
+      return { id: b.id || neuerBlock("pause", b.start, b.ende).id, art: "pause",
+        name: String(b.name || "").trim() || "Pause", start: b.start, ende: b.ende };
+    });
+  }
+
+  // Stundenzeiten aus den gespeicherten (Roh-)Einstellungen lesen – auch aus
+  // älteren Formen: bis 1.15 hieß das Feld `stundenplan` und war eine Liste
+  // { nr, start, ende } (davor ein Wochenplan je Wochentag, Montag als Basis).
+  // Die bisherigen Zeiten werden zu Stunden, Pausen kommen dabei keine dazu.
+  // Rückgabe: Blockliste oder null (nichts gespeichert -> Standard).
+  function stundenzeitenLesen(roh) {
+    if (!roh) return null;
+    if (Array.isArray(roh.stundenzeiten)) return roh.stundenzeiten;
+    let alt = roh.stundenplan;
+    if (alt && !Array.isArray(alt)) {
+      const ersterTag = Object.keys(alt).sort()[0];
+      alt = ersterTag ? alt[ersterTag] : null;
+    }
+    if (!Array.isArray(alt)) return null;
+    return alt.filter((h) => h && h.start && h.ende)
+      .map((h) => neuerBlock("stunde", h.start, h.ende));
   }
 
   // Bringt eine Schwellen-Liste in eine gültige Form: unbrauchbare Einträge
@@ -68,9 +131,9 @@
     // "note6"  = jede 3. vergessene HA je Quartal erzeugt automatisch eine
     //            Note 6 in „Mündliche Mitarbeit", HA geben dann keine Punkte
     haModus: "punkte",
-    // Stundenplan: flache Liste von genau 10 { nr, start: "HH:MM", ende: "HH:MM" },
-    // gilt für jeden Schultag gleich (kein Wochenplan mehr).
-    stundenplan: defaultStundenplan(),
+    // Stundenzeiten: Stunden und Pausen als Blöcke (siehe oben), gelten für
+    // jeden Schultag gleich. Hieß bis 1.15 `stundenplan` (nur Stunden).
+    stundenzeiten: defaultStundenzeiten(),
     // Reihenfolge der Schüler/innen in allen Listen:
     // "nachname" = alphabetisch (Nachname, dann Vorname), "manuell" = per ▲/▼ gepflegter sortIndex
     schuelerSortierung: "nachname",
@@ -112,6 +175,8 @@
   async function getSettings() {
     let s = await DB.get("einstellungen", "app");
     const quartalFehlt = !s || !s.aktuellesQuartal;
+    // Vor dem Merge lesen, sonst verdeckt der Standard die alten Zeiten
+    const stundenzeiten = stundenzeitenLesen(s);
     if (!s) {
       // Erster Start bzw. leere Datenbank: nichts zu migrieren
       s = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
@@ -126,14 +191,10 @@
     if (s.heatPunktVerfallProMinuten && !s.heatVerfallMinuten) {
       s.heatVerfallMinuten = s.heatPunktVerfallProMinuten;
     }
-    // Altes Format (Wochenplan als Objekt je Wochentag) in die flache
-    // 10-Stunden-Liste überführen: Montagsliste als Basis, sonst Default.
-    if (!Array.isArray(s.stundenplan)) {
-      const alt = s.stundenplan || {};
-      const ersterTag = Object.keys(alt).sort()[0];
-      s.stundenplan = ersterTag ? alt[ersterTag] : null;
-    }
-    s.stundenplan = stundenplanNormalisieren(s.stundenplan);
+    // Stundenzeiten (auch aus dem alten Feld `stundenplan`); das alte Feld
+    // verschwindet beim nächsten Speichern
+    s.stundenzeiten = stundenzeitenNormalisieren(stundenzeiten || s.stundenzeiten);
+    delete s.stundenplan;
     s.mitarbeitSchwellen = schwellenNormalisieren(s.mitarbeitSchwellen);
     if (!s.mitarbeitSchwellen.length) {
       s.mitarbeitSchwellen = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.mitarbeitSchwellen));
@@ -153,6 +214,8 @@
   Object.assign(global.Store, {
     DEFAULT_SETTINGS,
     getSettings, saveSettings,
-    defaultStundenplan, schwellenNormalisieren, hhmmZuMinuten
+    MAX_STUNDEN, MAX_BLOECKE,
+    defaultStundenzeiten, stundenzeitenNormalisieren, stundenzeitenLesen, pausenAusLuecken,
+    schwellenNormalisieren, hhmmZuMinuten, minZuHHMM
   });
 })(window);

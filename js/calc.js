@@ -11,7 +11,7 @@
      calc.js           – diese Datei: legt window.Calc an
      calc.zeugnis.js   – Halbjahres-Kette: Einzelnoten -> Epochalnote -> Zeugnisnote
      calc.mitarbeit.js – Mitarbeits-Auswertung (Stundennoten-Modell), Schwellen
-     calc.tracker.js   – Heatmap-Verfall und Stundenplan (Tracker)
+     calc.tracker.js   – Heatmap-Verfall und Stundenzeiten (Tracker)
    Alle Funktionen sind rein: kein DOM, keine Datenbank. Geprüft werden sie
    im Selbsttest tests.html.
    ========================================================================= */
