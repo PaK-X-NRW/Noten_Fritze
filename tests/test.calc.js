@@ -478,6 +478,53 @@
     });
   });
 
+  gruppe("Stundenplanung: Einheit, Fahrplan, Umzug", () => {
+    const zeiten = Store.defaultStundenzeiten();
+    const std = (nr) => zeiten.find((b) => b.id === "std-" + nr);
+    const versionen = [{ id: "v", gueltigAb: null, eintraege: [
+      { tag: 1, blockId: "std-1", woche: "alle", klasseId: "k" },
+      { tag: 1, blockId: "std-2", woche: "alle", klasseId: "k" },
+      { tag: 1, blockId: "std-4", woche: "alle", klasseId: "k" },
+      { tag: 3, blockId: "std-3", woche: "alle", klasseId: "k" }
+    ] }];
+    fall("Doppelstunde = eine Einheit, getrennte Stunde = eigene Einheit", () => {
+      const p = Calc.tagesPlan(versionen, [], [], "2026-09-28");
+      gleich(Calc.einheitBestimmen(p, zeiten, "k", "std-2").map((b) => b.id), ["std-1", "std-2"]);
+      gleich(Calc.einheitBestimmen(p, zeiten, "k", "std-4").map((b) => b.id), ["std-4"]);
+    });
+    fall("Fahrplan: Trenner teilt die Bausteine auf die Stunden auf", () => {
+      const einheit = [std(1), std(2)];
+      const planungen = [{ blockId: "std-2", bausteine: [{ id: "c", minuten: 20 }] },
+        { blockId: "std-1", bausteine: [{ id: "a", minuten: 10 }, { id: "b", minuten: 30 }] }];
+      const liste = Calc.fahrplanAusPlanungen(einheit, planungen);
+      gleich(liste.map((x) => x.id), ["a", "b", "trenner-std-2", "c"]);
+      // Trenner nach oben gezogen: b wandert in die 2. Stunde
+      const neu = [liste[0], liste[2], liste[1], liste[3]];
+      const teile = Calc.fahrplanAufteilen(einheit, neu);
+      gleich([teile["std-1"].map((x) => x.id), teile["std-2"].map((x) => x.id)], [["a"], ["b", "c"]]);
+      const m = Calc.minutenSumme(einheit, neu);
+      gleich([m.gesamt, m.dauer, m.jeStunde["std-2"].minuten], [60, 90, 50]);
+    });
+    fall("vorige Stunde der Klasse (über Tage, Ausfall übersprungen)", () => {
+      gleich(Calc.vorherigeStunde(versionen, [], [], zeiten, "k", "2026-09-30", "std-3", 30), { datum: "2026-09-28", blockId: "std-4" });
+      const ausfall = [{ art: "aenderung", aenderung: "ausfall", datum: "2026-09-28", blockId: "std-4", klasseId: "k" }];
+      gleich(Calc.vorherigeStunde(versionen, [], ausfall, zeiten, "k", "2026-09-30", "std-3", 30), { datum: "2026-09-28", blockId: "std-2" });
+      gleich(Calc.vorherigeStunde(versionen, [], [], zeiten, "k", "2026-09-28", "std-1", 3), null, "nichts in Reichweite");
+    });
+    fall("Umzug: Tausch gleichzeitig, Kollision legt zusammen", () => {
+      const pl = [{ id: "1", klasseId: "k", datum: "d1", blockId: "b1", bausteine: [{ id: "x" }] },
+        { id: "2", klasseId: "k", datum: "d2", blockId: "b2", bausteine: [{ id: "y" }] }];
+      const tausch = Calc.planungenUmziehen(pl, [
+        { klasseId: "k", von: { datum: "d1", blockId: "b1" }, nach: { datum: "d2", blockId: "b2" } },
+        { klasseId: "k", von: { datum: "d2", blockId: "b2" }, nach: { datum: "d1", blockId: "b1" } }]);
+      gleich(tausch.put.map((p) => p.id + "@" + p.datum).sort(), ["1@d2", "2@d1"]);
+      gleich(tausch.del, []);
+      const zusammen = Calc.planungenUmziehen(pl, [{ klasseId: "k", von: { datum: "d1", blockId: "b1" }, nach: { datum: "d2", blockId: "b2" } }]);
+      gleich([zusammen.del, zusammen.put[0].id, zusammen.put[0].bausteine.map((x) => x.id)], [["1"], "2", ["y", "x"]]);
+      gleich(pl[1].bausteine.length, 1, "Eingabe bleibt unverändert");
+    });
+  });
+
   gruppe("Sitzplan: Raumform", () => {
     fall("Mittelgang nur bei ungerader Spaltenzahl", () => {
       gleich(Calc.sitzplanGaenge(7, "mittelgang"), [3]);

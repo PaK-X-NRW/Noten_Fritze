@@ -65,7 +65,7 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `db.js` – generischer IndexedDB-Wrapper (Promises, Schema-Versionierung)
   - `store.js` – Domänenmodell und Repositories (Kern des Namespace `Store`)
   - `store.einstellungen.js` – Standardwerte und App-Einstellungen
-  - `store.stundenplan.js` – Stundenplan (Versionen), Wochennotizen, Termine/Kalender
+  - `store.stundenplan.js` – Stundenplan (Versionen), Wochennotizen, Termine/Kalender, Planungen
   - `store.migrationen.js` – Daten-Migrationen (`schemaVersion`)
   - `store.transfer.js` – Backup und Klassen-Export/-Import
   - `store.demo.js` – Demo-Daten beim ersten Start
@@ -75,6 +75,7 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `calc.tracker.js` – Heatmap, Stundenzeiten, vergessene Stunden
   - `calc.sitzplan.js` – Raumform-Vorlagen, Sitzregeln, automatisches Verteilen
   - `calc.stundenplan.js` – Wochen, A/B-Wochen, Versionen, tatsächlicher Tag, Monat, Klassenfarben
+  - `calc.planung.js` – Stundenplanung: Einheit (Doppelstunde), Fahrplan aufteilen, Minuten, vorige Stunde, Umzug
     (alle `calc*.js` rein, ohne DOM/DB; geprüft in `tests.html`)
   - `csv.js` – CSV-Export/Import
   - `ui.js` – UI-Bausteine (Modal, Toast, Formfelder)
@@ -88,6 +89,7 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `views.tracker.js` – Mitarbeits-Tracker
   - `views.stundenplan.js` – Stundenplan auf der Startseite (Wochenansicht)
   - `views.kalender.js` – Monatsansicht, Termine, Ausfall/Verschieben/Hinweis
+  - `views.planung.js` – Stundenplanung (Fahrplan aus Bausteinen)
   - `views.dialoge.js` – allgemeine Dialoge
   - `views.js` – Aktions-Dispatcher (Action-Map, Delegation)
   - `app.js` – Bootstrap
@@ -158,6 +160,11 @@ termine        { id, art('klassenarbeit'|'test'|'konferenz'|'elternabend'|'aufsi
                  createdAt, updatedAt }
                  (Änderungen meinen eine Stunde über Datum + Block + Klasse bzw. Freitext;
                  der Plan selbst bleibt unverändert)
+planungen      { id, klasseId, datum, blockId, thema, bausteine:[{ id, typ('text'|'link'|'datei'),
+                 phase, minuten, text, url, dateiId }], createdAt, updatedAt }
+                 (je Stunde ein Datensatz; eine Doppelstunde = zwei Datensätze, im Fenster
+                 ein Fahrplan mit Trennlinie; zieht beim Verschieben der Stunde mit)
+dateien        (ab 4b: Anhänge der Planung)
 einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punkte'|'note6'),
                  stundenzeiten [{ id, art('stunde'|'pause'), name, start, ende, nr }]
                  (bis 1.15: stundenplan, wird beim Lesen umgewandelt),
@@ -173,7 +180,7 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
 
 - **Integrität:** Löschen einer Klasse/eines Schülers löscht kaskadierend alle
   abhängigen Datensätze (Leistungen, Noten, Ereignisse, Stunden, Abwesenheiten,
-  Sitzplatz-Zuweisung, Einträge im Stundenplan, Termine); das Löschen einer Kategorie oder einer Spalte nimmt die
+  Sitzplatz-Zuweisung, Einträge im Stundenplan, Termine, Planungen); das Löschen einer Kategorie oder einer Spalte nimmt die
   darin erfassten Noten mit.
 - **App-Version:** `APP_VERSION` in `js/version.js` (Schema `MAJOR.MINOR.PATCH`,
   aktuell **1.15.0**) ist die sichtbare Programmversion: angezeigt unter
@@ -479,6 +486,18 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   die **nächsten Termine** (14 Tage). Jede Klasse hat eine **eigene Farbe**
   (Klassen-Dialog, Farbstreifen auf der Klassenkarte), die im Stundenplan und bei
   Terminen der Klasse gilt.
+- **Stundenplanung** – **Tipp** auf eine Klassenstunde im Stundenplan öffnet ihren
+  Fahrplan (Vollbild); **langes Drücken** bzw. Rechtsklick öffnet das Menü (Ausfall,
+  Verschieben, Hinweis, Termin) – im Fahrplan auch über „⋯ Stunde ändern“. Oben das
+  **Thema** (erscheint im Raster) und „verplant: x von 45 Min“. **Bausteine** mit Phase
+  (Vorschläge: Einstieg · Erarbeitung · Sicherung · Übung · Hausaufgabe · Puffer, frei
+  ergänzbar), Minuten und Text, dazu **Link-Bausteine** („Öffnen“); sortieren am Griff ⠿,
+  gespeichert wird automatisch. Eine **Doppelstunde** hat einen Fahrplan mit
+  verschiebbarer Trennlinie „— 2. Stunde —“; neue Bausteine füllen die Stunden von oben.
+  Oben erscheint die **Hausaufgabe der letzten Stunde** der Klasse, **📋 Übernehmen**
+  hängt den Fahrplan einer anderen Stunde an, **▶ Tracker** startet die Erfassung, im
+  Tracker zeigt **🗺 Fahrplan** den Plan der laufenden Stunde. Wird eine Stunde
+  verschoben (oder getauscht), zieht ihr Fahrplan mit.
 - **Klasse** – Tabs: *Schüler/innen · Noten · Kategorien · Sitzplan · Mitarbeit*.
   Oben schnell erreichbar: **Tracker**, **Besprechung**, **Exportieren** (Klasse als
   JSON), Bearbeiten. Im Bearbeiten-Dialog legt die **Klassenstufe** (5–13) fest,
@@ -617,6 +636,7 @@ Noten_Fritze/
    ├─ calc.tracker.js       Heatmap, Stundenzeiten, vergessene Stunden
    ├─ calc.sitzplan.js      Raumform, Sitzregeln, automatisches Verteilen
    ├─ calc.stundenplan.js   Wochen, A/B, Versionen, Kalender-Tag, Monat
+   ├─ calc.planung.js       Stundenplanung: Einheit, Fahrplan, Umzug
    ├─ csv.js                CSV-Export/Import
    ├─ ui.js                 Modal/Toast/Formfelder
    ├─ views.core.js         Views-Kern (State, Routing, Render)
@@ -630,6 +650,7 @@ Noten_Fritze/
    ├─ views.tracker.js      Mitarbeits-Tracker
    ├─ views.stundenplan.js  Stundenplan auf der Startseite (Woche)
    ├─ views.kalender.js     Monat, Termine, Ausfall/Verschieben/Hinweis
+   ├─ views.planung.js      Stundenplanung (Fahrplan)
    ├─ views.dialoge.js      allgemeine Dialoge
    ├─ views.js              Aktions-Dispatcher (Action-Map)
    └─ app.js                Bootstrap

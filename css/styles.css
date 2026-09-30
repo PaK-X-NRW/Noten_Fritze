@@ -447,6 +447,34 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .mo-tag.heute { box-shadow: inset 0 0 0 3px var(--accent); }
 .mo-nr { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
 .mo-frei { font-size: 12px; font-weight: 600; color: #4d6b45; margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Langes Drücken auf eine Stunde: kein Text-Markieren / iOS-Menü */
+.sp-tabelle .sp-zelle[data-datum] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.sp-thema { display: block; font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Stundenplanung (Fahrplan) */
+.pl-kopfzeile { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pl-kopfzeile #pl-thema { flex: 1; min-width: 220px; font-size: 18px; font-weight: 600; }
+.pl-summe { font-size: 14px; color: var(--text-muted); white-space: nowrap; }
+.pl-summe.zuviel { color: var(--danger); font-weight: 700; }
+.pl-ha { background: #fdf5e9; }
+.pl-liste { display: flex; flex-direction: column; gap: 10px; margin: var(--gap) 0; }
+.pl-baustein { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.pl-baustein.link { border-left: 4px solid var(--accent); }
+.pl-baustein.zieht, .pl-trenner.zieht { opacity: .7; box-shadow: var(--shadow-lg); }
+.pl-zeile { display: flex; align-items: center; gap: 8px; }
+.pl-griff { font-size: 22px; line-height: 1; padding: 8px 6px; cursor: grab; color: var(--text-muted); touch-action: none; -webkit-user-select: none; user-select: none; }
+.pl-phase { width: 170px; }
+.pl-min { width: 80px; }
+.pl-baustein textarea { width: 100%; min-height: 0; }
+.pl-link { display: flex; gap: 8px; align-items: center; }
+.pl-link input { flex: 1; }
+.pl-trenner { display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-muted); font-weight: 600; font-size: 14px; }
+.pl-trenner.fest { padding-left: 14px; }
+.pl-stundensumme { margin-left: auto; font-weight: 400; }
+.pl-leer { text-align: center; }
+.pl-klassenpunkt { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.pl-lesenliste { display: flex; flex-direction: column; gap: 10px; }
+.pl-lesen { border-left: 3px solid var(--accent); padding-left: 10px; }
+.pl-text { white-space: pre-wrap; }
 /* Farbwahl im Klassen-Dialog */
 .farbwahl { display: flex; flex-wrap: wrap; gap: 8px; }
 .farbwahl .farbe { width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(0, 0, 0, .1); cursor: pointer; }

@@ -60,6 +60,7 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/calc.tracker.js` | `Calc` | Heatmap-Verfall/-Farbe, Stundenzeiten (`trackerSession`), vergessene Stunden (`stundeVergessen`, `erfassungsZeit`) |
 | `js/calc.sitzplan.js` | `Calc` | Sitzplan: Gang-Vorlagen, Lage der Plätze, Sitzregeln prüfen, `sitzplanVerteilen` |
 | `js/calc.stundenplan.js` | `Calc` | Stundenplan: Montag/KW, A/B-Wochen (`abWoche`), gültige Version (`versionFuer`), Archiv, tatsächlicher Tag (`tagesPlan`), Monat, `eintragJetzt`, Klassenfarben |
+| `js/calc.planung.js` | `Calc` | Stundenplanung: `einheitBestimmen`, `fahrplanAusPlanungen`/`fahrplanAufteilen`, `minutenSumme`, `vorherigeStunde`, `planungenUmziehen` |
 | `js/csv.js` | `CSV` | CSV-Export/Import (UTF-8 mit BOM) |
 | `js/ui.js` | `UI` | UI-Bausteine: Modal, Toast, Formfelder, `esc`, `$`/`$all` |
 | `js/views.core.js` | `Views` | Views-Kern: State, Navigation (`go`), Render-Schleife (`render`), Zeitraum-Reiter |
@@ -73,6 +74,7 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/views.tracker.js` | `Views` | Mitarbeits-Tracker (Stunden, Kacheln, Modi, Heatmap, Restzeit, Tippen, Rückgängig) |
 | `js/views.stundenplan.js` | `Views` | Stundenplan auf der Startseite (Wochenraster, Bearbeiten, Pläne/Archiv, Wochennotiz, nächste Termine) |
 | `js/views.kalender.js` | `Views` | Kalender: Monatsansicht, Termin-Dialog, Zellen-Menü (Ausfall, Verschieben mit Tausch, Hinweis) |
+| `js/views.planung.js` | `Views` | Stundenplanung: Fahrplan-Ansicht (Bausteine, Ziehen, Übernehmen, HA), `fahrplanDialog` im Tracker |
 | `js/views.dialoge.js` | `Views` | Allgemeine Dialoge (Klasse, Anteile, Schüler, Kategorie, Importe, Umzug-Empfang von der alten Adresse) |
 | `js/views.js` | `Views` | Aktions-Dispatcher: Action-Map + zentrale Delegation |
 | `js/app.js` | – | Bootstrap (DB öffnen, Demo-Daten, erster Render, SW-Registrierung) |
@@ -381,6 +383,21 @@ beim allerersten Start erscheint er bewusst nicht.
   `Calc.freieKlassenFarbe`), ohne Wert berechnet `Calc.klassenFarbe` eine feste Farbe aus
   der ID – keine Migration. Gilt im Stundenplan, bei Terminen der Klasse und als Streifen
   auf der Klassenkarte.
+- **Stundenplanung:** Store `planungen` (seit `DB_VERSION` 7, dort auch schon `dateien`):
+  **je Stunde ein Datensatz** `{ klasseId, datum, blockId, thema, bausteine }`, Schlüssel ist
+  der tatsächliche Platz der Stunde. Eine Einheit (Doppelstunde) bestimmt
+  `Calc.einheitBestimmen`; das Fenster (`state.view = "planung"`, `state.planungSlot`) zeigt
+  sie als eine Liste mit Trennern, `Calc.fahrplanAufteilen` verteilt beim Speichern auf die
+  Stunden (`Store.Planungen.einheitSpeichern`, räumt doppelte Datensätze auf). Speichern
+  läuft in `views.planung.js` über eine **Kette** (nacheinander) – parallele Aufrufe legten
+  sonst je einen neuen Datensatz an. Beim Verschieben/Tauschen/Zurückholen einer Stunde
+  ziehen ihre Planungen in **derselben Transaktion** mit (`planungsUmzug` →
+  `Calc.planungenUmziehen`, gleichzeitige Züge, Kollision = zusammenlegen). Tipp auf eine
+  Klassenstunde → Planung, langes Drücken/Rechtsklick → Zellen-Menü (`UI.langDruck`
+  verschluckt danach den Klick bis zum Loslassen, sonst löst iOS zusätzlich den Tipp aus).
+  Sortieren per Pointer-Events am Griff (`touch-action: none`), wie `spaltenZiehen`.
+  Kaskade: `Klassen.remove` löscht die Planungen (Index `klasseId`), nicht über
+  `klassenAbhaengige`. Im Backup, nicht im Klassen-Export.
 - **Heatmap-Zeit:** Der Verfall läuft **nur innerhalb einer laufenden Stunde**
   (Bezugszeit `min(jetzt, stunde.endeTs)`). Beim Öffnen/Fortsetzen wird
   `heatLastDecayAt` auf jetzt gesetzt (kein Nachhol-Verfall aus der Pause), beim

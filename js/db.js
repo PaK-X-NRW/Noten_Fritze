@@ -14,7 +14,8 @@
   // v5: neue Stores "stundenplaene" (Versionen des Wochen-Stundenplans) und
   //     "wochennotizen" (Notiz je Woche, Schlüssel = Montag)
   // v6: neuer Store "termine" (Kalender: Termine, Ferien, Änderungen einzelner Stunden)
-  const DB_VERSION = 6;
+  // v7: neue Stores "planungen" (Fahrplan je Stunde) und "dateien" (Anhänge)
+  const DB_VERSION = 7;
 
   // Definition der Object-Stores + Indizes. Zentral, damit Migrationen
   // (spätere DB_VERSION-Erhöhungen) übersichtlich bleiben.
@@ -59,6 +60,10 @@
     wochennotizen:{ keyPath: "montag", indexes: [] },
     // Kalender: Termine, Ferien und Änderungen einzelner Stunden
     termine:      { keyPath: "id", indexes: [{ name: "klasseId", keyPath: "klasseId" }] },
+    // Stundenplanung: je Stunde ein Fahrplan { klasseId, datum, blockId, thema, bausteine }
+    planungen:    { keyPath: "id", indexes: [{ name: "klasseId", keyPath: "klasseId" }] },
+    // Anhänge der Planung (Kopie der Datei; Inhalt wird nach einer Frist entfernt)
+    dateien:      { keyPath: "id", indexes: [] },
     einstellungen:{ keyPath: "key", indexes: [] }
   };
 

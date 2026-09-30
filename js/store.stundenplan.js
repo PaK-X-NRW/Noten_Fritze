@@ -8,6 +8,8 @@
    - Store.Wochennotizen: freie Notiz je Woche (Schlüssel = Montag)
    - Store.Termine: Kalender (Termine, Ferien, Änderungen einzelner Stunden:
      Ausfall, Verschieben mit Platztausch, Hinweis) und TERMIN_ARTEN
+   - Store.Planungen: Fahrplan je Stunde (Store „planungen“); beim Verschieben
+     einer Stunde ziehen ihre Planungen in derselben Transaktion mit um
    Die Einträge verweisen auf die Stundenzeiten (blockId: "std-3" bzw. die
    ID einer Pause) und auf eine Klasse – oder tragen einen freien Titel.
    ========================================================================= */
@@ -113,6 +115,29 @@
     return { put: v };
   }
 
+  // Planungen, die beim Verschieben mit umziehen (Calc.planungenUmziehen).
+  //   zuege: [{ klasseId, von: {datum, blockId}, nach: {datum, blockId} }]
+  // Liest vorher (DB.atomar darf kein await enthalten). Rückgabe: { put, del }
+  async function planungsUmzug(zuege) {
+    zuege = (zuege || []).filter((z) => z.klasseId);
+    if (!zuege.length) return { put: [], del: [] };
+    const klassen = zuege.map((z) => z.klasseId).filter((k, i, a) => a.indexOf(k) === i);
+    const listen = await Promise.all(klassen.map((k) => DB.getAllByIndex("planungen", "klasseId", k)));
+    return Calc.planungenUmziehen([].concat.apply([], listen), zuege);
+  }
+  // Schreibt Termin-Schritte ({ put } / { del }) und den Planungs-Umzug in
+  // einer Transaktion.
+  async function termineUndPlanungen(schritte, umzug) {
+    await DB.atomar(["termine", "planungen"], (os) => {
+      schritte.forEach((x) => {
+        if (x.del) os("termine").delete(x.del);
+        if (x.put) os("termine").put(x.put);
+      });
+      umzug.del.forEach((id) => os("planungen").delete(id));
+      umzug.put.forEach((pl) => { pl.updatedAt = now(); os("planungen").put(pl); });
+    });
+  }
+
   const Termine = {
     alle: () => DB.getAll("termine"),
     get: (id) => DB.get("termine", id),
@@ -121,11 +146,15 @@
     // Ausfall oder Hinweis an einer Stunde (item aus Calc.tagesPlan) setzen.
     //   was: "ausfall" | "hinweis"; notiz: Grund bzw. Hinweistext
     async aenderungSetzen(item, datum, blockId, was, notiz) {
-      let v;
+      let v, zuege = [];
       if (item.verschobenVon) {
-        // Eine hierher verschobene Stunde: Ausfall gilt für sie selbst
+        // Eine hierher verschobene Stunde: Ausfall gilt für sie selbst – sie
+        // steht dann wieder an ihrem alten Platz (mit ihrer Planung)
         v = Object.assign({}, item.verschobenVon);
-        if (was === "ausfall") { v.aenderung = "ausfall"; v.nachDatum = null; v.nachBlockId = null; }
+        if (was === "ausfall") {
+          zuege.push({ klasseId: v.klasseId, von: { datum: v.nachDatum, blockId: v.nachBlockId }, nach: { datum: v.datum, blockId: v.blockId } });
+          v.aenderung = "ausfall"; v.nachDatum = null; v.nachBlockId = null;
+        }
       } else {
         v = item.aenderung ? Object.assign({}, item.aenderung)
           : neuerTermin({ art: "aenderung", datum, blockId, klasseId: item.klasseId || null, titel: item.titel || "" });
@@ -135,17 +164,57 @@
         }
       }
       v.notiz = notiz || "";
-      return Termine.save(v);
+      v.updatedAt = now();
+      return termineUndPlanungen([{ put: v }], await planungsUmzug(zuege));
+    },
+    // Verschiebung aufheben: Änderung löschen, die Planung kehrt an den alten Platz zurück.
+    async verschiebungAufheben(v) {
+      const zuege = v.aenderung === "verschoben"
+        ? [{ klasseId: v.klasseId, von: { datum: v.nachDatum, blockId: v.nachBlockId }, nach: { datum: v.datum, blockId: v.blockId } }]
+        : [];
+      return termineUndPlanungen([{ del: v.id }], await planungsUmzug(zuege));
     },
     // Stunde verschieben; liegt am Ziel schon Unterricht (zielItems), tauschen
     // die Stunden die Plätze. Alles in einer Transaktion.
     async verschieben(item, vonDatum, vonBlockId, nachDatum, nachBlockId, zielItems) {
       const schritte = [verschiebung(item, vonDatum, vonBlockId, nachDatum, nachBlockId)];
-      (zielItems || []).forEach((z) => schritte.push(verschiebung(z, nachDatum, nachBlockId, vonDatum, vonBlockId)));
-      await DB.atomar(["termine"], (os) => {
-        schritte.forEach((x) => {
-          if (x.del) os("termine").delete(x.del);
-          if (x.put) os("termine").put(x.put);
+      const von = { datum: vonDatum, blockId: vonBlockId }, nach = { datum: nachDatum, blockId: nachBlockId };
+      const zuege = [{ klasseId: item.klasseId, von, nach }];
+      (zielItems || []).forEach((z) => {
+        schritte.push(verschiebung(z, nachDatum, nachBlockId, vonDatum, vonBlockId));
+        zuege.push({ klasseId: z.klasseId, von: nach, nach: von });
+      });
+      await termineUndPlanungen(schritte, await planungsUmzug(zuege));
+    }
+  };
+
+  // ---- Planungen (Fahrplan je Stunde) -------------------------------------------
+  // Datensatz: { id, klasseId, datum, blockId, thema, bausteine: [
+  //   { id, typ: "text" | "link" | "datei", phase, minuten, text, url, dateiId } ] }
+  // Eine Doppelstunde hat je Stunde einen Datensatz; das Planungsfenster zeigt
+  // sie als einen Fahrplan (Calc.fahrplanAusPlanungen / fahrplanAufteilen).
+  const Planungen = {
+    alle: () => DB.getAll("planungen"),
+    byKlasse: (klasseId) => DB.getAllByIndex("planungen", "klasseId", klasseId),
+    async derStunden(klasseId, datum, blockIds) {
+      return (await Planungen.byKlasse(klasseId)).filter((p) => p.datum === datum && blockIds.indexOf(p.blockId) !== -1);
+    },
+    // Speichert den Fahrplan einer Einheit: je Stunde die Bausteine, das Thema
+    // für alle Stunden. Stunden ohne Bausteine und ohne Thema werden gelöscht.
+    //   teile: { blockId: [bausteine] }
+    async einheitSpeichern(klasseId, datum, blockIds, teile, thema) {
+      const vorhanden = await Planungen.derStunden(klasseId, datum, blockIds);
+      const t = now();
+      await DB.atomar(["planungen"], (os) => {
+        blockIds.forEach((blockId) => {
+          // Je Stunde genau ein Datensatz; überzählige (Altlast) entfernen
+          const alle = vorhanden.filter((p) => p.blockId === blockId);
+          const alt = alle[0];
+          alle.slice(1).forEach((p) => os("planungen").delete(p.id));
+          const bausteine = teile[blockId] || [];
+          if (!bausteine.length && !thema) { if (alt) os("planungen").delete(alt.id); return; }
+          os("planungen").put(Object.assign(alt || { id: uid(), klasseId, datum, blockId, createdAt: t },
+            { thema: thema || "", bausteine, updatedAt: t }));
         });
       });
     }
@@ -163,6 +232,6 @@
 
   Object.assign(global.Store, {
     Stundenplan, Wochennotizen, neuerPlanEintrag,
-    Termine, neuerTermin, TERMIN_ARTEN, TERMIN_ART_MAP
+    Termine, neuerTermin, TERMIN_ARTEN, TERMIN_ART_MAP, Planungen
   });
 })(window);

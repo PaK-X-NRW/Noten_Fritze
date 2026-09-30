@@ -185,13 +185,13 @@
       if (k) aktionen.push({ gruppe, label: "Klasse öffnen", klasse: "primary", fn: () => go("klasse", { klasseId: k.id, tab: "schueler" }) });
       if (a && (a.aenderung === "ausfall" || a.aenderung === "verschoben")) {
         aktionen.push({ gruppe, label: a.aenderung === "ausfall" ? "Ausfall aufheben" : "Verschiebung aufheben",
-          fn: async () => { await Store.Termine.remove(a.id); render(); } });
+          fn: async () => { await Store.Termine.verschiebungAufheben(a); render(); } });
       } else {
         aktionen.push({ gruppe, label: "Fällt aus …", fn: () => textDialog("Stunde fällt aus", name + " · " + tagKurz(datum) + " " + blockName(blockId, true),
           "Grund (optional)", "", async (text) => { await Store.Termine.aenderungSetzen(item, datum, blockId, "ausfall", text); render(); }) });
         aktionen.push({ gruppe, label: "Verschieben …", fn: () => verschiebenDialog(item, datum, blockId, name) });
         if (item.verschobenVon) aktionen.push({ gruppe, label: "Zurück an den alten Platz",
-          fn: async () => { await Store.Termine.remove(item.verschobenVon.id); render(); } });
+          fn: async () => { await Store.Termine.verschiebungAufheben(item.verschobenVon); render(); } });
       }
       const rec = item.verschobenVon || a;
       aktionen.push({ gruppe, label: rec && rec.notiz ? "Hinweis ändern …" : "Hinweis …", fn: () => textDialog("Hinweis zur Stunde",

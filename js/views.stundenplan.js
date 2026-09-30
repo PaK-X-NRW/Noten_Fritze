@@ -8,13 +8,15 @@
    - Bearbeiten: Zelle antippen -> Klasse oder Freitext, jede Woche oder A/B
    - Versionen: „Neuer Stundenplan ab …“, ältere Pläne im Archiv (nur lesbar)
    - Notiz je Woche (Wochenende / ToDos), darunter die nächsten Termine
+   - Tipp auf eine Klassenstunde öffnet die Stundenplanung (views.planung.js),
+     langes Drücken / Rechtsklick das Menü (Ausfall, Verschieben, Hinweis, Termin)
    Monat, Termin- und Änderungs-Dialoge liegen in views.kalender.js, die
    Rechnungen (Wochen, A/B, Versionen, Tagesplan) in calc.stundenplan.js.
    ========================================================================= */
 (function (global) {
   "use strict";
 
-  const { state, render, homeUmschalterHTML } = global.Views;
+  const { state, go, render, homeUmschalterHTML } = global.Views;
   const api = global.Views;   // views.kalender.js lädt später
   const TAGE = ["Mo", "Di", "Mi", "Do", "Fr"];
 
@@ -69,9 +71,12 @@
   // =========================================================================
   async function ViewStundenplan() {
     const s = state.settings;
-    const [versionen, klassenListe, termine] = await Promise.all([
-      Store.Stundenplan.alle(), Store.Klassen.all(), Store.Termine.alle()
+    const [versionen, klassenListe, termine, planungenListe] = await Promise.all([
+      Store.Stundenplan.alle(), Store.Klassen.all(), Store.Termine.alle(), Store.Planungen.alle()
     ]);
+    // Planungen der Stunden: Thema und Anhänge im Raster
+    const planungen = {};
+    planungenListe.forEach((p) => { planungen[p.klasseId + "|" + p.datum + "|" + p.blockId] = p; });
     const klassen = {};
     klassenListe.forEach((k) => { klassen[k.id] = k; });
     const heute = Store.datumLokal();
@@ -143,7 +148,8 @@
           return '<td class="' + klasse + ' bearbeiten" data-action="sp-zelle" data-tag="' + tag + '" data-block="' + UI.esc(b.id) + '">' + inhalt + "</td>";
         }
         const p = tage[i];
-        const inhalt = (p.zellen[b.id] || []).map((item) => itemHTML(item, klassen)).join("");
+        const inhalt = (p.zellen[b.id] || []).map((item) => itemHTML(item, klassen,
+          item.klasseId ? planungen[item.klasseId + "|" + daten[i] + "|" + b.id] : null)).join("");
         return '<td class="' + klasse + (p.frei ? " frei" : "") + '" data-action="sp-zelle" data-datum="' + daten[i] +
           '" data-block="' + UI.esc(b.id) + '">' + inhalt + "</td>";
       }).join("");
@@ -194,6 +200,9 @@
       '<p class="home-info"><a href="info.html">Was ist Noten-Fritze? · Anleitung · Datenschutz</a></p>';
 
     return { topbar, body, mount: () => {
+      // Langes Drücken / Rechtsklick: Menü der Zelle (Ausfall, Verschieben, …)
+      if (!bearbeiten) UI.langDruck(UI.$(".sp-tabelle"), ".sp-zelle[data-datum]", (el) =>
+        api.zellenMenue(el.getAttribute("data-datum"), el.getAttribute("data-block")));
       const feld = UI.$("#sp-notiz");
       if (feld) feld.addEventListener("change", async () => {
         await Store.Wochennotizen.save(montag, feld.value);
@@ -230,8 +239,9 @@
     return '<div class="sp-eintrag frei">' + ab + '<span class="nm">' + UI.esc(e.titel || "") + "</span></div>";
   }
 
-  // Eintrag des tatsächlichen Tages (Ansicht): Stunde mit Änderung oder Termin
-  function itemHTML(item, klassen) {
+  // Eintrag des tatsächlichen Tages (Ansicht): Stunde mit Änderung oder Termin;
+  // planung: Fahrplan dieser Stunde (Thema, 📎 bei Links/Dateien) oder null
+  function itemHTML(item, klassen, planung) {
     if (item.typ === "termin") return terminChipHTML(item.termin, klassen);
     const k = item.klasseId ? klassen[item.klasseId] : null;
     if (item.klasseId && !k) return "";
@@ -247,9 +257,13 @@
         (v.notiz ? '<span class="sp-vermerk">ℹ︎ ' + UI.esc(v.notiz) + "</span>" : "");
     }
     const cls = "sp-eintrag" + (k ? "" : " frei") + (weg ? " weg" : "") + (item.verschobenVon ? " hergeschoben" : "");
+    const anhaenge = planung && !weg ? (planung.bausteine || []).filter((x) => x.typ === "link" || x.typ === "datei").length : 0;
+    const thema = planung && !weg && planung.thema
+      ? '<span class="sp-thema">' + UI.esc(planung.thema) + (anhaenge ? " 📎" : "") + "</span>"
+      : (anhaenge ? '<span class="sp-thema">📎</span>' : "");
     return '<div class="' + cls + '"' + (k ? ' style="background:' + Calc.klassenFarbe(k) + '"' : "") + ">" +
       '<span class="nm">' + UI.esc(k ? (k.name || "(ohne Namen)") : item.titel) + "</span>" +
-      (k && k.fach && !zusatz ? '<span class="fach">' + UI.esc(k.fach) + "</span>" : "") + zusatz + "</div>";
+      (k && k.fach && !zusatz && !thema ? '<span class="fach">' + UI.esc(k.fach) + "</span>" : "") + thema + zusatz + "</div>";
   }
 
   // =========================================================================
@@ -279,10 +293,21 @@
     render();
   }
 
-  // Ansicht: Menü der Zelle (views.kalender.js). Bearbeiten: Zelle belegen.
+  // Ansicht: Tipp auf eine Klassenstunde öffnet die Stundenplanung, sonst das
+  // Menü der Zelle (leere Zelle: neuer Termin). Bearbeiten: Zelle belegen.
   async function stundenplanZelle(el) {
     if (!state.stundenplanBearbeiten) {
-      return api.zellenMenue(el.getAttribute("data-datum"), el.getAttribute("data-block"));
+      const datum = el.getAttribute("data-datum"), blockId = el.getAttribute("data-block");
+      const [versionen, termine] = await Promise.all([Store.Stundenplan.alle(), Store.Termine.alle()]);
+      const plan = Calc.tagesPlan(versionen, state.settings.abWochen, termine, datum);
+      const items = plan.zellen[blockId] || [];
+      const stunde = state.settings.stundenzeiten.some((b) => b.id === blockId && b.art === "stunde");
+      // Eine Stunde, die hier (noch) liegt – auch ausgefallen, nicht weggeschoben
+      const klassenStunde = stunde && items.find((i) => i.typ === "stunde" && i.klasseId &&
+        !(i.aenderung && i.aenderung.aenderung === "verschoben"));
+      if (klassenStunde) return go("planung", { planungSlot: { klasseId: klassenStunde.klasseId, datum, blockId } });
+      if (!items.length) return api.terminDialog(null, { datum, blockId });
+      return api.zellenMenue(datum, blockId);
     }
     const versionen = await Store.Stundenplan.alle();
     const version = Calc.versionFuer(versionen, angezeigterMontag());

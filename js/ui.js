@@ -173,8 +173,49 @@
     return (s.vorname + " " + (s.nachname || "")).trim();
   }
 
+  // Langes Drücken (iPad) bzw. Rechtsklick (PC) auf Elemente unter root, die
+  // zu selector passen: fn(el). Der normale Tipp bleibt unberührt. Nach dem
+  // langen Drücken werden Klicks bis kurz nach dem Loslassen verschluckt –
+  // sonst löst iOS beim Loslassen zusätzlich den normalen Tipp aus.
+  function langDruck(root, selector, fn) {
+    if (!root) return;
+    let timer = null, start = null;
+    const schlucken = (ev) => { ev.preventDefault(); ev.stopPropagation(); };
+    const loslassen = ["pointerup", "touchend", "touchcancel"];
+    const sperren = () => {
+      let ende = null;
+      const frei = () => {
+        loslassen.forEach((n) => document.removeEventListener(n, frei, true));
+        clearTimeout(ende);
+        setTimeout(() => document.removeEventListener("click", schlucken, true), 400);
+      };
+      document.addEventListener("click", schlucken, true);
+      loslassen.forEach((n) => document.addEventListener(n, frei, true));
+      ende = setTimeout(frei, 10000);   // Sicherheitsnetz
+    };
+    const abbrechen = () => { clearTimeout(timer); timer = null; };
+    root.addEventListener("pointerdown", (ev) => {
+      const el = ev.target.closest(selector);
+      if (!el || !root.contains(el) || ev.button !== 0) return;
+      start = { x: ev.clientX, y: ev.clientY };
+      abbrechen();
+      timer = setTimeout(() => { timer = null; sperren(); fn(el); }, 550);
+    });
+    root.addEventListener("pointermove", (ev) => {
+      if (timer && start && (Math.abs(ev.clientX - start.x) > 10 || Math.abs(ev.clientY - start.y) > 10)) abbrechen();
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach((n) => root.addEventListener(n, abbrechen));
+    root.addEventListener("contextmenu", (ev) => {
+      const el = ev.target.closest(selector);
+      if (!el || !root.contains(el)) return;
+      ev.preventDefault();
+      abbrechen();
+      fn(el);
+    });
+  }
+
   global.UI = {
-    esc, fromHTML, $, $all,
+    esc, fromHTML, $, $all, langDruck,
     toast, hideToast, fehlerMelden, modal, confirmDialog,
     field, formValues,
     relZeit, datumKurz, initialen, vollerName

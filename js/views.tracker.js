@@ -62,6 +62,7 @@
         : "") +
       '<div class="modusbar">' + modusBtns + "</div>" +
       (stunde.endeTs && !t.nachtragen ? '<span class="chip accent" id="tracker-restzeit" style="align-self:center">' + restzeitText() + "</span>" : "") +
+      '<button class="btn small" data-action="tracker-fahrplan" title="Fahrplan dieser Stunde (Stundenplanung)">🗺 Fahrplan</button>' +
       '<button class="btn small" data-action="tracker-undo" id="undo-btn" title="Lang drücken bzw. Rechtsklick: alle Einträge dieser Stunde"' + (t.undoStack.length ? "" : " disabled") + ">↶ Rückgängig</button>" +
       '<button class="btn small" data-action="tracker-stunde-beenden">Stunde beenden</button>';
 

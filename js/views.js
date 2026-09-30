@@ -18,7 +18,8 @@
     trackerStundeBeenden, trackerVerlassen, trackerRaumDialog, trackerTap, trackerUndo, trackerHeatPause,
     besprechungStep, stundenzeitenAktion,
     stundenplanEinrichten, ansichtSetzen, wocheBlaettern, stundenplanZelle, abWocheUmstellen, plaeneDialog,
-    monatBlaettern, monatTag, ansichtWechseln, terminBearbeiten, terminNeu
+    monatBlaettern, monatTag, ansichtWechseln, terminBearbeiten, terminNeu,
+    bausteinNeu, planungZurueck, planungKlasse, planungTracker, planungMenue, planungUebernehmen, fahrplanDialog
   } = global.Views;
 
   // =========================================================================
@@ -148,6 +149,14 @@
     "mo-tag": (el) => monatTag(el.getAttribute("data-datum")),
     "termin-neu": () => terminNeu(),
     "termin-bearbeiten": (el) => terminBearbeiten(el.getAttribute("data-id")),
+    // Stundenplanung (views.planung.js)
+    "planung-neu": (el) => bausteinNeu(el.getAttribute("data-typ")),
+    "planung-zurueck": () => planungZurueck(),
+    "planung-klasse": () => planungKlasse(),
+    "planung-tracker": () => planungTracker(),
+    "planung-menue": () => planungMenue(),
+    "planung-uebernehmen": () => planungUebernehmen(),
+    "tracker-fahrplan": () => state.tracker && fahrplanDialog(state.klasseId, state.tracker.stunde),
     // Startseite: vergessene Stunde einer Klasse ansehen (Tracker-Start fragt nach)
     "offene-stunde": async (el) => {
       await go("klasse", { klasseId: el.getAttribute("data-id"), tab: "schueler" });

@@ -12,7 +12,7 @@
   "use strict";
 
   const state = {
-    view: "home",          // home | klasse | tracker | besprechung | einstellungen
+    view: "home",          // home | klasse | tracker | besprechung | einstellungen | planung
     klasseId: null,
     tab: "schueler",       // schueler | noten | kategorien | sitzplan | auswertung
     auswertungRange: "alle",
@@ -37,6 +37,9 @@
     stundenplanBearbeiten: false,
     stundenplanAnsicht: "woche", // "woche" | "monat"
     stundenplanMonat: "",        // angezeigter Monat "YYYY-MM" ("" = Monat der angezeigten Woche)
+    // Stundenplanung: geöffnete Stunde { klasseId, datum, blockId } und flüchtiger Fahrplan
+    planungSlot: null,
+    planung: null,
     settings: null
   };
 
@@ -127,6 +130,7 @@
       case "tracker":      out = await api.ViewTracker(); break;
       case "besprechung":  out = await api.ViewBesprechung(); break;
       case "einstellungen":out = await api.ViewEinstellungen(); break;
+      case "planung":      out = await api.ViewPlanung(); break;
       default:             out = await api.ViewHome();
     }
     document.getElementById("topbar").innerHTML = out.topbar || "";
