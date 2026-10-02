@@ -170,7 +170,7 @@ IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
 ## 5. Service Worker – Cache-Falle
 
 `service-worker.js` cached die App-Shell **cache-first** unter dem Namen
-`noten-fritze-<APP_VERSION>` (z. B. `noten-fritze-1.15.0`). Der Name wird aus
+`noten-fritze-<APP_VERSION>` (z. B. `noten-fritze-1.16.0`). Der Name wird aus
 `js/version.js` gebildet, das der Service Worker per `importScripts` lädt.
 
 ⚠️ **Änderungen an einer gecachten Datei** (`index.html`, `css/`, `js/`,
