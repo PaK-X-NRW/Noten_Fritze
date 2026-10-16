@@ -3,7 +3,7 @@
 **Noten und mündliche Mitarbeit erfassen – direkt im Unterricht, auf dem iPad.**
 Kostenlos, ohne Konto, ohne Cloud: Alle Daten bleiben auf deinem Gerät.
 
-### ▶︎ [App starten](https://noten-fritze.patrick-knapp.de/) · 📖 [Anleitung & Funktionen](https://noten-fritze.patrick-knapp.de/info.html)
+### ▶︎ [App starten](https://noten-fritze.de/) · 📖 [Anleitung & Funktionen](https://noten-fritze.de/info.html)
 
 ![Mitarbeits-Tracker: Schülerkacheln im Sitzplan mit Meldungen und Störungen](img/tracker.jpg)
 
@@ -18,7 +18,7 @@ Kostenlos, ohne Konto, ohne Cloud: Alle Daten bleiben auf deinem Gerät.
 - **Offline nutzbar** als App auf dem Home-Bildschirm, **Backup** als Datei
 
 *Alle Namen in den Bildern sind erfundene Beispieldaten.*
-Fragen, Fehler, Wünsche: [noten-fritze@patrick-knapp.de](mailto:noten-fritze@patrick-knapp.de) oder
+Fragen, Fehler, Wünsche: [webmaster@noten-fritze.de](mailto:webmaster@noten-fritze.de) oder
 [GitHub-Issues](https://github.com/PaK-X-NRW/Noten_Fritze/issues). Lizenz: [MIT](LICENSE).
 
 ---
@@ -31,7 +31,8 @@ Tablet-first, optimiert für das **iPad im Querformat**, offline nutzbar als PWA
 
 ## Verfügbarkeit & Hosting
 
-- **https://noten-fritze.patrick-knapp.de** (eigene Domain, zeigt auf GitHub Pages)
+- **https://noten-fritze.de** (eigene Domain, zeigt auf GitHub Pages). Unter der alten Adresse
+  `noten-fritze.patrick-knapp.de` läuft die Umzugsseite (Repo `Noten_Fritze_Umzug`).
 - Gehostet auf GitHub Pages: https://pak-x-nrw.github.io/Noten_Fritze/
 - **Infoseite für Lehrkräfte** `info.html` (Funktionen, Anleitung, Datenschutzerklärung,
   Kontakt, Lizenz) – verlinkt auf der App-Startseite und unter Einstellungen →
