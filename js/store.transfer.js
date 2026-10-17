@@ -250,5 +250,18 @@
     return klasse;
   }
 
-  Object.assign(global.Store, { exportAll, importAll, exportKlasse, importKlasse });
+  // ---- Umzug-Vermerk -------------------------------------------------------
+  // Wann zuletzt Daten von der alten Adresse übernommen wurden. Eigener
+  // Datensatz einstellungen/key "umzug" (wie "export"), nicht im Settings-
+  // Objekt und nicht im Backup. importAll mit replace leert ihn – deshalb
+  // erst nach dem Import setzen.
+  async function umzugVermerk() {
+    const r = await DB.get("einstellungen", "umzug");
+    return r && r.am ? r.am : null;
+  }
+  function umzugVermerken() {
+    return DB.put("einstellungen", { key: "umzug", am: new Date().toISOString() });
+  }
+
+  Object.assign(global.Store, { exportAll, importAll, exportKlasse, importKlasse, umzugVermerk, umzugVermerken });
 })(window);

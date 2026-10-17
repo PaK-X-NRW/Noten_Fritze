@@ -305,33 +305,69 @@
     }
     const anzahl = (n, eins, mehr) => n + " " + (n === 1 ? eins : mehr);
     const hier = await Store.Klassen.all();
+    const vermerk = await Store.umzugVermerk();
+    // Eigene Daten auf dieser Seite (mehr als die Demo-Klasse, oder schon
+    // einmal übernommen): vor dem Überschreiben automatisch sichern.
+    const eigeneDaten = !!vermerk || hier.length > 1 || (hier.length === 1 && hier[0].name !== "8b (Demo)");
+    const abbrechen = (close) => {
+      close();
+      antworten(false, "Auf noten-fritze.de abgebrochen. Es wurde nichts übertragen.");
+    };
+    const uebernehmen = async (close) => {
+      if (eigeneDaten) {
+        let sicherung;
+        try {
+          sicherung = await CSV.speichern(
+            "noten-fritze-backup-vor-umzug-" + new Date().toISOString().slice(0, 10) + ".json",
+            JSON.stringify(await Store.exportAll({ mitDateien: true }), null, 2), "application/json");
+        } catch (e) { sicherung = "fehler"; }
+        if (sicherung === "abgebrochen" || sicherung === "fehler") {
+          UI.toast("Ohne Sicherung des bisherigen Stands wird nichts überschrieben.");
+          return;
+        }
+      }
+      try {
+        await Store.importAll(backup, { replace: true });
+        await Store.umzugVermerken();
+      } catch (e) {
+        UI.toast("Fehler: " + e.message);
+        antworten(false, "Fehler beim Übernehmen: " + e.message);
+        return;
+      }
+      close();
+      antworten(true);
+      await go("home");
+      UI.toast(eigeneDaten ? "Daten übernommen – der vorherige Stand liegt als Backup-Datei bereit" : "Daten übernommen",
+        { duration: 8000 });
+    };
+
+    // Schon einmal übernommen: erst deutlich warnen
+    if (vermerk) {
+      UI.modal({ title: "Schon einmal übernommen", dismissible: false, bodyHTML:
+        "<p>Am <strong>" + new Date(vermerk).toLocaleDateString("de-DE") + "</strong> hast du bereits Daten " +
+          "von der alten Adresse übernommen. Alles, was du seitdem hier geändert hast, würde überschrieben.</p>" +
+        '<p class="muted">Normalerweise brauchst du das nicht. Wenn doch, wird der jetzige Stand vorher ' +
+          "als Backup-Datei gesichert.</p>",
+        buttons: [
+          { label: "Abbrechen", className: "primary", onClick: abbrechen },
+          { label: "Trotzdem überschreiben", className: "danger", onClick: uebernehmen }
+        ]});
+      return;
+    }
+
     const body =
       "<p>Von der alten Adresse sind angekommen: <strong>" +
         anzahl(d.klassen.length, "Klasse", "Klassen") + " mit " +
         anzahl(d.schueler.length, "Schüler/in", "Schüler/innen") + "</strong>.</p>" +
       (hier.length
         ? '<p class="muted">Die Daten auf dieser Seite (' + anzahl(hier.length, "Klasse", "Klassen") +
-          ", z. B. die Demo-Klasse) werden dabei ersetzt.</p>"
+          (eigeneDaten ? ") werden dabei ersetzt und vorher als Backup-Datei gesichert.</p>"
+            : ", z. B. die Demo-Klasse) werden dabei ersetzt.</p>")
         : "") +
       '<p class="muted">Unter der alten Adresse bleibt alles erhalten.</p>';
     UI.modal({ title: "Daten übernehmen", bodyHTML: body, dismissible: false, buttons: [
-      { label: "Abbrechen", onClick: (close) => {
-        close();
-        antworten(false, "Auf noten-fritze.de abgebrochen. Es wurde nichts übertragen.");
-      }},
-      { label: "Übernehmen", className: "primary", onClick: async (close) => {
-        try {
-          await Store.importAll(backup, { replace: true });
-        } catch (e) {
-          UI.toast("Fehler: " + e.message);
-          antworten(false, "Fehler beim Übernehmen: " + e.message);
-          return;
-        }
-        close();
-        antworten(true);
-        await go("home");
-        UI.toast("Daten übernommen");
-      }}
+      { label: "Abbrechen", onClick: abbrechen },
+      { label: "Übernehmen", className: "primary", onClick: uebernehmen }
     ]});
   }
 

@@ -743,7 +743,12 @@ Die Daten gehören im Browser zur Adresse der App. Beim Wechsel von
 eine Umzugsseite (Repo `Noten_Fritze_Umzug`). Ihr Button „Daten übertragen“ öffnet die
 App unter der neuen Adresse mit `?umzug=1` und schickt das Backup per `postMessage`.
 Die App nimmt es nur vom öffnenden Fenster der alten Adresse an und ersetzt nach
-Rückfrage die Daten (`Views.umzugEmpfangen` in `views.dialoge.js`).
+Rückfrage die Daten (`Views.umzugEmpfangen` in `views.dialoge.js`). Danach merkt sie
+sich die Übernahme (`Store.umzugVermerk`, Datensatz einstellungen/key `"umzug"`, nicht im
+Backup). Eine erneute Übertragung zeigt dann eine Warnung („Schon einmal übernommen“).
+Liegen eigene Daten auf der neuen Seite (mehr als „8b (Demo)“ oder Vermerk vorhanden),
+wird der bisherige Stand vor dem Überschreiben automatisch als Backup gesichert
+(`CSV.speichern`); bricht das Sichern ab, wird nichts überschrieben.
 
 ### Sicherheit
 
