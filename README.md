@@ -20,6 +20,7 @@ Kostenlos, ohne Konto, ohne Cloud: Alle Daten bleiben auf deinem Gerät.
 *Alle Namen in den Bildern sind erfundene Beispieldaten.*
 Fragen, Fehler, Wünsche: [webmaster@noten-fritze.de](mailto:webmaster@noten-fritze.de) oder
 [GitHub-Issues](https://github.com/PaK-X-NRW/Noten_Fritze/issues). Lizenz: [MIT](LICENSE).
+Noten-Fritze bleibt kostenlos. Wer die Weiterentwicklung unterstützen möchte: [☕ paypal.me/notenfritze](https://paypal.me/notenfritze).
 
 ---
 
@@ -34,11 +35,14 @@ Tablet-first, optimiert für das **iPad im Querformat**, offline nutzbar als PWA
 - **https://noten-fritze.de** (eigene Domain, zeigt auf GitHub Pages). Unter der alten Adresse
   `noten-fritze.patrick-knapp.de` läuft die Umzugsseite (Repo `Noten_Fritze_Umzug`).
 - Gehostet auf GitHub Pages: https://pak-x-nrw.github.io/Noten_Fritze/
-- **Infoseite für Lehrkräfte** `info.html` (Funktionen, Anleitung, Datenschutzerklärung,
-  Kontakt, Lizenz) – verlinkt auf der App-Startseite und unter Einstellungen →
+- **Infoseite für Lehrkräfte** `info.html` (Funktionen, Anleitung, Datenschutzerklärung, Unterstützen,
+  Kontakt, Impressum, Lizenz) – verlinkt auf der App-Startseite und unter Einstellungen →
   „Hilfe & Rechtliches“. Für Suchmaschinen: `robots.txt`, `sitemap.xml`,
   Seitenbeschreibung/Vorschau-Tags und strukturierte Daten (JSON-LD) in `info.html`.
 - Lizenz: MIT (siehe `LICENSE`).
+- **Unterstützen:** freiwillige Beiträge über `https://paypal.me/notenfritze` – nur als normaler Link
+  (Infoseite, Abschnitt „Unterstützen“, und Einstellungen → Karte „Über“), kein PayPal-Skript.
+  Anbieter ist ein Kleingewerbe (Kleinunternehmer § 19 UStG); deshalb hat `info.html` ein Impressum.
 
 Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Workflow
 `.github/workflows/pages.yml`, der die Dateien unverändert hochlädt (kein Build, kein Jekyll).
@@ -188,7 +192,7 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
   Sitzplatz-Zuweisung, Einträge im Stundenplan, Termine, Planungen); das Löschen einer Kategorie oder einer Spalte nimmt die
   darin erfassten Noten mit.
 - **App-Version:** `APP_VERSION` in `js/version.js` (Schema `MAJOR.MINOR.PATCH`,
-  aktuell **1.16.0**) ist die sichtbare Programmversion: angezeigt unter
+  aktuell **1.17.0**) ist die sichtbare Programmversion: angezeigt unter
   Einstellungen → Über, Name des Service-Worker-Caches, Feld `appVersion` im
   JSON-Backup. Sie wird von Hand gepflegt und ist unabhängig von den beiden
   internen Zählern unten.

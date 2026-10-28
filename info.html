@@ -64,6 +64,7 @@
     }
     .btn.primary { background: #fff; color: var(--accent-dark); }
     .btn.ghost { color: #fff; border: 2px solid rgba(255,255,255,.6); margin-left: 8px; }
+    .btn.accent { background: var(--accent); color: #fff; }
     .badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; padding: 0; list-style: none; }
     .badges li { background: rgba(255,255,255,.15); border-radius: 999px; padding: 6px 14px; font-size: 15px; }
     nav.toc { background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; }
@@ -121,7 +122,8 @@
       <a href="#start">Erste Schritte</a>
       <a href="#hinweise">Wichtige Hinweise</a>
       <a href="#datenschutz">Datenschutz</a>
-      <a href="#kontakt">Kontakt &amp; Lizenz</a>
+      <a href="#unterstuetzen">Unterstützen</a>
+      <a href="#kontakt">Kontakt &amp; Impressum</a>
     </div>
   </nav>
 
@@ -260,7 +262,7 @@
       <h2>Datenschutzerklärung</h2>
 
       <h3>Verantwortlich</h3>
-      <p>Patrick Knapp (privates, unentgeltliches Projekt)<br />E-Mail: <a href="mailto:webmaster@noten-fritze.de">webmaster@noten-fritze.de</a></p>
+      <p>Patrick Knapp, Kurfürstenstraße 21, 54516 Wittlich<br />E-Mail: <a href="mailto:webmaster@noten-fritze.de">webmaster@noten-fritze.de</a></p>
 
       <h3>Was die App speichert</h3>
       <p>Alles, was du in Noten-Fritze eingibst (Klassen, Namen, Noten, Mitarbeit, Stundenplan, Termine,
@@ -289,25 +291,56 @@
         selbst habe keinen Zugriff auf diese Protokolle. Näheres:
         <a href="https://docs.github.com/de/site-policy/privacy-policies/github-general-privacy-statement" rel="noopener">Datenschutzerklärung von GitHub</a>.</p>
 
+      <h3>Unterstützung über PayPal</h3>
+      <p>Der Knopf <span class="ui">Per PayPal unterstützen</span> auf dieser Seite und in den Einstellungen der App
+        ist ein gewöhnlicher Link. Erst wenn du ihn antippst, öffnet sich die Seite von PayPal (Europe) S.à r.l.
+        et Cie, S.C.A., 22–24 Boulevard Royal, L-2449 Luxemburg. Dafür gilt die
+        <a href="https://www.paypal.com/de/legalhub/privacy-full" rel="noopener">Datenschutzerklärung von PayPal</a>;
+        PayPal ist für die Zahlungsabwicklung selbst verantwortlich. Die App überträgt dabei keine Daten.</p>
+      <p>Wenn du mir einen Beitrag schickst, erhalte ich von PayPal deinen Namen, deine E-Mail-Adresse, den
+        Betrag, das Datum und eine eventuelle Nachricht. Ich nutze diese Angaben nur, um die Zahlung zu verbuchen
+        und gegebenenfalls zu antworten. Rechtsgrundlage ist Art. 6 Abs. 1 lit. c DSGVO, denn als
+        Gewerbetreibender muss ich Zahlungsbelege nach § 147 Abgabenordnung zehn Jahre aufbewahren. Danach werden
+        sie gelöscht. Ich gebe sie nicht weiter, außer an das Finanzamt, wenn es dies verlangt.</p>
+
       <h3>Deine Rechte</h3>
       <p>Du hast das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Widerspruch
         und Datenübertragbarkeit sowie das Recht auf Beschwerde bei einer Datenschutz-Aufsichtsbehörde –
         etwa an deinem Wohnort. Zuständig für mich ist der Landesbeauftragte für den Datenschutz und die
         Informationsfreiheit Rheinland-Pfalz.</p>
-      <p class="muted">Stand: September 2026</p>
+      <p class="muted">Stand: Oktober 2026</p>
     </section>
 
-    <!-- ================= Kontakt & Lizenz ================= -->
+    <!-- ================= Unterstützen ================= -->
+    <section id="unterstuetzen">
+      <h2>Unterstützen</h2>
+      <p>Noten-Fritze ist kostenlos und bleibt es. Wenn dir die App die Arbeit erleichtert, kannst du die
+        Weiterentwicklung mit einem freiwilligen Beitrag unterstützen. Du erhältst dafür keine Gegenleistung,
+        und alle Funktionen bleiben für alle frei.</p>
+      <p><a class="btn accent" href="https://paypal.me/notenfritze" rel="noopener">☕ Per PayPal unterstützen</a></p>
+      <p class="muted">Der Link führt zu PayPal. Was dabei mit deinen Daten passiert, steht unter
+        <a href="#datenschutz">Datenschutz</a>. Eine Spendenquittung kann ich nicht ausstellen, da Noten-Fritze
+        nicht gemeinnützig ist.</p>
+    </section>
+
+    <!-- ================= Kontakt & Impressum ================= -->
     <section id="kontakt">
-      <h2>Kontakt &amp; Lizenz</h2>
-      <p>Noten-Fritze ist ein privates Hobbyprojekt von Patrick Knapp – ohne Werbung, ohne Einnahmen,
-        ohne Datenerhebung.</p>
+      <h2>Kontakt &amp; Impressum</h2>
+      <p>Noten-Fritze ist ein Projekt von Patrick Knapp – kostenlos, ohne Werbung, ohne Datenerhebung.
+        Die Weiterentwicklung wird durch freiwillige Beiträge unterstützt.</p>
       <p><strong>E-Mail:</strong> <a href="mailto:webmaster@noten-fritze.de">webmaster@noten-fritze.de</a></p>
       <p><strong>Fehler melden, Wünsche äußern:</strong> gern per E-Mail oder
         <a href="https://github.com/PaK-X-NRW/Noten_Fritze/issues" rel="noopener">über GitHub</a>
         (kostenloses GitHub-Konto nötig; die Einträge dort sind öffentlich).
         Bitte in keinem Fall echte Schülerdaten mitschicken – Beispielklassen reichen zum Zeigen.</p>
-      <!-- Platz für ein Impressum, falls später nötig. -->
+      <h3 id="impressum">Impressum</h3>
+      <p>Angaben gemäß § 5 Digitale-Dienste-Gesetz (DDG):</p>
+      <p>Patrick Knapp<br />Noten-Fritze<br />Kurfürstenstraße 21<br />54516 Wittlich</p>
+      <p>E-Mail: <a href="mailto:webmaster@noten-fritze.de">webmaster@noten-fritze.de</a><br />
+        Anfragen per E-Mail beantworte ich in der Regel innerhalb von zwei Werktagen.</p>
+      <p>Gemäß § 19 Umsatzsteuergesetz (Kleinunternehmerregelung) wird keine Umsatzsteuer berechnet.</p>
+
+      <h3>Quellcode &amp; Lizenz</h3>
       <p><strong>Quellcode:</strong> <a href="https://github.com/PaK-X-NRW/Noten_Fritze" rel="noopener">github.com/PaK-X-NRW/Noten_Fritze</a></p>
       <p><strong>Lizenz:</strong> Noten-Fritze steht unter der <a href="https://github.com/PaK-X-NRW/Noten_Fritze/blob/main/LICENSE" rel="noopener">MIT-Lizenz</a>.
         Du darfst die Software frei nutzen, verändern und weitergeben. Sie wird ohne jede Gewähr bereitgestellt.</p>
@@ -316,7 +349,7 @@
 
   <footer>
     <div class="wrap">
-      <a href="./">▶︎ App starten</a> · <a href="#datenschutz">Datenschutz</a> · <a href="#kontakt">Kontakt</a>
+      <a href="./">▶︎ App starten</a> · <a href="#datenschutz">Datenschutz</a> · <a href="#impressum">Impressum</a> · <a href="#unterstuetzen">Unterstützen</a>
       <span class="muted"> · © 2026 Patrick Knapp · MIT-Lizenz</span>
     </div>
   </footer>
