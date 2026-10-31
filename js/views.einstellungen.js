@@ -146,6 +146,50 @@
     return Store.schwellenNormalisieren(liste);
   }
 
+  // ---- Notenschlüssel für Rohpunkte (Einstellungen und Spalten-Dialog) ------
+  // Eine Zeile je Stufe, beste zuerst: Note bzw. MSS-Punkte, „ab … %“ und – im
+  // Spalten-Dialog – die daraus gerundete Punktgrenze (schluesselPunkteZeigen).
+  //   mss: true / false zeigt nur die Stufen dieser Skala, null (Einstellungen) beide
+  const SCHLUESSEL_NOTEN = ["6", "5-", "5", "5+", "4-", "4", "4+", "3-", "3", "3+", "2-", "2", "2+", "1-", "1", "1+"];
+  function schluesselStufe(p, mss) {
+    if (mss === true) return p + " P.";
+    if (mss === false) return SCHLUESSEL_NOTEN[p];
+    return SCHLUESSEL_NOTEN[p] + " · " + p + " P." + (p === 15 ? " (nur MSS)" : "");
+  }
+  function schluesselFelderHTML(schluessel, mss) {
+    let zeilen = "";
+    for (let p = 15; p >= 1; p--) {
+      if (p === 15 && mss === false) continue;
+      zeilen += '<div class="ns-zeile"><span class="ns-name">' + schluesselStufe(p, mss) + '</span><span class="muted">ab</span>' +
+        '<input type="number" step="0.5" min="0" max="100" inputmode="decimal" data-schluessel="' + p + '" value="' +
+          UI.esc(schluessel[p]) + '"><span class="muted">%</span><span class="ns-punkte" data-ns-punkte="' + p + '"></span></div>';
+    }
+    return '<div class="ns-liste">' + zeilen +
+      '<div class="ns-zeile"><span class="ns-name">' + schluesselStufe(0, mss) + '</span><span class="muted">darunter</span></div></div>';
+  }
+  // Liest den Schlüssel aus; nicht gezeigte Stufen (die 15 in der Sek I) kommen
+  // aus alt. Rückgabe: Liste oder null (Prozente steigen nicht streng / ungültig)
+  function schluesselAusFormular(root, alt) {
+    const liste = alt.slice();
+    const gezeigt = {};
+    UI.$all("[data-schluessel]", root).forEach((inp) => {
+      const p = parseInt(inp.getAttribute("data-schluessel"), 10);
+      liste[p] = String(inp.value).trim() === "" ? NaN : inp.value;
+      gezeigt[p] = true;
+    });
+    // Sek I: Die (unsichtbare) 15 bleibt immer über der 1
+    if (!gezeigt[15] && !(Number(liste[15]) > Number(liste[14]))) liste[15] = Math.min(100, Number(liste[14]) + 1);
+    return Calc.schluesselNormalisieren(liste);
+  }
+  // Punktgrenzen neben den Prozenten (Spalten-Dialog, Höchstpunktzahl bekannt)
+  function schluesselPunkteZeigen(root, schluessel, maxPunkte, mss) {
+    const tabelle = schluessel && maxPunkte > 0 ? Calc.punkteTabelle(maxPunkte, schluessel, mss) : [];
+    UI.$all("[data-ns-punkte]", root).forEach((el) => {
+      const z = tabelle.find((t) => t.punkte === parseInt(el.getAttribute("data-ns-punkte"), 10));
+      el.textContent = z ? "= ab " + Calc.formatRohpunkte(z.ab) + " P." : "";
+    });
+  }
+
   // ---- Bauplan der einfachen Einstellungen ----------------------------------
   // Schlüssel = Pfad im Einstellungs-Objekt ("heatStartWert",
   // "mitarbeitPunkte.gut"). Ein Eingabefeld mit data-einstellung="<Schlüssel>"
@@ -238,6 +282,7 @@
     // keine Berechtigungsabfrage beim Anzeigen.
     const ordnerApi = !!window.showDirectoryPicker;
     const ordnerHandle = ordnerApi ? await CSV.exportOrdner() : null;
+    const papierkorb = await Store.Papierkorb.alle();
     const punkte = Store.EVENT_TYPES.map((t) => zahlZeile(t.label, "mitarbeitPunkte." + t.id, s)).join("");
     const dateien = await Store.Dateien.alle();
     const mitInhalt = dateien.filter((d) => d.daten);
@@ -275,6 +320,14 @@
       '<div class="card"><h2>Mitarbeit – Notenschwellen</h2>' +
         '<p class="muted">Übersetzt die Punkte einer einzelnen Stunde in eine Stundennote; der Vorschlag für die Mitarbeitsnote ist der Ø aller Stundennoten. Einzelne Klassen können eigene Schwellen bekommen (Klasse → Auswertung → Schwellen), z. B. weil eine Biologiestunde andere Mitarbeit ermöglicht als eine Deutschstunde.</p>' +
         '<div id="schwellen-global">' + schwellenFelderHTML(s.mitarbeitSchwellen) + "</div>" +
+      "</div>" +
+      '<div class="card"><h2>Notenschlüssel für Rohpunkte</h2>' +
+        '<p class="muted">Vorschlag für Spalten mit der Bewertung „Rohpunkte“ (z. B. Klassen- und Kursarbeiten): ab wie viel Prozent ' +
+        "der Höchstpunktzahl es welche Note bzw. wie viele MSS-Punkte gibt. Die Punktgrenzen werden kaufmännisch auf halbe Punkte " +
+        "gerundet. Jede neue Spalte bekommt eine Kopie, die du dort anpassen kannst – eine Änderung hier verändert keine " +
+        "schon vergebenen Noten.</p>" +
+        '<div id="ns-global">' + schluesselFelderHTML(s.notenschluessel, null) + "</div>" +
+        '<div class="btn-row" style="margin-top:10px"><button class="btn small" data-action="notenschluessel-standard">Vorschlag wiederherstellen</button></div>' +
       "</div>" +
       '<div class="card"><h2>Heatmap</h2>' + heatpunkte +
         '<div class="field" style="margin-top:14px">' + einstellungFeld("Default-Wert für neue / zurückgesetzte Heatmap", "heatStartWert", s, { type: "number", inputmode: "numeric", hint: "Wertebereich: 0 bis 100" }) + "</div>" +
@@ -320,14 +373,27 @@
           '<button class="btn" data-action="backup-export">Backup exportieren (JSON)</button>' +
           '<button class="btn" data-action="backup-import">Backup importieren</button>' +
           '<button class="btn" data-action="reset-demo">Demo-Daten neu laden</button>' +
-          '<button class="btn danger" data-action="delete-all">Alle Daten löschen</button>' +
         "</div>" +
+      "</div>" +
+      '<div class="card"><h2>Papierkorb</h2>' +
+        '<p class="muted">Gelöschte Klassen bleiben hier ' + Store.Papierkorb.TAGE + " Tage und lassen sich vollständig " +
+        "wiederherstellen – mit Noten, Mitarbeit, Stundenplan-Einträgen, Terminen und Planungen. Danach werden sie " +
+        "beim Start der App endgültig entfernt. Der Papierkorb ist nicht Teil des Backups.</p>" +
+        (papierkorb.length
+          ? papierkorb.map((e) => '<div class="pk-zeile"><div class="grow"><strong>' + UI.esc(e.name || "(ohne Namen)") + "</strong>" +
+              '<div class="hint">gelöscht am ' + UI.esc(e.geloeschtAm.split("-").reverse().join(".")) + " · noch " +
+              Store.Papierkorb.restTage(e) + " Tage</div></div>" +
+              '<button class="btn small primary" data-action="papierkorb-zurueck" data-id="' + UI.esc(e.id) + '">Wiederherstellen</button>' +
+              '<button class="btn small danger" data-action="papierkorb-weg" data-id="' + UI.esc(e.id) + '">Endgültig löschen</button></div>').join("")
+          : '<p class="hint">Der Papierkorb ist leer.</p>') +
       "</div>" +
       '<div class="card"><h2>Beispielklassen</h2>' +
         '<p class="muted">Zwei Klassen mit einem komplett durchgespielten Schuljahr zum Ausprobieren: ' +
         '„9a (Beispiel)“ mit Schulnoten und „Mathematik LK 12 (Beispiel)“ mit MSS-Punkten. ' +
         "In beiden sind das 1.–3. Quartal abgeschlossen, das 4. Quartal läuft noch. " +
-        "Deine eigenen Klassen bleiben unverändert; löschen kannst du die Beispiele jederzeit auf der Startseite.</p>" +
+        "Gibt es noch keinen Stundenplan, entsteht ein Beispiel-Stundenplan mit Planungen für die nächsten vier Wochen " +
+        "(zum Ausprobieren von Rücken und ⇥). " +
+        "Deine eigenen Klassen bleiben unverändert; löschen kannst du die Beispiele jederzeit über die Klasse → Bearbeiten.</p>" +
         '<div class="btn-row">' +
           '<button class="btn" data-action="seed-beispielklassen">Beispielklassen anlegen</button>' +
         "</div>" +
@@ -345,7 +411,13 @@
         // Normaler Link, öffnet PayPal erst beim Antippen; die App selbst lädt nichts von dort.
         '<p class="muted">Noten-Fritze ist kostenlos und bleibt es. Wenn du die Weiterentwicklung unterstützen möchtest, ' +
           "freue ich mich über einen freiwilligen Beitrag.</p>" +
-        '<div class="btn-row"><a class="btn" href="https://paypal.me/notenfritze" target="_blank" rel="noopener">☕ Per PayPal unterstützen</a></div></div>';
+        '<div class="btn-row"><a class="btn" href="https://paypal.me/notenfritze" target="_blank" rel="noopener">☕ Per PayPal unterstützen</a></div></div>' +
+      // Bewusst ganz unten und getrennt von „Backup exportieren“ (Action „delete-all“)
+      '<div class="card gefahrzone"><h3>Alle Daten löschen</h3>' +
+        '<p class="hint">Löscht alle Klassen mit Noten und Mitarbeit, Stundenplan, Termine, Planungen, Einstellungen und den ' +
+        "Papierkorb von diesem Gerät. Vorher wird automatisch ein Backup als Datei gespeichert (ohne die Dateien der " +
+        "Stundenplanung); damit lässt sich über „Backup importieren“ alles zurückholen.</p>" +
+        '<button class="btn danger" data-action="delete-all">Alle Daten löschen …</button></div>';
 
     return { topbar, body, mount: () => {
       // Einfache Einstellungen: alle nach dem Bauplan (EINSTELLUNGEN)
@@ -359,9 +431,19 @@
         s.mitarbeitSchwellen = liste;
         await Store.saveSettings(s); UI.toast("Notenschwellen gespeichert");
       }));
+      const nsBox = UI.$("#ns-global");
+      if (nsBox) UI.$all("[data-schluessel]", nsBox).forEach((inp) => inp.addEventListener("change", async () => {
+        const neu = schluesselAusFormular(nsBox, s.notenschluessel);
+        if (!neu) { UI.toast("Die Prozente müssen von unten nach oben steigen (0–100)"); return; }
+        s.notenschluessel = neu;
+        await Store.saveSettings(s); UI.toast("Notenschlüssel gespeichert");
+      }));
       UI.$all("[data-sz-feld]").forEach((inp) => inp.addEventListener("change", () => stundenzeitFeldGeaendert(inp)));
     }};
   }
 
-  Object.assign(global.Views, { ViewEinstellungen, schwellenFelderHTML, schwellenAusFormular, EINSTELLUNGEN, stundenzeitenAktion });
+  Object.assign(global.Views, {
+    ViewEinstellungen, schwellenFelderHTML, schwellenAusFormular, EINSTELLUNGEN, stundenzeitenAktion,
+    schluesselFelderHTML, schluesselAusFormular, schluesselPunkteZeigen
+  });
 })(window);

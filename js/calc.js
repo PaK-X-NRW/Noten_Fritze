@@ -3,7 +3,9 @@
    - Noteneingabe und -anzeige (deutsche Tendenzen 2+, 2, 2-; MSS-Punkte)
    - Drittelnoten (x,0 | x,3 | x,7) für alle Zwischennoten
    - Zeugnisskala (ganze Noten, einzige Tendenz 4-) und Jahresnote
-   - Umrechnung Schulnote -> MSS-Punkte, Notenfarbe
+   - Umrechnung Schulnote -> MSS-Punkte (und zurück), Notenfarbe
+   - Rohpunkte -> Note über den Notenschlüssel (Prozent, Punktetabelle)
+   - Notenspiegel und Durchschnitt einer Spalte
    - Kategorie-Helfer (zählt in die Note? Mitarbeits-Kategorie?)
 
    Calc ist auf mehrere Dateien verteilt, die sich denselben Namespace teilen
@@ -163,6 +165,90 @@
     return clampNote(Math.round(17 - Number(note) * 3), true);
   }
 
+  // ---- Rohpunkte -> Note (Notenschlüssel in Prozent) -------------------------
+  // Eine Spalte mit bewertung "rohpunkte" bekommt Punkte statt Noten; die Note
+  // entsteht über den Notenschlüssel: 16 Prozentgrenzen, Index = MSS-Punkte
+  // 0..15 („ab x % gibt es p Punkte“, Index 0 ist immer 0 %). Die Sek I nutzt
+  // dieselben Grenzen bis 14 Punkte (= 1); die 15 (1+) gibt es nur in der MSS.
+
+  // MSS-Punkte -> Drittelnote der Sek I: 14 -> 1 · 13 -> 1- (1,3) · 12 -> 2+ (1,7)
+  // … 1 -> 5- (5,3) · 0 -> 6 (Umkehrung von noteZuMssPunkte).
+  function mssPunkteZuNote(p) {
+    p = Math.round(Number(p));
+    if (!(p > 0)) return 6;
+    return Math.round((17 - Math.min(15, p)) / 3 * 10) / 10;
+  }
+
+  // Notenschlüssel prüfen: 16 Zahlen 0..100, streng steigend ab 1 Punkt.
+  // Rückgabe: bereinigte Liste (Index 0 = 0) oder null.
+  function schluesselNormalisieren(liste) {
+    if (!Array.isArray(liste) || liste.length !== 16) return null;
+    const out = liste.map((x) => Number(String(x).replace(",", ".")));
+    out[0] = 0;
+    for (let p = 1; p < 16; p++) {
+      if (isNaN(out[p]) || out[p] <= out[p - 1] || out[p] > 100) return null;
+    }
+    return out;
+  }
+
+  // Punktetabelle einer Arbeit (beste Note zuerst): ab welcher Rohpunktzahl
+  // welche Note gilt – Prozent × Höchstpunkte, kaufmännisch auf halbe Punkte
+  // gerundet (78,3 -> 78,5 · 78,2 -> 78). Rückgabe: [{ punkte (0..15), note
+  // (Wert der Klassenskala), ab }]
+  function punkteTabelle(maxPunkte, schluessel, mss) {
+    const s = schluesselNormalisieren(schluessel);
+    const max = Number(maxPunkte) || 0;
+    if (!s) return [];
+    const out = [];
+    for (let p = mss ? 15 : 14; p >= 0; p--) {
+      // + 1e-9: Prozentwerte wie 0,29 × 50 liegen binär knapp unter der Mitte
+      const ab = p === 0 ? 0 : Math.round(s[p] * max / 100 * 2 + 1e-9) / 2;
+      out.push({ punkte: p, note: mss ? p : mssPunkteZuNote(p), ab });
+    }
+    return out;
+  }
+  // Note aus Rohpunkten über die Punktetabelle (dieselbe Rundung wie angezeigt)
+  function noteAusRohpunkten(roh, maxPunkte, schluessel, mss) {
+    if (roh === null || roh === undefined || isNaN(roh)) return null;
+    const zeile = punkteTabelle(maxPunkte, schluessel, mss).find((z) => Number(roh) >= z.ab);
+    return zeile ? zeile.note : null;
+  }
+  // Eingabe „67“, „67,5“, „67.5“: ganze oder halbe Punkte von 0 bis maxPunkte, sonst null
+  function parseRohpunkte(input, maxPunkte) {
+    const s = String(input === null || input === undefined ? "" : input).trim().replace(",", ".");
+    if (!/^\d+(\.\d+)?$/.test(s)) return null;
+    const x = parseFloat(s);
+    if (Math.round(x * 2) !== x * 2 || x > Number(maxPunkte)) return null;
+    return x;
+  }
+  // 67.5 -> „67,5“
+  function formatRohpunkte(x) {
+    return x === null || x === undefined || isNaN(x) ? "" : String(x).replace(".", ",");
+  }
+
+  // ---- Notenspiegel einer Spalte (Klassen-/Kursarbeit) ----------------------
+  // Sek I: Stufen 1..6, Tendenzen zählen zur ganzen Note (1 und 1- -> 1; 2+, 2,
+  // 2- -> 2 …); MSS: jede Punktzahl 15..0 einzeln. Der Durchschnitt kommt aus den
+  // genauen Werten (2- = 2,3), auf zwei Stellen gerundet. unter = Minderleistungen
+  // (Sek I: 4- oder schlechter, MSS: 4 Punkte oder weniger). Leere Zellen zählen nicht.
+  // Rückgabe: { anzahl, schnitt (null ohne Noten), stufen: [{ stufe, anzahl }], unter }
+  function notenspiegel(werte, mss) {
+    const liste = (werte || []).filter((w) => w !== null && w !== undefined && !isNaN(w)).map(Number);
+    const stufen = [];
+    if (mss) for (let p = 15; p >= 0; p--) stufen.push({ stufe: p, anzahl: 0 });
+    else for (let n = 1; n <= 6; n++) stufen.push({ stufe: n, anzahl: 0 });
+    let summe = 0, unter = 0;
+    liste.forEach((w) => {
+      summe += w;
+      const stufe = clampNote(Math.round(w), mss);
+      stufen.find((z) => z.stufe === stufe).anzahl++;
+      if (mss ? stufe < 5 : w > 4) unter++;
+    });
+    // Auf zwei Stellen gerundet (+ 1e-9: x,xx5 liegt binär oft knapp darunter)
+    const schnitt = liste.length ? Math.round(summe / liste.length * 100 + 1e-9) / 100 : null;
+    return { anzahl: liste.length, schnitt, stufen, unter };
+  }
+
   // Farbe für eine Note. Für Badges. mss=false: 1 gut = grün, 6 = rot.
   // mss=true (MSS-Punkte): 15 gut = grün, 0 = rot (umgekehrte Richtung).
   function noteFarbe(n, mss) {
@@ -188,6 +274,7 @@
     parseNote, clampNote, formatNote,
     zeugnisnote, formatZeugnisnote, istGrenzwert, jahresnote,
     tendenznote, formatTendenz, noteZuMssPunkte, noteFarbe,
+    notenspiegel, mssPunkteZuNote, schluesselNormalisieren, punkteTabelle, noteAusRohpunkten, parseRohpunkte, formatRohpunkte,
     istNotenKategorie, istMitarbeitsKategorie
   };
 })(window);

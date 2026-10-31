@@ -18,8 +18,10 @@
     trackerStundeBeenden, trackerVerlassen, trackerRaumDialog, trackerTap, trackerUndo, trackerHeatPause,
     besprechungStep, stundenzeitenAktion,
     stundenplanEinrichten, ansichtSetzen, wocheBlaettern, stundenplanZelle, abWocheUmstellen, plaeneDialog,
+    checkToggle, checkNeu, checkBearbeiten,
     monatBlaettern, monatTag, ansichtWechseln, terminBearbeiten, terminNeu, krankDialog,
-    bausteinNeu, planungZurueck, planungKlasse, planungTracker, planungMenue, planungUebernehmen, fahrplanDialog
+    bausteinNeu, planungZurueck, planungAusfall, planungRuecken, planungKlasse, planungTracker, planungMenue, planungUebernehmen, fahrplanDialog,
+    reiheAnsehen, reiheExport, reiheImportStart, reiheUebernehmen
   } = global.Views;
 
   // =========================================================================
@@ -143,6 +145,9 @@
     "sp-zelle": (el) => stundenplanZelle(el),
     "sp-ab": () => abWocheUmstellen(),
     "sp-archiv": () => plaeneDialog(),
+    "ck-toggle": (el) => checkToggle(el),
+    "ck-neu": (el) => checkNeu(el),
+    "ck-bearbeiten": (el) => checkBearbeiten(el),
     // Kalender (views.kalender.js)
     "sp-ansicht": (el) => ansichtWechseln(el.getAttribute("data-ansicht")),
     "mo-blaettern": (el) => monatBlaettern(el.getAttribute("data-schritt")),
@@ -156,7 +161,14 @@
     "planung-klasse": () => planungKlasse(),
     "planung-tracker": () => planungTracker(),
     "planung-menue": () => planungMenue(),
+    "planung-ausfall": () => planungAusfall(),
+    "planung-ruecken": () => planungRuecken(),
     "planung-uebernehmen": () => planungUebernehmen(),
+    // Unterrichtsreihen (views.reihen.js)
+    "reihe-ansehen": (el) => reiheAnsehen(el),
+    "reihe-export": (el) => reiheExport(el),
+    "reihe-import": () => reiheImportStart(),
+    "reihe-uebernehmen": (el) => reiheUebernehmen(el),
     "tracker-fahrplan": () => state.tracker && fahrplanDialog(state.klasseId, state.tracker.stunde),
     // Startseite: vergessene Stunde einer Klasse ansehen (Tracker-Start fragt nach)
     "offene-stunde": async (el) => {
@@ -235,15 +247,42 @@
       exportToast(status, "Klasse");
     },
     "import-klasse": () => klassenImportDialog(),
+    // Klasse löschen – nur aus „Klasse bearbeiten“: erst eine Sicherungsdatei
+    // (Klassen-Export), dann in den Papierkorb (30 Tage wiederherstellbar)
     "delete-class": async (el) => {
       const k = await Store.Klassen.get(el.getAttribute("data-id"));
       if (!k) return;
+      const dialog = el.closest(".modal-backdrop");
+      if (dialog) dialog.remove();
+      const tage = Store.Papierkorb.TAGE;
       const ok = await UI.confirmDialog("Klasse löschen?",
-        "„" + k.name + "“ und alle zugehörigen Schüler, Noten, Ereignisse, Stunden, Abwesenheiten und der Sitzplan werden gelöscht.");
+        "„" + k.name + "“ wird mit allen Schüler/innen, Noten, Mitarbeit, Stunden und Sitzplänen gelöscht – dazu ihre " +
+        "Einträge im Stundenplan, ihre Termine und Planungen. Vorher wird eine Sicherungsdatei gespeichert (zurückholen " +
+        "über „Klasse importieren“). Außerdem liegt die Klasse " + tage + " Tage im Papierkorb (⚙️ Einstellungen) und " +
+        "lässt sich dort vollständig wiederherstellen.", { okLabel: "Sichern und löschen" });
       if (!ok) return;
-      await Store.Klassen.remove(k.id);
-      UI.toast("Klasse gelöscht");
+      const daten = await Store.exportKlasse(k.id);
+      const status = await CSV.speichern("klasse_" + CSV.safe(k.name) + "_" + Store.datumLokal() + ".json",
+        JSON.stringify(daten, null, 2), "application/json");
+      if (status === "abgebrochen" && !await UI.confirmDialog("Ohne Sicherungsdatei löschen?",
+        "Die Sicherungsdatei wurde nicht gespeichert. Die Klasse liegt trotzdem " + tage + " Tage im Papierkorb.",
+        { okLabel: "Trotzdem löschen" })) return;
+      const eintrag = await Store.Papierkorb.klasseLoeschen(k.id);
+      UI.toast("„" + k.name + "“ liegt im Papierkorb", { duration: 8000,
+        aktion: { label: "Rückgängig", onClick: () => { papierkorbZurueck(eintrag.id).catch(UI.fehlerMelden); } } });
       if (state.klasseId === k.id) go("home"); else render();
+    },
+    // Papierkorb (Einstellungen)
+    "papierkorb-zurueck": (el) => papierkorbZurueck(el.getAttribute("data-id")),
+    "papierkorb-weg": async (el) => {
+      const e = (await Store.Papierkorb.alle()).find((x) => x.id === el.getAttribute("data-id"));
+      if (!e) return;
+      if (!await UI.confirmDialog("Endgültig löschen?",
+        "„" + e.name + "“ wird endgültig gelöscht und lässt sich danach nicht mehr wiederherstellen.",
+        { okLabel: "Endgültig löschen" })) return;
+      await Store.Papierkorb.endgueltigLoeschen(e.id);
+      render();
+      UI.toast("„" + e.name + "“ endgültig gelöscht");
     },
 
     // Mitarbeit: Quartal abschließen (Dialog in views.dialoge.js)
@@ -288,7 +327,8 @@
       const ok = await UI.confirmDialog("Beispielklassen anlegen?",
         "Angelegt werden „9a (Beispiel)“ mit Schulnoten und „Mathematik LK 12 (Beispiel)“ mit MSS-Punkten – " +
         "beide mit einem kompletten Beispieljahr. Deine vorhandenen Klassen bleiben unverändert; " +
-        "gibt es eine davon schon, wird sie übersprungen.",
+        "gibt es eine davon schon, wird sie übersprungen. Gibt es noch keinen Stundenplan, entsteht ein " +
+        "Beispiel-Stundenplan mit Planungen für die nächsten vier Wochen.",
         { okLabel: "Anlegen", danger: false });
       if (!ok) return;
       const erg = await Store.seedBeispielklassen();
@@ -298,15 +338,43 @@
       if (erg.uebersprungen.length) {
         teile.push(namen(erg.uebersprungen) + " gibt es schon – übersprungen");
       }
+      teile.push(erg.stundenplan ? "Beispiel-Stundenplan mit Planungen angelegt"
+        : "Stundenplan unverändert (es gibt schon einen)");
       UI.toast(teile.join(" · "), { duration: 6000 });
       go("home");
     },
+    "notenschluessel-standard": async () => {
+      const s = await Store.getSettings();
+      s.notenschluessel = Store.DEFAULT_SETTINGS.notenschluessel.slice();
+      await Store.saveSettings(s);
+      render();
+      UI.toast("Vorschlag für den Notenschlüssel wiederhergestellt");
+    },
+    // Alle Daten löschen (Gefahrenbereich ganz unten in den Einstellungen): vorher
+    // automatisch ein Backup ohne die Dateien der Stundenplanung speichern
     "delete-all": async () => {
-      if (await UI.confirmDialog("Wirklich ALLE Daten löschen?", "Diese Aktion kann nicht rückgängig gemacht werden. Vorher am besten ein Backup exportieren.")) {
-        await DB.clearAll(); go("home"); UI.toast("Alle Daten gelöscht");
-      }
+      if (!await UI.confirmDialog("Wirklich ALLE Daten löschen?",
+        "Alle Klassen, Noten, Mitarbeit, Stundenplan, Termine, Planungen, Einstellungen und der Papierkorb werden von " +
+        "diesem Gerät gelöscht. Vorher wird ein Backup als Datei gespeichert – damit lässt sich über „Backup " +
+        "importieren“ alles zurückholen (die Dateien der Stundenplanung sind darin nicht enthalten).",
+        { okLabel: "Backup speichern und löschen" })) return;
+      const data = await Store.exportAll({ mitDateien: false });
+      const status = await CSV.speichern(
+        "noten-fritze-backup-vor-dem-loeschen-" + Store.datumLokal() + ".json",
+        JSON.stringify(data, null, 2), "application/json");
+      if (status === "abgebrochen" && !await UI.confirmDialog("Ohne Backup löschen?",
+        "Das Backup wurde nicht gespeichert. Ohne Backup lassen sich die Daten nicht wiederherstellen.",
+        { okLabel: "Ohne Backup löschen" })) return;
+      await DB.clearAll(); go("home"); UI.toast("Alle Daten gelöscht");
     }
   };
+
+  // Klasse aus dem Papierkorb zurückholen (Einstellungen oder „Rückgängig“ im Toast)
+  async function papierkorbZurueck(id) {
+    const e = await Store.Papierkorb.wiederherstellen(id);
+    render();
+    UI.toast("„" + e.name + "“ wiederhergestellt");
+  }
 
   // Toast je nach Ergebnis von CSV.speichern ("abgebrochen" = kein Toast)
   function exportToast(status, label) {

@@ -44,7 +44,13 @@
       ].concat([5, 6, 7, 8, 9, 10, 11, 12, 13].map((n) => ({ value: n, label: String(n) }))),
         hint: "Ab Klassenstufe 11 werden Noten als MSS-Punkte (0–15) statt Schulnoten erfasst." }) +
       farbFeld +
-      UI.field("Notizen", "notizen", data.notizen, { type: "textarea", placeholder: "optional" });
+      UI.field("Notizen", "notizen", data.notizen, { type: "textarea", placeholder: "optional" }) +
+      // Löschen bewusst nur hier (nicht mehr auf der Startseite): erst eine
+      // Sicherungsdatei, dann 30 Tage Papierkorb (Action „delete-class“)
+      (isNew ? "" : '<div class="gefahrzone"><h3>Klasse löschen</h3>' +
+        '<p class="hint">Löscht die Klasse mit allen Noten und Daten. Vorher wird eine Sicherungsdatei gespeichert, ' +
+        "außerdem bleibt sie " + Store.Papierkorb.TAGE + " Tage im Papierkorb (⚙️ Einstellungen).</p>" +
+        '<button type="button" class="btn danger" data-action="delete-class" data-id="' + UI.esc(data.id) + '">Klasse löschen …</button></div>');
     UI.modal({
       title: isNew ? "Neue Klasse" : "Klasse bearbeiten",
       bodyHTML: body,

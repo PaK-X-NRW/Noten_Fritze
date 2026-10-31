@@ -138,6 +138,60 @@
     });
   });
 
+  gruppe("Rohpunkte → Note (Notenschlüssel)", () => {
+    // Vorschlag aus der Absprache: ab % je MSS-Punkt 0..15
+    const S = [0, 25, 30, 35, 40, 45, 50, 56, 62, 68, 74, 79, 84, 89, 95, 98];
+    fall("MSS-Punkte → Drittelnote (Sek I)", () => {
+      const noten = [14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0].map((p) => Calc.formatTendenz(Calc.mssPunkteZuNote(p), false));
+      gleich(noten, ["1", "1-", "2+", "2", "2-", "3+", "3", "3-", "4+", "4", "4-", "5+", "5", "5-", "6"]);
+    });
+    fall("Punktetabelle 90 P., kaufmännisch auf halbe Punkte (Sek I ohne 1+)", () => {
+      gleich(Calc.punkteTabelle(90, S, false).map((z) => z.ab),
+        [85.5, 80, 75.5, 71, 66.5, 61, 56, 50.5, 45, 40.5, 36, 31.5, 27, 22.5, 0]);
+      gleich(Calc.punkteTabelle(90, S, true)[0], { punkte: 15, note: 15, ab: 88 });
+    });
+    fall("Note aus Rohpunkten (Grenze gehört zur besseren Note)", () => {
+      const n = (roh) => Calc.formatTendenz(Calc.noteAusRohpunkten(roh, 90, S, false), false);
+      gleich([85.5, 85, 56, 55.5, 40.5, 40, 22.5, 22, 0].map(n), ["1", "1-", "3", "3-", "4", "4-", "5-", "6", "6"]);
+      gleich([88, 87.5, 0].map((r) => Calc.noteAusRohpunkten(r, 90, S, true)), [15, 14, 0]);
+    });
+    fall("Rohpunkte-Eingabe: ganze und halbe Punkte bis zur Höchstpunktzahl", () => {
+      gleich(["67", "67,5", "67.5", "0", "90"].map((x) => Calc.parseRohpunkte(x, 90)), [67, 67.5, 67.5, 0, 90]);
+      gleich(["67,3", "90,5", "-1", "abc", ""].map((x) => Calc.parseRohpunkte(x, 90)), [null, null, null, null, null]);
+      gleich(Calc.formatRohpunkte(67.5), "67,5");
+    });
+    fall("Notenschlüssel muss streng steigen", () => {
+      gleich(Calc.schluesselNormalisieren(S), S);
+      gleich(Calc.schluesselNormalisieren(S.slice(0, 15)), null);
+      const kaputt = S.slice(); kaputt[8] = 50;
+      gleich(Calc.schluesselNormalisieren(kaputt), null);
+    });
+  });
+
+  gruppe("Notenspiegel einer Klassenarbeit", () => {
+    fall("Sek I: Tendenzen zählen zur ganzen Note, Ø aus den genauen Noten", () => {
+      // 1-, 1, 2+, 2, 2-, 3, 4-, 5+, 6 und eine leere Zelle
+      const sp = Calc.notenspiegel([1.3, 1, 1.7, 2, 2.3, 3, 4.3, 4.7, 6, null], false);
+      gleich(sp.stufen.map((z) => z.anzahl), [2, 3, 1, 1, 1, 1]);
+      gleich(sp.anzahl, 9);
+      gleich(Calc.formatNote(sp.schnitt, 2), "2,92");
+      gleich(sp.unter, 3, "4-, 5+ und 6 sind Minderleistungen, die 4 nicht");
+    });
+    fall("MSS: jede Punktzahl einzeln, 4 Punkte oder weniger = Minderleistung", () => {
+      const sp = Calc.notenspiegel([15, 15, 11, 5, 4, 0], true);
+      gleich(sp.stufen.length, 16);
+      gleich(sp.stufen[0], { stufe: 15, anzahl: 2 });
+      gleich(Calc.formatNote(sp.schnitt, 2), "8,33");
+      gleich(sp.unter, 2);
+    });
+    fall("Durchschnitt kaufmännisch auf zwei Stellen (auch bei x,xx5)", () => {
+      gleich(Calc.notenspiegel([1, 1.01], false).schnitt, 1.01);   // 1,005 -> 1,01
+    });
+    fall("Ohne Noten: kein Durchschnitt", () => {
+      gleich(Calc.notenspiegel([null, undefined], false).schnitt, null);
+    });
+  });
+
   gruppe("Halbjahres-Kette (Beispiele aus Dev/Schuljahr-Schema.md)", () => {
     fall("Anna: Epochalnoten 2 / 2+, Zeugnis 2", () => {
       const e = Calc.halbjahrErgebnis(KATS, halbjahrNoten([2, 1.7], [2, 2, 1.3], [1.7, 1.7, 2]), KLASSE, 1, false);
@@ -366,6 +420,30 @@
     });
   });
 
+  gruppe("Tracker: Erfassungsquartal nach dem Abschluss", () => {
+    const zu = (...q) => q.map((x) => ({ quartal: x, datum: "2026-01-01" }));
+    fall("Ohne Abschluss: das eingestellte Quartal", () => {
+      gleich(Calc.erfassungsQuartal(1, [], null), 1);
+    });
+    fall("Quartal abgeschlossen: weiter im nächsten", () => {
+      gleich(Calc.erfassungsQuartal(1, zu(1), null), 2);
+      gleich(Calc.erfassungsQuartal(1, zu(1, 2), 2), 3);
+    });
+    fall("Nie rückwärts: Abschluss aufgehoben, aber schon im 2. Q erfasst", () => {
+      gleich(Calc.erfassungsQuartal(1, [], 2), 2);
+    });
+    fall("Abschluss aufgehoben, noch nichts im neuen Quartal: zurück ins alte", () => {
+      gleich(Calc.erfassungsQuartal(1, [], 1), 1);
+    });
+    fall("Alle vier abgeschlossen: kein Quartal mehr", () => {
+      gleich(Calc.erfassungsQuartal(4, zu(1, 2, 3, 4), 4), null);
+    });
+    fall("Schuljahr beginnt am 1. August", () => {
+      gleich([Calc.schuljahrBeginn("2026-10-31"), Calc.schuljahrBeginn("2026-07-31"), Calc.schuljahrBeginn("2026-08-01")],
+        ["2026-08-01", "2025-08-01", "2026-08-01"]);
+    });
+  });
+
   gruppe("Stundenplan: Wochen, A/B-Wochen, Versionen", () => {
     fall("Montag und Kalenderwoche", () => {
       gleich(Calc.montagVon("2026-10-01"), "2026-09-28", "Donnerstag -> Montag");
@@ -553,6 +631,55 @@
       const termine = [{ art: "ferien", datum: "2026-10-05", bis: "2026-10-09" }];
       const z = Calc.weiterschiebenZuege(versionen, [], termine, termine.concat(moAus), zeiten, "k", "2026-09-28", "2026-10-16", "einheit");
       gleich(z.slice(2, 4).map(kurz), ["02/5→12/1", "02/6→12/2"]);
+    });
+    const miLuecke = [ausfall("2026-09-30", "std-3")];
+    fall("Rücken nach hinten (stundenweise): ab Mi 3 eine Stunde weiter, Mi 3 wird frei", () => {
+      const z = Calc.planungenRuecken(versionen, [], [], miLuecke, zeiten, "k", "2026-09-30", "2026-10-09", "stunde", "nach");
+      gleich(z.slice(0, 3).map(kurz), ["30/3→02/5", "02/5→02/6", "02/6→05/1"]);
+    });
+    fall("Rücken nach vorne (stundenweise): die folgenden rücken auf Mi 3 auf", () => {
+      const z = Calc.planungenRuecken(versionen, [], [], miLuecke, zeiten, "k", "2026-09-30", "2026-10-09", "stunde", "vor");
+      gleich(z.slice(0, 3).map(kurz), ["02/5→30/3", "02/6→02/5", "05/1→02/6"]);
+    });
+    fall("Rücken je Doppelstunde: nur Doppelstunden wandern", () => {
+      const z = Calc.planungenRuecken(versionen, [], [], moAus, zeiten, "k", "2026-09-28", "2026-10-09", "einheit", "nach");
+      gleich(z.slice(0, 2).map(kurz), ["28/1→02/5", "28/2→02/6"]);
+      wahr(!z.some((x) => x.von.blockId === "std-3"), "Mi 3 (Einzel) bleibt");
+    });
+    fall("Thema einer eingeschobenen Fortsetzung", () => {
+      gleich(Calc.themaFortsetzung("Brüche"), "Brüche 2");
+      gleich(Calc.themaFortsetzung("Brüche 2"), "Brüche 3");
+      gleich(Calc.themaFortsetzung("Klasse 7 Brüche 9"), "Klasse 7 Brüche 10");
+      gleich(Calc.themaFortsetzung("  "), "");
+    });
+    fall("Nächste Stunde nach einer Einheit (Ausfall übersprungen)", () => {
+      gleich(Calc.naechsteStunde(versionen, [], [], zeiten, "k", "2026-09-28", "std-2", 30), { datum: "2026-09-30", blockId: "std-3" });
+      gleich(Calc.naechsteStunde(versionen, [], miLuecke, zeiten, "k", "2026-09-28", "std-2", 30), { datum: "2026-10-02", blockId: "std-5" });
+    });
+  });
+
+  gruppe("Unterrichtsreihen", () => {
+    const zeiten = Store.defaultStundenzeiten();
+    const pl = (datum, blockId, reihe, thema) => ({ id: datum + blockId, klasseId: "k", datum, blockId, reihe, thema, bausteine: [{ id: "b", phase: thema }] });
+    const planungen = [
+      pl("2026-09-30", "std-3", "Der Schimmelreiter", "Novelle"), pl("2026-09-28", "std-2", "der schimmelreiter", "Einstieg 2"),
+      pl("2026-09-28", "std-1", "Der Schimmelreiter", "Einstieg"), pl("2026-09-28", "std-5", "", "ohne Reihe")
+    ];
+    fall("Gruppieren nach Klasse und Name, Stunden in zeitlicher Folge", () => {
+      const r = Calc.reihenAusPlanungen(planungen, zeiten);
+      gleich(r.length, 1);
+      gleich(r[0].stunden.map((p) => p.thema), ["Einstieg", "Einstieg 2", "Novelle"]);
+      gleich([r[0].von, r[0].bis], ["2026-09-28", "2026-09-30"]);
+    });
+    fall("Vorlage: Doppelstunde = gleiche Einheit, ohne Datum", () => {
+      const v = Calc.reiheVorlage(Calc.reihenAusPlanungen(planungen, zeiten)[0].stunden, zeiten);
+      gleich(v.map((x) => x.einheit), [1, 1, 2]);
+      wahr(v.every((x) => !x.datum), "kein Datum in der Vorlage");
+    });
+    fall("Verteilen: stundenweise, belegte Stunden überspringen", () => {
+      const ziele = [{ datum: "d1", blockId: "b1" }, { datum: "d1", blockId: "b2" }, { datum: "d2", blockId: "b1" }, { datum: "d3", blockId: "b1" }];
+      gleich(Calc.reiheVerteilen(2, ziele, { "d1|b2": true }), [{ datum: "d1", blockId: "b1" }, { datum: "d2", blockId: "b1" }]);
+      gleich(Calc.reiheVerteilen(9, ziele, {}).length, 4, "reichen die Stunden nicht, kommen weniger zurück");
     });
   });
 

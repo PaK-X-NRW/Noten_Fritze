@@ -6,12 +6,14 @@
    Beide leiten bei Dateien aus älteren Versionen die Spalten (Leistungen)
    aus den Noten ab, prüfen die Datei vor dem Schreiben und schreiben in
    einer einzigen Transaktion (alles oder nichts).
+   Dazu Store.Papierkorb: Eine gelöschte Klasse liegt 30 Tage als
+   Schnappschuss im Store „papierkorb“ und lässt sich vollständig zurückholen.
    ========================================================================= */
 (function (global) {
   "use strict";
 
   const {
-    uid, now, Klassen, getSettings, klassenAbhaengige, kaskade,
+    uid, now, datumLokal, Klassen, getSettings, klassenAbhaengige, kaskade,
     normalisiereSchuelerHeat, leistungenAusNoten, sitzplaeneNormalisieren,
     SCHEMA_VERSION, migrateSchema
   } = global.Store;
@@ -263,5 +265,125 @@
     return DB.put("einstellungen", { key: "umzug", am: new Date().toISOString() });
   }
 
-  Object.assign(global.Store, { exportAll, importAll, exportKlasse, importKlasse, umzugVermerk, umzugVermerken });
+  // ---- Unterrichtsreihe als Paket ---------------------------------------------
+  // Datei { app: "noten-fritze-reihe", name, stunden: [{ thema, bausteine,
+  // einheit }], dateien: [{ id, name, mime, groesse, daten64 }] } – ohne Datum
+  // und Klasse (Calc.reiheVorlage). Datei-Inhalte nur auf Wunsch.
+  async function reihePaket(name, vorlage, mitDateien) {
+    const ids = [];
+    vorlage.forEach((st) => (st.bausteine || []).forEach((x) => {
+      if (x.typ === "datei" && x.dateiId && ids.indexOf(x.dateiId) === -1) ids.push(x.dateiId);
+    }));
+    const dateien = mitDateien
+      ? (await Promise.all(ids.map((id) => DB.get("dateien", id)))).filter((d) => d && d.daten)
+          .map((d) => ({ id: d.id, name: d.name, mime: d.mime, groesse: d.groesse, daten64: zuBase64(d.daten) }))
+      : [];
+    return { app: "noten-fritze-reihe", appVersion: APP_VERSION, exportedAt: new Date().toISOString(), name, stunden: vorlage, dateien };
+  }
+  // Paket prüfen und vorbereiten: Dateien mit Inhalt bekommen neue IDs, die
+  // Bausteine zeigen darauf. Rückgabe: { name, vorlage, dateien (Datensätze) }
+  function reiheAusPaket(paket) {
+    if (!paket || paket.app !== "noten-fritze-reihe" || !Array.isArray(paket.stunden) || !paket.stunden.length) {
+      throw new Error("Das ist keine Reihen-Datei von Noten-Fritze.");
+    }
+    const neu = {}, dateien = [];
+    (paket.dateien || []).forEach((d) => {
+      if (!d || !d.id || !d.daten64) return;
+      neu[d.id] = uid();
+      dateien.push({ id: neu[d.id], name: d.name || "Datei", mime: d.mime || "application/octet-stream",
+        groesse: d.groesse || 0, daten: ausBase64(d.daten64), behalten: false, entferntAm: null, erstelltAm: now() });
+    });
+    const vorlage = paket.stunden.map((st) => ({
+      thema: String((st && st.thema) || ""), einheit: st && st.einheit,
+      bausteine: ((st && st.bausteine) || []).filter(Boolean).map((x) => Object.assign({}, x,
+        x.typ === "datei" ? { dateiId: neu[x.dateiId] || x.dateiId || null } : {}))
+    }));
+    return { name: String(paket.name || ""), vorlage, dateien };
+  }
+
+  // ---- Papierkorb (gelöschte Klassen) ----------------------------------------
+  // Löschen einer Klasse legt vorher einen Schnappschuss ab: den Klassen-Export
+  // (Schüler, Noten, Mitarbeit, Stunden, Sitzpläne …) und zusätzlich, was der
+  // Export bewusst nicht enthält – ihre Stundenplan-Einträge (je Version),
+  // Termine, Planungen und deren Dateien. Wiederherstellen spielt alles zurück.
+  // Nach PAPIERKORB_TAGE räumt aufraeumen() beim App-Start endgültig auf.
+  // Datensatz: { id, klasseId, name, geloeschtAm ("YYYY-MM-DD"), export,
+  //              stundenplan: [{ versionId, eintraege }], termine, planungen, dateien }
+  const PAPIERKORB_TAGE = 30;
+  const TAG_MS = 86400000;
+  function tageSeit(datum, heute) {
+    const d = (x) => new Date(x + "T12:00:00").getTime();
+    return Math.round((d(heute) - d(datum)) / TAG_MS);
+  }
+  const Papierkorb = {
+    TAGE: PAPIERKORB_TAGE,
+    alle: () => DB.getAll("papierkorb").then((l) => l.sort((a, b) => (a.geloeschtAm < b.geloeschtAm ? 1 : -1))),
+    // Noch verbleibende Tage bis zum endgültigen Löschen
+    restTage: (eintrag, heute) => Math.max(0, PAPIERKORB_TAGE - tageSeit(eintrag.geloeschtAm, heute || datumLokal())),
+    // Klasse in den Papierkorb: erst den Schnappschuss sichern, dann
+    // kaskadierend löschen (Klassen.remove). Scheitert das Löschen, wird der
+    // Schnappschuss wieder entfernt.
+    async klasseLoeschen(klasseId) {
+      const [exp, versionen, termine, planungen] = await Promise.all([
+        exportKlasse(klasseId), DB.getAll("stundenplaene"),
+        DB.getAllByIndex("termine", "klasseId", klasseId), DB.getAllByIndex("planungen", "klasseId", klasseId)
+      ]);
+      if (!exp.data.klasse) throw new Error("Klasse nicht gefunden");
+      const dateiIds = [];
+      planungen.forEach((p) => (p.bausteine || []).forEach((x) => {
+        if (x.typ === "datei" && x.dateiId && dateiIds.indexOf(x.dateiId) === -1) dateiIds.push(x.dateiId);
+      }));
+      const dateien = (await Promise.all(dateiIds.map((id) => DB.get("dateien", id)))).filter(Boolean);
+      const eintrag = {
+        id: uid(), klasseId, name: exp.data.klasse.name || "", geloeschtAm: datumLokal(), export: exp,
+        stundenplan: versionen.map((v) => ({ versionId: v.id, eintraege: (v.eintraege || []).filter((e) => e.klasseId === klasseId) }))
+          .filter((x) => x.eintraege.length),
+        termine, planungen, dateien
+      };
+      await DB.put("papierkorb", eintrag);
+      try {
+        await Klassen.remove(klasseId);
+      } catch (e) {
+        await DB.del("papierkorb", eintrag.id);
+        throw e;
+      }
+      return eintrag;
+    },
+    // Vollständig zurückholen. Gibt es die Klasse (gleiche Kennung) wieder,
+    // etwa aus einem Backup, wird abgebrochen statt überschrieben.
+    async wiederherstellen(id) {
+      const e = await DB.get("papierkorb", id);
+      if (!e) throw new Error("Nicht mehr im Papierkorb");
+      if (await Klassen.get(e.klasseId)) throw new Error("„" + e.name + "“ gibt es bereits – nichts überschrieben.");
+      await importKlasse(e.export, { modus: "ersetzen" });
+      // Stundenplan-Einträge in ihre (noch vorhandenen) Versionen zurück,
+      // Termine, Planungen und Dateien – zusammen mit dem Entfernen aus dem Papierkorb
+      const versionen = await DB.getAll("stundenplaene");
+      await DB.atomar(["stundenplaene", "termine", "planungen", "dateien", "papierkorb"], (os) => {
+        (e.stundenplan || []).forEach((x) => {
+          const v = versionen.find((y) => y.id === x.versionId);
+          if (!v) return;
+          const da = (v.eintraege || []).map((y) => y.id);
+          os("stundenplaene").put(Object.assign({}, v, {
+            eintraege: (v.eintraege || []).concat(x.eintraege.filter((y) => da.indexOf(y.id) === -1)), updatedAt: now()
+          }));
+        });
+        (e.termine || []).forEach((t) => os("termine").put(t));
+        (e.planungen || []).forEach((p) => os("planungen").put(p));
+        (e.dateien || []).forEach((d) => os("dateien").put(d));
+        os("papierkorb").delete(e.id);
+      });
+      return e;
+    },
+    endgueltigLoeschen: (id) => DB.del("papierkorb", id),
+    // Beim App-Start: was länger als PAPIERKORB_TAGE drin liegt, endgültig löschen
+    async aufraeumen(heute) {
+      const alt = (await DB.getAll("papierkorb")).filter((e) => tageSeit(e.geloeschtAm, heute) >= PAPIERKORB_TAGE);
+      for (const e of alt) await DB.del("papierkorb", e.id);
+      return alt.length;
+    }
+  };
+
+  Object.assign(global.Store, { exportAll, importAll, exportKlasse, importKlasse, umzugVermerk, umzugVermerken, Papierkorb,
+    reihePaket, reiheAusPaket });
 })(window);

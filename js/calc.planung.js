@@ -5,8 +5,12 @@
    - Fahrplan <-> Planungen je Stunde: die Liste der Bausteine mit Trennern
      („— 2. Stunde —“) wird beim Speichern je Stunde aufgeteilt
    - Minuten: verplante Zeit je Stunde und gesamt
-   - vorige Stunde einer Klasse (Hausaufgabe von letzter Stunde)
-   - Umzug von Planungen (Stunde verschoben/getauscht/zurück)
+   - vorige Stunde einer Klasse (Hausaufgabe von letzter Stunde), nächste
+     Stunde (Bausteine weiterschieben)
+   - Umzug von Planungen (Stunde verschoben/getauscht/zurück), Weiterschieben
+     bei Ausfall, Rücken ohne Ausfall (nach hinten / nach vorne)
+   - Unterrichtsreihen: Planungen nach Reihe gruppieren, als Vorlage ohne
+     Datum ablegen und stundenweise auf freie Stunden einer Klasse verteilen
    Erweitert den Namespace Calc (calc.js lädt davor). Frei von DOM/DB.
    ========================================================================= */
 (function (global) {
@@ -102,6 +106,33 @@
     return null;
   }
 
+  // Nächste Stunde der Klasse nach einer Einheit (tatsächlicher Tag: Ferien,
+  // Ausfall, Verschiebung beachtet). blockId = letzte Stunde der Einheit; sucht
+  // höchstens maxTage voraus. Rückgabe: { datum, blockId } oder null
+  function naechsteStunde(versionen, abWochen, termine, stundenzeiten, klasseId, datum, blockId, maxTage) {
+    const stunden = nurStunden(stundenzeiten);
+    const start = stunden.findIndex((b) => b.id === blockId);
+    for (let t = 0; t <= (maxTage || 90); t++) {
+      const d = Calc.datumPlusTage(datum, t);
+      const plan = Calc.tagesPlan(versionen, abWochen, termine, d);
+      for (let i = t === 0 ? start + 1 : 0; i < stunden.length; i++) {
+        if (Calc.stundenFinden(plan, stunden[i].id).some((x) => x.klasseId === klasseId)) {
+          return { datum: d, blockId: stunden[i].id };
+        }
+      }
+    }
+    return null;
+  }
+
+  // Thema einer eingeschobenen Fortsetzungsstunde: „Brüche“ -> „Brüche 2“,
+  // „Brüche 2“ -> „Brüche 3“; ohne Thema bleibt es leer.
+  function themaFortsetzung(thema) {
+    const t = String(thema || "").trim();
+    if (!t) return "";
+    const m = t.match(/^(.*\S)\s+(\d+)$/);
+    return m ? m[1] + " " + (parseInt(m[2], 10) + 1) : t + " 2";
+  }
+
   // Umzug von Planungen: zuege [{ klasseId, von: {datum, blockId}, nach: {datum, blockId} }]
   // gelten gleichzeitig (Tausch!). Treffen zwei Planungen auf denselben Platz,
   // werden ihre Bausteine zusammengelegt.
@@ -126,6 +157,7 @@
         neu[k] = vorhanden;
         vorhanden.bausteine = (vorhanden.bausteine || []).concat(q.bausteine || []);
         if (!vorhanden.thema) vorhanden.thema = q.thema;
+        if (!vorhanden.reihe) vorhanden.reihe = q.reihe;
         if (put.indexOf(vorhanden) === -1) put.push(vorhanden);
         del.push(p.id);
       } else {
@@ -192,8 +224,69 @@
       .map((p) => ({ klasseId, von: { datum: p[0].datum, blockId: p[0].blockId }, nach: { datum: p[1].datum, blockId: p[1].blockId } }));
   }
 
+  // Planungen ab einer Stunde rücken, ohne dass etwas ausfällt (Stoff nicht
+  // geschafft, Stunde einschieben). Gerechnet wird, als fiele die Stunde aus:
+  //   richtung "nach": Termine -> luecke, die Stunde wird frei, alles rückt weiter
+  //   richtung "vor":  luecke -> Termine, die folgenden rücken auf sie auf (hat
+  //                    sie schon eine Planung, legt planungenUmziehen zusammen)
+  //   luecke: Termine mit der Stunde (bzw. Einheit) als Ausfall
+  function planungenRuecken(versionen, abWochen, termine, luecke, stundenzeiten, klasseId, von, bis, modus, richtung) {
+    return richtung === "vor"
+      ? weiterschiebenZuege(versionen, abWochen, luecke, termine, stundenzeiten, klasseId, von, bis, modus)
+      : weiterschiebenZuege(versionen, abWochen, termine, luecke, stundenzeiten, klasseId, von, bis, modus);
+  }
+
+  // ---- Unterrichtsreihen -----------------------------------------------------
+  // Position einer Stunde am Tag (für die Reihenfolge und Doppelstunden)
+  function stundenPosition(stundenzeiten) {
+    const pos = {};
+    nurStunden(stundenzeiten).forEach((b, i) => { pos[b.id] = i; });
+    return pos;
+  }
+  // Reihen aus Planungen: je Klasse und Reihenname (Groß-/Kleinschreibung egal)
+  // die Stunden in zeitlicher Reihenfolge, neueste Reihe zuerst.
+  // Rückgabe: [{ klasseId, name, stunden: [planung], von, bis }]
+  function reihenAusPlanungen(planungen, stundenzeiten) {
+    const pos = stundenPosition(stundenzeiten);
+    const gruppen = {};
+    (planungen || []).forEach((p) => {
+      const name = String(p.reihe || "").trim();
+      if (!name) return;
+      const key = p.klasseId + "|" + name.toLowerCase();
+      (gruppen[key] = gruppen[key] || { klasseId: p.klasseId, name, stunden: [] }).stunden.push(p);
+    });
+    return Object.keys(gruppen).map((key) => {
+      const g = gruppen[key];
+      g.stunden.sort((a, b) => (a.datum === b.datum ? (pos[a.blockId] || 0) - (pos[b.blockId] || 0) : (a.datum < b.datum ? -1 : 1)));
+      g.von = g.stunden[0].datum;
+      g.bis = g.stunden[g.stunden.length - 1].datum;
+      return g;
+    }).sort((a, b) => (a.von === b.von ? 0 : a.von < b.von ? 1 : -1));
+  }
+  // Stunden einer Reihe als Vorlage ohne Datum und Klasse: [{ thema, bausteine,
+  // einheit }] – Stunden mit gleicher einheit waren eine Doppelstunde (nur zur
+  // Anzeige; verteilt wird stundenweise).
+  function reiheVorlage(stunden, stundenzeiten) {
+    const pos = stundenPosition(stundenzeiten);
+    let nr = 0, vor = null;
+    return (stunden || []).map((p) => {
+      if (!(vor && vor.datum === p.datum && pos[vor.blockId] + 1 === pos[p.blockId])) nr++;
+      vor = p;
+      return { thema: p.thema || "", bausteine: JSON.parse(JSON.stringify(p.bausteine || [])), einheit: nr };
+    });
+  }
+  // Verteilen: die Stunden einer Vorlage stundenweise auf die nächsten freien
+  // Stunden einer Klasse (ziele aus stundenReihe; belegt: { "datum|blockId": true }
+  // – schon geplante Stunden werden übersprungen). Rückgabe: [{ datum, blockId }],
+  // kürzer als anzahl, wenn die Stunden nicht reichen.
+  function reiheVerteilen(anzahl, ziele, belegt) {
+    return (ziele || []).filter((z) => !(belegt || {})[z.datum + "|" + z.blockId])
+      .slice(0, anzahl).map((z) => ({ datum: z.datum, blockId: z.blockId }));
+  }
+
   Object.assign(global.Calc, {
+    reihenAusPlanungen, reiheVorlage, reiheVerteilen,
     PHASEN, einheitBestimmen, fahrplanAusPlanungen, fahrplanAufteilen, minutenSumme,
-    vorherigeStunde, planungenUmziehen, stundenReihe, weiterschiebenZuege
+    vorherigeStunde, naechsteStunde, themaFortsetzung, planungenUmziehen, stundenReihe, weiterschiebenZuege, planungenRuecken
   });
 })(window);

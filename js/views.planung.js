@@ -1,12 +1,17 @@
 /* =========================================================================
    views.planung.js – Stundenplanung (Fahrplan einer Stunde)
-   - Vollbild-Ansicht, geöffnet per Tipp auf eine Klassenstunde im Stundenplan
-   - Thema + Bausteine (Phase, Minuten, Text; Link; Datei als Kopie in der App,
+   - Fenster rechts neben dem Wochenplan (planungPanel), geöffnet per Tipp auf
+     eine Klassenstunde; der Plan bleibt daneben bedienbar (blättern, andere
+     Stunde antippen = Fenster wechselt). Schmale Bildschirme: nur das Fenster.
+   - Thema, Reihe (Unterrichtsreihe, siehe views.reihen.js) + Bausteine (Phase,
+     Minuten, Text; Link; Datei als Kopie in der App,
      öffnen/teilen/📌 behalten); Sortieren am Griff ⠿
      (Pointer-Events, auch auf dem iPad), Speichern automatisch
+   - ⇥ an einem Baustein: ihn und alle folgenden in die nächste Stunde (vorne)
+   - Fällt aus / Rücken (Planungen ab hier nach hinten oder vorne) direkt im Fenster
    - Doppelstunde = ein Fahrplan mit verschiebbarer Trennlinie „— 2. Stunde —“
    - Hausaufgabe der letzten Stunde, Fahrplan einer anderen Stunde übernehmen
-   - fahrplanDialog: der Fahrplan im Tracker (nur lesen)
+   - fahrplanDialog: die Stundenplanung im Tracker (nur lesen, Knopf „📋 Stundenplanung“)
    Rechnungen (Einheit, Aufteilen, Minuten, vorige Stunde) in calc.planung.js,
    gespeichert je Stunde über Store.Planungen.
    ========================================================================= */
@@ -31,36 +36,57 @@
   // =========================================================================
   //  ANSICHT
   // =========================================================================
-  async function ViewPlanung() {
+  // Planungsfenster rechts neben dem Wochenplan (views.stundenplan.js baut es
+  // ein, solange state.planungSlot gesetzt ist). Rückgabe: { html, mount }
+  // oder null, wenn die Stunde nicht mehr an diesem Platz liegt.
+  async function planungPanel() {
+    // Noch ausstehende Eingaben der bisher offenen Stunde sichern – aber nur
+    // die: Ein volles Speichern würde Planungen überschreiben, die gerade
+    // gerückt oder weitergeschoben wurden (der Fahrplan im Speicher ist dann alt).
+    if (speicherTimer) await speichern();
+    else await speicherKette.catch(() => {});
     const slot = state.planungSlot;
     const s = state.settings;
     const [k, versionen, termine] = await Promise.all([
       slot ? Store.Klassen.get(slot.klasseId) : null, Store.Stundenplan.alle(), Store.Termine.alle()
     ]);
-    if (!k) { state.view = "home"; return api.ViewHome(); }
+    if (!k) { state.planungSlot = null; state.planung = null; return null; }
     const plan = Calc.tagesPlan(versionen, s.abWochen, termine, slot.datum);
     const einheit = Calc.einheitBestimmen(plan, s.stundenzeiten, k.id, slot.blockId);
     const daIst = (plan.zellen[slot.blockId] || []).some((i) => i.typ === "stunde" && i.klasseId === k.id &&
       !(i.aenderung && i.aenderung.aenderung === "verschoben"));
     if (!einheit.length || !daIst) {
-      // z. B. gerade über „⋯ Stunde ändern“ verschoben: zurück zum Stundenplan
-      state.view = "home"; state.planung = null;
+      // z. B. gerade über „⋯ Mehr“ verschoben: Fenster schließen
+      state.planungSlot = null; state.planung = null;
       UI.toast("Die Stunde liegt nicht mehr an diesem Platz – siehe Stundenplan");
-      return api.ViewHome();
+      return null;
     }
     const blockIds = einheit.map((b) => b.id);
     const planungen = await Store.Planungen.derStunden(k.id, slot.datum, blockIds);
     const liste = Calc.fahrplanAusPlanungen(einheit, planungen);
+    // Haben die Stunden einer Doppelstunde verschiedene Themen (z. B. nach dem
+    // stundenweisen Rücken), bekommt jede Stunde ihr eigenes Feld (themen), sonst
+    // gilt ein Thema für alle Stunden.
+    const themaVon = (b) => ((planungen.find((p) => p.blockId === b.id && p.thema) || {}).thema || "");
+    const verschiedene = einheit.map(themaVon).filter((t, i, a) => t && a.indexOf(t) === i);
+    const themen = verschiedene.length > 1 ? {} : null;
+    if (themen) einheit.slice(1).forEach((b) => { themen[b.id] = themaVon(b); });
+    // Reihe der Einheit; Vorschläge: die Reihen dieser Klasse
+    const reihenDerKlasse = (await Store.Planungen.byKlasse(k.id)).map((p) => String(p.reihe || "").trim())
+      .filter((r, i, a) => r && a.indexOf(r) === i).sort((a, b) => a.localeCompare(b, "de"));
     state.planung = {
       klasseId: k.id, datum: slot.datum, einheit, blockIds, liste,
-      thema: (planungen.find((p) => p.thema) || {}).thema || "",
+      thema: themen ? themaVon(einheit[0]) : verschiedene[0] || "",
+      themen,
+      reihe: (planungen.find((p) => p.reihe) || {}).reihe || "",
       dateien: await dateiStatus(liste)
     };
 
     // Hinweise: Ausfall dieser Stunde, Hausaufgabe der letzten Stunde
     let hinweise = "";
     const erste = (plan.zellen[einheit[0].id] || []).find((i) => i.typ === "stunde" && i.klasseId === k.id);
-    if (erste && erste.aenderung && erste.aenderung.aenderung === "ausfall") {
+    const faelltAus = !!(erste && erste.aenderung && erste.aenderung.aenderung === "ausfall");
+    if (faelltAus) {
       hinweise += '<div class="hint-box"><strong>Diese Stunde fällt aus</strong>' +
         (erste.aenderung.notiz ? " – " + UI.esc(erste.aenderung.notiz) : "") + ".</div>";
     }
@@ -77,21 +103,28 @@
 
     const zeit = einheit[0].start + "–" + einheit[einheit.length - 1].ende;
     const stunden = einheit.length > 1 ? einheit[0].nr + ".–" + einheit[einheit.length - 1].nr + ". Stunde" : einheit[0].nr + ". Stunde";
-    const topbar =
-      '<button class="iconbtn plain" data-action="planung-zurueck" title="Zurück">‹</button>' +
-      '<div class="title-wrap"><h1 class="main">' + UI.esc(k.name || "(ohne Namen)") + (k.fach ? " · " + UI.esc(k.fach) : "") + "</h1>" +
-      '<span class="sub">' + tagKurz(slot.datum) + " · " + stunden + " · " + zeit + "</span></div>" +
-      '<div class="grow"></div>' +
-      '<button class="btn" data-action="planung-uebernehmen">📋 Übernehmen</button>' +
-      '<button class="btn" data-action="planung-menue" title="Ausfall, Verschieben, Hinweis, Termin">⋯ Stunde ändern</button>' +
-      '<button class="btn" data-action="planung-klasse">Klasse</button>' +
-      '<button class="btn primary" data-action="planung-tracker">▶ Tracker</button>';
+    const kopf =
+      '<div class="pl-panelkopf">' +
+        '<div class="title-wrap"><h2>' + UI.esc(k.name || "(ohne Namen)") + (k.fach ? " · " + UI.esc(k.fach) : "") + "</h2>" +
+        '<span class="sub">' + tagKurz(slot.datum) + " · " + stunden + " · " + zeit + "</span></div>" +
+        '<button class="iconbtn plain" data-action="planung-zurueck" title="Planung schließen">✕</button>' +
+      "</div>" +
+      '<div class="btn-row pl-knoepfe">' +
+        '<button class="btn small" data-action="planung-ausfall">' + (faelltAus ? "Ausfall aufheben" : "Fällt aus …") + "</button>" +
+        (faelltAus ? "" : '<button class="btn small" data-action="planung-ruecken" title="Planungen ab hier nach hinten oder vorne rücken">⇅ Rücken …</button>') +
+        '<button class="btn small" data-action="planung-menue" title="Verschieben, Hinweis, Termin">⋯ Mehr</button>' +
+        '<button class="btn small" data-action="planung-uebernehmen">📋 Übernehmen</button>' +
+        '<button class="btn small" data-action="planung-klasse">Klasse</button>' +
+        '<button class="btn small primary" data-action="planung-tracker">▶ Tracker</button>' +
+      "</div>";
 
-    const body = hinweise +
-      '<div class="card pl-kopfzeile" style="border-left:8px solid ' + Calc.klassenFarbe(k) + '">' +
-        '<input type="text" id="pl-thema" placeholder="Thema der Stunde" value="' + UI.esc(state.planung.thema) + '">' +
+    const html = '<div class="card pl-panel" style="border-top:6px solid ' + Calc.klassenFarbe(k) + '">' + kopf + hinweise +
+      '<div class="pl-kopfzeile">' +
+        '<input type="text" id="pl-thema" placeholder="' + (state.planung.themen ? "Thema der 1. Stunde" : "Thema der Stunde") + '" value="' + UI.esc(state.planung.thema) + '">' +
+        '<input type="text" id="pl-reihe" list="pl-reihen" placeholder="Reihe (z. B. Der Schimmelreiter)" value="' + UI.esc(state.planung.reihe) + '">' +
         '<span class="pl-summe" id="pl-summe"></span>' +
       "</div>" +
+      '<datalist id="pl-reihen">' + reihenDerKlasse.map((r) => '<option value="' + UI.esc(r) + '">').join("") + "</datalist>" +
       '<datalist id="pl-phasen">' + Calc.PHASEN.map((p) => '<option value="' + UI.esc(p) + '">').join("") + "</datalist>" +
       '<div class="pl-liste" id="pl-liste"></div>' +
       '<div class="btn-row pl-neu">' +
@@ -99,9 +132,9 @@
         '<button class="btn" data-action="planung-neu" data-typ="link">＋ Link</button>' +
         '<button class="btn" data-action="planung-neu" data-typ="datei">＋ Datei</button>' +
         '<input type="file" id="pl-datei" multiple hidden>' +
-      "</div>";
+      "</div></div>";
 
-    return { topbar, body, fullWidth: false, mount: mountPlanung };
+    return { html, mount: mountPlanung };
   }
 
   // ---- Liste zeichnen ---------------------------------------------------------
@@ -113,6 +146,7 @@
         '<input type="number" class="pl-min" data-feld="minuten" inputmode="numeric" min="0" placeholder="Min" value="' + UI.esc(x.minuten || "") + '">' +
         '<span class="muted">Min</span>' +
         '<div class="grow"></div>' +
+        '<button class="iconbtn plain pl-weiter" title="Diesen und alle folgenden Bausteine in die nächste Stunde">⇥</button>' +
         '<button class="iconbtn plain danger-text pl-weg" title="Baustein entfernen">🗑</button>' +
       "</div>";
     let inhalt = "";
@@ -140,10 +174,21 @@
     return '<div class="pl-baustein' + (x.typ === "link" || x.typ === "datei" ? " " + x.typ : "") + '" data-id="' + UI.esc(x.id) + '">' + kopf + inhalt + "</div>";
   }
   function trennerHTML(block, fest) {
+    const themen = state.planung && state.planung.themen;
     return '<div class="pl-trenner' + (fest ? " fest" : "") + '" data-id="' + (fest ? "kopf" : "trenner-" + UI.esc(block.id)) + '">' +
       (fest ? "" : '<span class="pl-griff" title="Ziehen, um die Grenze zu verschieben">⠿</span>') +
       "<span>" + (fest ? "" : "— ") + UI.esc(blockName(block.id)) + " (" + block.start + "–" + block.ende + ")" + (fest ? "" : " —") + "</span>" +
+      // Eigenes Thema dieser Stunde (nur bei verschiedenen Themen)
+      (themen && !fest ? '<input type="text" class="pl-stundenthema" data-thema-block="' + UI.esc(block.id) +
+        '" placeholder="Thema dieser Stunde" value="' + UI.esc(themen[block.id] || "") + '">' : "") +
       '<span class="pl-stundensumme" data-block="' + UI.esc(block.id) + '"></span></div>';
+  }
+  // Thema zum Speichern: Text für alle Stunden, bei getrennten Themen { blockId: Text }
+  function themaZumSpeichern(p) {
+    if (!p.themen) return p.thema.trim();
+    const out = {};
+    p.einheit.forEach((b, i) => { out[b.id] = String(i === 0 ? p.thema : p.themen[b.id] || "").trim(); });
+    return out;
   }
   function zeichnen() {
     const p = state.planung;
@@ -179,7 +224,7 @@
     const p = state.planung;
     if (!p) return speicherKette;
     speicherKette = speicherKette.catch(() => {}).then(() => Store.Planungen.einheitSpeichern(
-      p.klasseId, p.datum, p.blockIds, Calc.fahrplanAufteilen(p.einheit, p.liste), p.thema.trim()));
+      p.klasseId, p.datum, p.blockIds, Calc.fahrplanAufteilen(p.einheit, p.liste), themaZumSpeichern(p), p.reihe.trim()));
     return speicherKette;
   }
   function spaeterSpeichern() {
@@ -194,9 +239,14 @@
     const thema = UI.$("#pl-thema");
     thema.addEventListener("input", () => { p.thema = thema.value; spaeterSpeichern(); });
     thema.addEventListener("change", () => { p.thema = thema.value; speichern().catch(UI.fehlerMelden); });
+    const reihe = UI.$("#pl-reihe");
+    reihe.addEventListener("input", () => { p.reihe = reihe.value; spaeterSpeichern(); });
+    reihe.addEventListener("change", () => { p.reihe = reihe.value; speichern().catch(UI.fehlerMelden); });
     const box = UI.$("#pl-liste");
     const eintrag = (el) => p.liste.find((x) => x.id === el.closest("[data-id]").getAttribute("data-id"));
     box.addEventListener("input", (ev) => {
+      const themaBlock = ev.target.getAttribute("data-thema-block");
+      if (themaBlock) { p.themen[themaBlock] = ev.target.value; spaeterSpeichern(); return; }
       const feld = ev.target.getAttribute("data-feld");
       const x = feld && eintrag(ev.target);
       if (!x) return;
@@ -210,6 +260,8 @@
         const x = eintrag(ev.target);
         p.liste = p.liste.filter((y) => y !== x);
         zeichnen(); speichern().catch(UI.fehlerMelden);
+      } else if (ev.target.closest(".pl-weiter")) {
+        bausteineWeiter(eintrag(ev.target)).catch(UI.fehlerMelden);
       } else if (ev.target.closest(".pl-oeffnen")) {
         linkOeffnen(eintrag(ev.target).url);
       } else if (ev.target.closest(".pl-datei-oeffnen")) {
@@ -351,10 +403,94 @@
     UI.toast(d.behalten ? "📌 Wird behalten – nicht automatisch entfernt" : "Wird nach der Frist automatisch entfernt");
   }
 
+  // „⇥“ an einem Baustein: ihn und alle folgenden der Einheit in die nächste
+  // Stunde der Klasse schieben. Die App fragt: vorne vor die vorhandene
+  // Planung, oder als eigene Stunde („Brüche 2“) einschieben – dann rücken die
+  // Planungen ab dort stundenweise weiter.
+  async function bausteineWeiter(x) {
+    const p = state.planung;
+    const s = state.settings;
+    if (!p || !x) return;
+    await speichern();
+    const weg = p.liste.slice(p.liste.indexOf(x)).filter((y) => y.typ !== "trenner");
+    const [versionen, termine, planungen] = await Promise.all([
+      Store.Stundenplan.alle(), Store.Termine.alle(), Store.Planungen.byKlasse(p.klasseId)
+    ]);
+    const ziel = Calc.naechsteStunde(versionen, s.abWochen, termine, s.stundenzeiten, p.klasseId, p.datum,
+      p.blockIds[p.blockIds.length - 1], 120);
+    if (!ziel) { UI.toast("In den nächsten Wochen liegt keine weitere Stunde dieser Klasse"); return; }
+    const wohin = tagKurz(ziel.datum) + ", " + blockName(ziel.blockId);
+    const dort = planungen.find((q) => q.datum === ziel.datum && q.blockId === ziel.blockId);
+    // Thema der Stunde, in der der Baustein steht (bei getrennten Themen)
+    const teile = Calc.fahrplanAufteilen(p.einheit, p.liste);
+    const seineStunde = p.einheit.find((b) => teile[b.id].indexOf(x) !== -1) || p.einheit[0];
+    const neuesThema = Calc.themaFortsetzung(p.themen && seineStunde !== p.einheit[0] ? p.themen[seineStunde.id] : p.thema);
+    const neuName = neuesThema ? "„" + neuesThema + "“" : "eigene Stunde";
+    const was = weg.length === 1 ? "Dieser Baustein" : "Diese " + weg.length + " Bausteine";
+    const wahl = await new Promise((resolve) => UI.modal({
+      title: "In die nächste Stunde schieben",
+      bodyHTML: "<p>" + was + " " + (weg.length === 1 ? "kommt" : "kommen") + " in die nächste Stunde (" + UI.esc(wohin) + ")" +
+          (dort && dort.thema ? ", geplant ist dort „" + UI.esc(dort.thema) + "“" : "") + ".</p>" +
+        '<p class="hint"><strong>Vorne anhängen:</strong> vor die vorhandene Planung dieser Stunde, sonst ändert sich nichts.<br>' +
+        "<strong>Einschieben:</strong> als " + UI.esc(neuName) + " in diese Stunde; ihre bisherige Planung und alle folgenden " +
+        "rücken samt Thema eine Stunde weiter.</p>",
+      onClose: () => resolve(null),
+      buttons: [
+        { label: "Abbrechen", onClick: (close) => { resolve(null); close(); } },
+        { label: "Vorne anhängen", onClick: (close) => { resolve("vorne"); close(); } },
+        { label: "Als " + neuName + " einschieben", className: "primary", onClick: (close) => { resolve("einschieben"); close(); } }
+      ]
+    }));
+    if (!wahl) return;
+    const rest = p.liste.filter((y) => weg.indexOf(y) === -1);
+    const quelle = { klasseId: p.klasseId, datum: p.datum, blockIds: p.blockIds, teile: Calc.fahrplanAufteilen(p.einheit, rest), thema: themaZumSpeichern(p), reihe: p.reihe.trim() };
+    if (wahl === "vorne") {
+      await Store.Planungen.bausteineVoranstellen(quelle, ziel, weg);
+    } else {
+      // Rücken ab dem Ziel, stundenweise; Horizont wie beim Ausfall (letzte Planung + 60 Tage)
+      const letzte = planungen.reduce((m, q) => (q.datum > m ? q.datum : m), ziel.datum);
+      const bis = Calc.datumPlusTage(letzte, 60);
+      const zielTag = Calc.tagesPlan(versionen, s.abWochen, termine, ziel.datum);
+      const item = Calc.stundenFinden(zielTag, ziel.blockId).find((i) => i.klasseId === p.klasseId);
+      const luecke = termine.filter((t) => !(item && (t === item.aenderung || t === item.verschobenVon)))
+        .concat(Store.Termine.ausfallDatensaetze([{ item, datum: ziel.datum, blockId: ziel.blockId }], "", null));
+      const zuege = Calc.planungenRuecken(versionen, s.abWochen, termine, luecke, s.stundenzeiten, p.klasseId,
+        ziel.datum, bis, "stunde", "nach");
+      await Store.Planungen.bausteineEinschieben(quelle, ziel, weg, neuesThema, zuege);
+    }
+    p.liste = rest;
+    await render();
+    UI.toast((weg.length === 1 ? "1 Baustein" : weg.length + " Bausteine") + " → " + wohin +
+      (wahl === "einschieben" ? " – folgende Planungen eine Stunde weiter" : ""));
+  }
+
+  // Planungsfenster schließen
   async function planungZurueck() {
     await speichern();
     state.planung = null;
-    go("home");
+    state.planungSlot = null;
+    render();
+  }
+  // Die Stunde des Fensters im tatsächlichen Tag (für Ausfall / Rücken)
+  async function planungStunde() {
+    const p = state.planung;
+    await speichern();
+    const [versionen, termine, k] = await Promise.all([Store.Stundenplan.alle(), Store.Termine.alle(), Store.Klassen.get(p.klasseId)]);
+    const plan = Calc.tagesPlan(versionen, state.settings.abWochen, termine, p.datum);
+    const item = (plan.zellen[p.blockIds[0]] || []).find((i) => i.typ === "stunde" && i.klasseId === p.klasseId &&
+      !(i.aenderung && i.aenderung.aenderung === "verschoben"));
+    return item ? { item, datum: p.datum, blockId: p.blockIds[0], name: (k && k.name) || "(ohne Namen)" } : null;
+  }
+  async function planungAusfall() {
+    const st = await planungStunde();
+    if (!st) return;
+    const a = st.item.aenderung;
+    if (a && a.aenderung === "ausfall") { await api.ausfallAufheben(a); render(); return; }
+    api.ausfallDialog(st.item, st.datum, st.blockId, st.name);
+  }
+  async function planungRuecken() {
+    const st = await planungStunde();
+    if (st) api.rueckenDialog(st.item, st.datum, st.blockId, st.name);
   }
   async function planungKlasse() {
     const p = state.planung;
@@ -430,16 +566,16 @@
           (x.typ === "datei" ? '<div>📄 <button class="btn small" data-datei="' + UI.esc(x.dateiId) + '">' + UI.esc(x.name || "Datei") + "</button></div>" : "") +
           (x.text ? '<div class="pl-text">' + UI.esc(x.text) + "</div>" : "") + "</div>").join("");
     const m = UI.modal({
-      title: "🗺 Fahrplan" + (thema ? " · " + thema : ""),
+      title: "📋 Stundenplanung" + (thema ? " · " + thema : ""),
       bodyHTML: liste.some((x) => x.typ !== "trenner") ? '<div class="pl-lesenliste">' + inhalt + "</div>"
-        : '<p class="muted">Für diese Stunde gibt es keinen Fahrplan' + (nr ? "" : " (die Stunde hat keine Stundennummer)") + ".</p>",
+        : '<p class="muted">Für diese Stunde gibt es keine Stundenplanung' + (nr ? "" : " (die Stunde hat keine Stundennummer)") + ".</p>",
       buttons: [{ label: "Schließen" }]
     });
     UI.$all("[data-datei]", m.box).forEach((b) => b.addEventListener("click", () => dateiOeffnen(b.getAttribute("data-datei"))));
   }
 
   Object.assign(global.Views, {
-    ViewPlanung, bausteinNeu, planungZurueck, planungKlasse, planungTracker, planungMenue,
+    planungPanel, bausteinNeu, planungZurueck, planungAusfall, planungRuecken, planungKlasse, planungTracker, planungMenue,
     planungUebernehmen, fahrplanDialog, groesseText
   });
 })(window);

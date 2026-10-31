@@ -8,7 +8,7 @@
 (function (global) {
   "use strict";
 
-  const { state, render, notenKontext, notenZeilenInhalt } = global.Views;
+  const { state, render, notenKontext, notenZeilenInhalt, notenFussInhalt } = global.Views;
 
   // Renderkontext der aktuellen Tabelle (siehe TabNoten in views.noten.js);
   // wird bei jedem mountNotenTabelle neu geholt.
@@ -47,20 +47,27 @@
       const sid = td.getAttribute("data-sid");
       const noten = notenKtx.notenBySchueler[sid] || [];
       const vorhanden = noten.find((n) => n.leistungId === lid);
-      const alt = vorhanden && vorhanden.wert !== null && vorhanden.wert !== undefined
-        ? Calc.formatTendenz(vorhanden.wert, notenKtx.mss) : "";
+      // Rohpunkte-Spalte: getippt werden die Punkte, die Note rechnet Calc aus
+      const leistung = notenKtx.leistungen.find((l) => l.id === lid);
+      const rp = !!(leistung && leistung.bewertung === "rohpunkte");
+      const alt = rp
+        ? (vorhanden ? Calc.formatRohpunkte(vorhanden.rohpunkte) : "")
+        : vorhanden && vorhanden.wert !== null && vorhanden.wert !== undefined
+          ? Calc.formatTendenz(vorhanden.wert, notenKtx.mss) : "";
       td.classList.add("editiert");
       // inputmode="none": Auf dem iPad soll die Bildschirmtastatur zubleiben –
       // eingegeben wird über das Nummernpad (eine angeschlossene Tastatur
-      // funktioniert trotzdem weiter).
-      td.innerHTML = '<input class="zelle-input" inputmode="none" value="' + UI.esc(alt) + '">';
+      // funktioniert trotzdem weiter). Rohpunkte: Zifferntastatur statt Pad.
+      td.innerHTML = '<input class="zelle-input" inputmode="' + (rp ? "decimal" : "none") + '"' +
+        (rp ? ' placeholder="von ' + UI.esc(Calc.formatRohpunkte(leistung.maxPunkte)) + '"' : "") +
+        ' value="' + UI.esc(alt) + '">';
       const input = td.querySelector("input");
-      aktiv = { td, input, lid, sid, alt };
+      aktiv = { td, input, lid, sid, alt, rp };
       input.focus();
       input.select();
       input.addEventListener("keydown", taste);
       input.addEventListener("blur", () => { if (aktiv && aktiv.input === input) schliessen(true); });
-      padOeffnen();
+      if (rp) padSchliessen(); else padOeffnen();
     }
 
     function taste(ev) {
@@ -161,21 +168,32 @@
 
     async function schliessen(speichern) {
       if (!aktiv) return;
-      const { td, input, lid, sid, alt } = aktiv;
+      const { td, input, lid, sid, alt, rp } = aktiv;
       const text = input.value.trim();
       aktiv = null;
       padSchliessen();
       td.classList.remove("editiert");
       if (!speichern || text === alt) { zeileNeu(sid); return; }
-      const wert = text === "" ? null : Calc.parseNote(text, notenKtx.mss);
-      if (text !== "" && wert === null) {
-        UI.toast(notenKtx.mss ? "Bitte Punkte 0–15 eingeben" : "Bitte eine Note eingeben, z. B. 2, 2+ oder 3-");
-        zeileNeu(sid);
-        return;
-      }
       const leistung = notenKtx.leistungen.find((l) => l.id === lid);
       if (!leistung) return;
-      const gespeichert = await Store.Noten.setzeZelle(leistung, sid, wert);
+      let wert, rohpunkte;
+      if (rp) {
+        rohpunkte = text === "" ? null : Calc.parseRohpunkte(text, leistung.maxPunkte);
+        if (text !== "" && rohpunkte === null) {
+          UI.toast("Bitte Punkte von 0 bis " + Calc.formatRohpunkte(leistung.maxPunkte) + " eingeben (halbe Punkte mit Komma)");
+          zeileNeu(sid);
+          return;
+        }
+        wert = rohpunkte === null ? null : Calc.noteAusRohpunkten(rohpunkte, leistung.maxPunkte, leistung.schluessel, notenKtx.mss);
+      } else {
+        wert = text === "" ? null : Calc.parseNote(text, notenKtx.mss);
+        if (text !== "" && wert === null) {
+          UI.toast(notenKtx.mss ? "Bitte Punkte 0–15 eingeben" : "Bitte eine Note eingeben, z. B. 2, 2+ oder 3-");
+          zeileNeu(sid);
+          return;
+        }
+      }
+      const gespeichert = await Store.Noten.setzeZelle(leistung, sid, wert, rohpunkte);
       // Lokalen Notenstand nachziehen, damit die Zeile ohne Neuladen stimmt
       const liste = (notenKtx.notenBySchueler[sid] || []).filter((n) => n.leistungId !== lid);
       if (gespeichert) liste.push(gespeichert);
@@ -187,6 +205,9 @@
       const tr = UI.$('tbody tr[data-sid="' + sid + '"]', table);
       const s = notenKtx.schueler.find((x) => x.id === sid);
       if (tr && s) tr.innerHTML = notenZeilenInhalt(s);
+      // Ø und Notenspiegel der schriftlichen Leistungen mitziehen
+      const fuss = UI.$("tfoot tr.noten-fuss", table);
+      if (fuss) fuss.innerHTML = notenFussInhalt();
     }
   }
 

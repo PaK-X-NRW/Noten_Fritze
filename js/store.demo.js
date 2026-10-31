@@ -4,6 +4,9 @@
    Start (leere Datenbank) eine vollständige Beispielklasse an – Schüler,
    Kategorien, Spalten (Leistungen), Noten, Stunden, Ereignisse,
    Abwesenheiten und Sitzplan.
+   seedBeispielklassen(): „9a (Beispiel)“ und „Mathematik LK 12 (Beispiel)“,
+   dazu – nur ohne vorhandenen Stundenplan – ein Beispiel-Stundenplan mit
+   Planungen für die nächsten Wochen und einer Klassenarbeit.
    Diese Datei lädt zuletzt, weil sie alle übrigen Store-Teile benutzt.
    ========================================================================= */
 (function (global) {
@@ -13,7 +16,7 @@
     now, datumLokal, quartalAusDatum, getSettings,
     Klassen, neueKlasse, neuerSchueler, neueKategorie,
     neueLeistung, neueNote, neuesEreignis, neueStunde,
-    Sitzplan, neuerSitzplan
+    Sitzplan, neuerSitzplan, uid, Stundenplan, Planungen, Termine
   } = global.Store;
 
   // ---- Demo-Daten ----------------------------------------------------------
@@ -333,7 +336,98 @@
       await musterklasseAnlegen(cfg, settings);
       angelegt.push(cfg.klasse.name);
     }
-    return { angelegt, uebersprungen };
+    const stundenplan = await beispielStundenplanAnlegen(settings);
+    return { angelegt, uebersprungen, stundenplan };
+  }
+
+  // ---- Beispiel-Stundenplan (Stundenplanung ausprobieren) -------------------------
+  // Nur wenn es noch gar keinen Stundenplan gibt – ein echter Plan wird nie
+  // angefasst. Gilt auch für schon vorhandene Beispielklassen; Planungen nur für
+  // Klassen, die noch keine haben. Doppel- und Einzelstunden gemischt, damit sich
+  // Rücken (je Doppelstunde / stundenweise) und ⇥ ausprobieren lassen. Die
+  // Klassenarbeit der 9a steht fest im Kalender – so sieht man, wie viele Stunden
+  // bis dahin bleiben. Löschen der Beispielklasse entfernt alles wieder.
+  const BEISPIEL_PLAN = [
+    {
+      name: "9a (Beispiel)",
+      stunden: [[1, 1], [1, 2], [3, 3], [5, 3], [5, 4]],   // [Tag, Stunde]: Mo 1+2, Mi 3, Fr 3+4
+      klassenarbeit: 10,                                   // Einheit mit der Klassenarbeit (0 = erste)
+      themen: ["Normalparabel", "Verschieben in y-Richtung", "Verschieben in x-Richtung", "Scheitelpunktform",
+        "Strecken und Stauchen", "Übung: Parabeln zeichnen", "Nullstellen", "p-q-Formel",
+        "Anwendungsaufgaben", "Wiederholung", "Klassenarbeit", "Rückgabe und Berichtigung"]
+    },
+    {
+      name: "Mathematik LK 12 (Beispiel)",
+      stunden: [[2, 3], [2, 4], [4, 1], [4, 2], [5, 6]],   // Di 3+4, Do 1+2, Fr 6
+      themen: ["Vektoren im Raum", "Geraden", "Lagebeziehungen von Geraden", "Ebenen in Parameterform",
+        "Koordinatenform", "Lage von Gerade und Ebene", "Schnittwinkel", "Abstand Punkt–Ebene",
+        "Abstand windschiefer Geraden", "Übungsstunde", "Kursarbeitstraining", "Puffer"]
+    }
+  ];
+
+  async function beispielStundenplanAnlegen(settings) {
+    if ((await Stundenplan.alle()).length) return false;
+    const namensSchluessel = (n) => String(n || "").trim().toLowerCase();
+    const klassen = await Klassen.all();
+    const zeiten = settings.stundenzeiten;
+    const gibt = (blockId) => zeiten.some((b) => b.id === blockId && b.art === "stunde");
+    const v = await Stundenplan.neu(null);
+    const dabei = [];
+    BEISPIEL_PLAN.forEach((cfg) => {
+      const k = klassen.find((x) => namensSchluessel(x.name) === namensSchluessel(cfg.name));
+      if (!k) return;
+      dabei.push({ k, cfg });
+      cfg.stunden.forEach(([tag, nr]) => {
+        if (gibt("std-" + nr)) v.eintraege.push({ id: uid(), tag, blockId: "std-" + nr, woche: "alle", klasseId: k.id, titel: "", sitzplanId: null });
+      });
+    });
+    if (!v.eintraege.length) { await Stundenplan.remove(v.id); return false; }
+    await Stundenplan.save(v);
+
+    // Planungen ab dieser Woche (4 Wochen), je Einheit ein Thema
+    const montag = global.Calc.montagVon(datumLokal());
+    const termine = await Termine.alle();
+    for (const { k, cfg } of dabei) {
+      if ((await Planungen.byKlasse(k.id)).length) continue;
+      const reihe = global.Calc.stundenReihe([v], settings.abWochen, termine, zeiten, k.id, montag, global.Calc.datumPlusTage(montag, 27));
+      const einheiten = [];
+      reihe.forEach((h) => {
+        const letzte = einheiten[einheiten.length - 1];
+        const vor = letzte && letzte[letzte.length - 1];
+        if (vor && vor.datum === h.datum && vor.i + 1 === h.i) letzte.push(h); else einheiten.push([h]);
+      });
+      for (let i = 0; i < einheiten.length; i++) {
+        const e = einheiten[i];
+        const thema = cfg.themen[i % cfg.themen.length];
+        await Planungen.einheitSpeichern(k.id, e[0].datum, e.map((h) => h.blockId),
+          beispielBausteine(e.map((h) => h.blockId), thema, i === cfg.klassenarbeit), thema);
+        if (i === cfg.klassenarbeit) {
+          const t = now();
+          await Termine.save({ id: uid(), art: "klassenarbeit", titel: "Klassenarbeit (Beispiel)", datum: e[0].datum, bis: null,
+            blockId: e[0].blockId, klasseId: k.id, notiz: "", aenderung: null, nachDatum: null, nachBlockId: null,
+            createdAt: t, updatedAt: t });
+        }
+      }
+    }
+    return true;
+  }
+
+  // Bausteine einer Beispiel-Einheit: Einzelstunde Einstieg · Erarbeitung ·
+  // Sicherung · Hausaufgabe; Doppelstunde mit zwei Erarbeitungsphasen.
+  function beispielBausteine(blockIds, thema, arbeit) {
+    const b = (phase, minuten, text) => ({ id: uid(), typ: "text", phase, minuten: String(minuten), text, url: "" });
+    if (arbeit) return { [blockIds[0]]: [b("Klassenarbeit", 45, "Aufgaben austeilen, Zeit im Blick behalten")] };
+    const teile = {};
+    if (blockIds.length > 1) {
+      teile[blockIds[0]] = [b("Einstieg", 10, "Wiederholung: " + thema), b("Erarbeitung", 35, "Erarbeitung 1 – Beispiele im Heft")];
+      teile[blockIds[1]] = [b("Erarbeitung", 20, "Erarbeitung 2 – Partnerarbeit"), b("Sicherung", 20, "Merksatz an der Tafel"),
+        b("Hausaufgabe", 5, "Buch S. 42, Nr. 3–5")];
+      blockIds.slice(2).forEach((id) => { teile[id] = [b("Übung", 45, "Übungsblatt")]; });
+    } else {
+      teile[blockIds[0]] = [b("Einstieg", 5, "Hausaufgabe besprechen"), b("Erarbeitung", 25, thema),
+        b("Sicherung", 10, "Tafelbild ins Heft"), b("Hausaufgabe", 5, "Arbeitsblatt fertigstellen")];
+    }
+    return teile;
   }
 
   async function musterklasseAnlegen(cfg, settings) {

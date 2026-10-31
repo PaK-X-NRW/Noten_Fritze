@@ -12,7 +12,7 @@
   "use strict";
 
   const state = {
-    view: "home",          // home | klasse | tracker | besprechung | einstellungen | planung
+    view: "home",          // home | klasse | tracker | besprechung | einstellungen
     klasseId: null,
     tab: "schueler",       // schueler | noten | kategorien | sitzplan | auswertung
     auswertungRange: "alle",
@@ -24,6 +24,7 @@
     // beim Neuladen gilt wieder die Default-Reihenfolge.
     notenSpalten: null,
     auswertungQuartal: "",  // dto. für die Mitarbeits-Auswertung
+    auswertungKlasse: "",   // Klasse, für die auswertungQuartal gewählt wurde (Wechsel = Vorauswahl neu)
     // Besprechung
     selectedSchuelerId: null,
     // Tracker (flüchtig)
@@ -37,8 +38,10 @@
     stundenplanBearbeiten: false,
     stundenplanAnsicht: "woche", // "woche" | "monat"
     stundenplanMonat: "",        // angezeigter Monat "YYYY-MM" ("" = Monat der angezeigten Woche)
-    // Stundenplanung: geöffnete Stunde { klasseId, datum, blockId } und flüchtiger Fahrplan
+    // Stundenplanung: geöffnete Stunde { klasseId, datum, blockId } (Fenster neben dem
+    // Wochenplan, null = zu) und flüchtiger Fahrplan
     planungSlot: null,
+    reihen: null,          // Reihen der zuletzt gezeigten Übersicht (views.reihen.js, Index für die Aktionen)
     planung: null,
     settings: null
   };
@@ -95,6 +98,16 @@
     return "<strong>" + UI.esc(s.nachname) + "</strong>, " + UI.esc(s.vorname);
   }
 
+  // Knopfleiste unten auf der Startseite (Klassen, Woche, Monat): Infoseite und
+  // freiwilliger Beitrag. Normale Links – PayPal öffnet sich erst beim Antippen.
+  function homeInfoHTML() {
+    return '<div class="home-info"><div class="btn-row">' +
+        '<a class="btn" href="info.html">📖 Anleitung &amp; Infos</a>' +
+        '<a class="btn" href="https://paypal.me/notenfritze" target="_blank" rel="noopener">☕ Per PayPal unterstützen</a>' +
+      "</div>" +
+      '<a class="home-info-klein" href="info.html">Datenschutz · Impressum</a></div>';
+  }
+
   // Sitzplan-Raster (Tracker und Reiter Sitzplan): Bis zur eingestellten
   // Spaltenzahl teilen sich die Kacheln die Bildschirmbreite, darüber bleiben
   // sie so breit und das Raster scrollt seitlich (Klasse „breit“, styles.css).
@@ -130,7 +143,6 @@
       case "tracker":      out = await api.ViewTracker(); break;
       case "besprechung":  out = await api.ViewBesprechung(); break;
       case "einstellungen":out = await api.ViewEinstellungen(); break;
-      case "planung":      out = await api.ViewPlanung(); break;
       default:             out = await api.ViewHome();
     }
     document.getElementById("topbar").innerHTML = out.topbar || "";
@@ -141,6 +153,6 @@
 
   const api = global.Views = {
     state, go, render, quartalFilter, quartalTabsHTML,
-    halbjahrFilter, halbjahrTabsHTML, notenBadge, nameHTML, sitzrasterHTML
+    halbjahrFilter, halbjahrTabsHTML, notenBadge, nameHTML, sitzrasterHTML, homeInfoHTML
   };
 })(window);

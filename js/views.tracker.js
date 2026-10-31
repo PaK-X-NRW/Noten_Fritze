@@ -62,7 +62,7 @@
         : "") +
       '<div class="modusbar">' + modusBtns + "</div>" +
       (stunde.endeTs && !t.nachtragen ? '<span class="chip accent" id="tracker-restzeit" style="align-self:center">' + restzeitText() + "</span>" : "") +
-      '<button class="btn small" data-action="tracker-fahrplan" title="Fahrplan dieser Stunde (Stundenplanung)">🗺 Fahrplan</button>' +
+      '<button class="btn small" data-action="tracker-fahrplan" title="Stundenplanung dieser Stunde">📋 Stundenplanung</button>' +
       '<button class="btn small" data-action="tracker-undo" id="undo-btn" title="Lang drücken bzw. Rechtsklick: alle Einträge dieser Stunde"' + (t.undoStack.length ? "" : " disabled") + ">↶ Rückgängig</button>" +
       '<button class="btn small" data-action="tracker-stunde-beenden">Stunde beenden</button>';
 
@@ -195,8 +195,9 @@
       return st;
     }
     if (state.tracker && state.tracker.klasseId === k.id && state.tracker.stunde) return state.tracker.stunde;
-    // Neue Stunden tragen das eingestellte Quartal, nicht das aus dem Datum abgeleitete.
-    const st = Store.neueStunde(k.id, { quartal: parseInt(state.settings.aktuellesQuartal, 10) || 1 });
+    // Neue Stunden tragen das Erfassungsquartal der Klasse, nicht das aus dem Datum abgeleitete.
+    const q = (await Store.erfassungsQuartal(k, state.settings)) || parseInt(state.settings.aktuellesQuartal, 10) || 1;
+    const st = Store.neueStunde(k.id, { quartal: q });
     await Store.Stunden.save(st);
     return st;
   }
@@ -616,11 +617,13 @@
     const vergessen = offene.find((st) => Calc.stundeVergessen(st, jetzt));
     if (vergessen) return vergesseneStundeDialog(klasse, vergessen);
 
-    // In einem abgeschlossenen Quartal wird nichts mehr erfasst – dort gehört
-    // keine neue Stunde mehr hinein (Abschluss im Mitarbeit-Tab aufhebbar).
+    // In einem abgeschlossenen Quartal wird nichts mehr erfasst: Neue Stunden
+    // landen im Erfassungsquartal der Klasse – nach einem Abschluss also
+    // automatisch im nächsten (Store.erfassungsQuartal, nie rückwärts).
     const aktuellesQ = parseInt(state.settings.aktuellesQuartal, 10) || 1;
-    if (klasse && Store.abschlussVon(klasse, aktuellesQ)) {
-      UI.toast(aktuellesQ + ". Quartal ist abgeschlossen – im Reiter Mitarbeit erst den Abschluss aufheben");
+    const erfassungsQ = klasse ? await Store.erfassungsQuartal(klasse, state.settings) : aktuellesQ;
+    if (erfassungsQ === null) {
+      UI.toast("Alle vier Quartale dieser Klasse sind abgeschlossen – im Reiter Mitarbeit lässt sich ein Abschluss aufheben");
       return;
     }
     // Noch laufende Stunde (fortsetzbar)
@@ -672,13 +675,19 @@
         state.pendingStunde = offen; go("tracker");
       }});
     }
-    buttons.push({ label: "Einzelstunde", className: offen || doppelVorschlag ? "" : "primary", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(einzel, offen, id); }});
-    buttons.push({ label: "Doppelstunde", className: offen ? "" : "primary", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(doppel, offen, id); }});
-    buttons.push({ label: "Ohne Zeitangabe", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(null, offen, id); }});
+    buttons.push({ label: "Einzelstunde", className: offen || doppelVorschlag ? "" : "primary", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(einzel, offen, id, erfassungsQ); }});
+    buttons.push({ label: "Doppelstunde", className: offen ? "" : "primary", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(doppel, offen, id, erfassungsQ); }});
+    buttons.push({ label: "Ohne Zeitangabe", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(null, offen, id, erfassungsQ); }});
+
+    // Weicht das Quartal der Klasse vom eingestellten ab, sagen wir es dazu
+    const quartalHinweis = erfassungsQ !== aktuellesQ
+      ? '<p class="hint-box">Erfasst wird im <strong>' + erfassungsQ + ". Quartal</strong>" +
+        (Store.abschlussVon(klasse, erfassungsQ - 1) ? " – das " + (erfassungsQ - 1) + ". Quartal ist abgeschlossen." : ".") + "</p>"
+      : "";
 
     UI.modal({
       title: "Tracker starten",
-      bodyHTML: offenText + raumHTML + "<p>Wie lange dauert die neue Stunde?</p>" + '<p class="muted">' + info + "</p>",
+      bodyHTML: quartalHinweis + offenText + raumHTML + "<p>Wie lange dauert die neue Stunde?</p>" + '<p class="muted">' + info + "</p>",
       buttons
     });
   }
@@ -724,10 +733,11 @@
   }
 
   // Neue Stunde anlegen (und eine noch offene vorher schließen).
-  async function stundeStarten(session, offen, sitzplanId) {
+  //   quartal: Erfassungsquartal der Klasse (aus trackerStartDialog)
+  async function stundeStarten(session, offen, sitzplanId, quartal) {
     if (offen) await Store.Stunden.beenden(offen.id);
-    // Neue Stunden tragen das eingestellte Quartal, nicht das aus dem Datum abgeleitete.
-    session = Object.assign({}, session, { quartal: parseInt(state.settings.aktuellesQuartal, 10) || 1 });
+    // Neue Stunden tragen das Erfassungsquartal der Klasse, nicht das aus dem Datum abgeleitete.
+    session = Object.assign({}, session, { quartal: quartal || parseInt(state.settings.aktuellesQuartal, 10) || 1 });
     const st = Store.neueStunde(state.klasseId, session);
     if (sitzplanId) {
       st.sitzplanId = sitzplanId;

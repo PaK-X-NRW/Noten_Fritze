@@ -32,6 +32,8 @@
       const s = await Store.getSettings();
       await Store.Dateien.aufraeumen(s.dateiAufbewahrung === "nie" ? null : s.dateiFristTage, Store.datumLokal());
     } catch (e) { console.warn("Dateien aufräumen:", e); }
+    // Klassen, die länger als 30 Tage im Papierkorb liegen, endgültig löschen
+    try { await Store.Papierkorb.aufraeumen(Store.datumLokal()); } catch (e) { console.warn("Papierkorb:", e); }
 
     Views.initDelegation();
     await Views.render();

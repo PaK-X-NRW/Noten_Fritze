@@ -164,6 +164,10 @@
       { abPunkte: -1.0, note: 5 }
       // darunter: 6
     ],
+    // Notenschlüssel für Rohpunkte-Spalten: ab wie viel Prozent der Höchstpunkte
+    // es p MSS-Punkte gibt (Index 0..15); Sek I bis 14 (= 1), die 15 nur in der
+    // MSS. Neue Spalten bekommen eine Kopie, die sich je Spalte anpassen lässt.
+    notenschluessel: [0, 25, 30, 35, 40, 45, 50, 56, 62, 68, 74, 79, 84, 89, 95, 98],
     // Heatmap-Erfassungspunkte je Ereignistyp
     heatPunkteEinfach: 1,
     heatPunkteGut: 2,
@@ -207,6 +211,9 @@
     s.mitarbeitSchwellen = schwellenNormalisieren(s.mitarbeitSchwellen);
     if (!s.mitarbeitSchwellen.length) {
       s.mitarbeitSchwellen = JSON.parse(JSON.stringify(DEFAULT_SETTINGS.mitarbeitSchwellen));
+    }
+    if (!global.Calc || !global.Calc.schluesselNormalisieren(s.notenschluessel)) {
+      s.notenschluessel = DEFAULT_SETTINGS.notenschluessel.slice();
     }
     // Aktuelles Quartal: fehlt es oder ist es ungültig, aus dem heutigen
     // Datum ableiten.

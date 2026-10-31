@@ -10,7 +10,10 @@
 (function (global) {
   "use strict";
 
-  const { state, render, halbjahrFilter, halbjahrTabsHTML, breakdownHTML, notenBadge, nameHTML } = global.Views;
+  const {
+    state, render, halbjahrFilter, halbjahrTabsHTML, breakdownHTML, notenBadge, nameHTML,
+    schluesselFelderHTML, schluesselAusFormular, schluesselPunkteZeigen
+  } = global.Views;
   // ---- Tab: Noten ----------------------------------------------------------
   // Die Notenübersicht zeigt genau ein Halbjahr. Aufbau der Spalten:
   //   Name | schriftliche Leistungen | [1. Quartal: sonstige Leistungen] |
@@ -83,7 +86,8 @@
         '<button class="btn small" data-action="export-einzelnoten">Einzelnoten-CSV</button>' +
       "</div>" +
       '<div class="table-wrap noten-wrap"><table class="noten-tab"><thead>' +
-        spaltenKopfZeile(notenKtx.spalten) + "</thead><tbody>" + body + "</tbody></table>" +
+        spaltenKopfZeile(notenKtx.spalten) + "</thead><tbody>" + body + "</tbody>" +
+        '<tfoot><tr class="noten-fuss">' + notenFussInhalt() + "</tr></tfoot></table>" +
         '<div class="noten-rand"></div>' +
       "</div>"
     );
@@ -104,17 +108,23 @@
   }
 
   // Spalte einer einzelnen Leistung: hier wird getippt (eine Note je Zelle).
+  // Rohpunkte-Spalte: Kopf mit Höchstpunktzahl, Zelle mit Note und Punkten.
   function leistungSpalte(l, kat, mss) {
-    const untertitel = UI.esc(kat.name) + (l.datum ? " · " + UI.datumKurz(l.datum) : "");
+    const rp = l.bewertung === "rohpunkte";
+    const untertitel = UI.esc(kat.name) + (l.datum ? " · " + UI.datumKurz(l.datum) : "") +
+      (rp ? " · " + Calc.formatRohpunkte(l.maxPunkte) + " P." : "");
     return {
       id: "l:" + l.id,
       grp: grpKlasse(kat.art),
       leistungId: l.id,
+      spiegel: kat.art === "schriftlich",   // Ø und Notenspiegel in der Fußzeile
       kopf: UI.esc(l.titel || kat.name) +
         '<br><span class="muted" style="text-transform:none;font-weight:400">' + untertitel + "</span>",
       zelle: (sp, ctx) => {
         const n = ctx.werte[l.id];
-        const inhalt = tendenzBadge(n ? n.wert : null, mss);
+        const inhalt = tendenzBadge(n ? n.wert : null, mss) +
+          (rp && n && n.rohpunkte !== undefined && n.rohpunkte !== null
+            ? '<span class="rp-punkte">' + Calc.formatRohpunkte(n.rohpunkte) + " P.</span>" : "");
         return spaltenZelle(sp, inhalt, "zelle",
           ' data-lid="' + l.id + '" data-sid="' + ctx.s.id + '" tabindex="0"');
       }
@@ -258,6 +268,27 @@
     return '<tr data-sid="' + s.id + '">' + notenZeilenInhalt(s) + "</tr>";
   }
 
+  // Fußzeile: unter jeder schriftlichen Leistung Ø und Notenspiegel
+  // (Calc.notenspiegel); die Inline-Eingabe zeichnet sie nach jeder Note neu.
+  function notenFussInhalt() {
+    const mss = notenKtx.mss;
+    return '<td class="fuss-name">Ø · Notenspiegel</td>' + notenKtx.spalten.map((sp) => {
+      if (!sp.spiegel) return '<td class="' + spaltenKlassen(sp) + '"></td>';
+      const werte = notenKtx.schueler.map((s) => {
+        const n = (notenKtx.notenBySchueler[s.id] || []).find((x) => x.leistungId === sp.leistungId);
+        return n ? n.wert : null;
+      });
+      const st = Calc.notenspiegel(werte, mss);
+      const inhalt = !st.anzahl ? '<span class="muted">–</span>'
+        : '<div class="fs-schnitt">Ø ' + Calc.formatNote(st.schnitt, 2) + "</div>" +
+          '<div class="fs-spiegel' + (mss ? " mss" : "") + '">' + st.stufen.map((z) =>
+            "<span" + (z.anzahl ? "" : ' class="null"') + "><b>" + z.stufe + ":</b> " + z.anzahl + "</span>").join("") + "</div>" +
+          '<div class="fs-unter">' + (mss ? "4 P. oder weniger" : "4- oder schlechter") + ": " + st.unter +
+            " (" + Math.round(st.unter / st.anzahl * 100) + " %)</div>";
+      return '<td class="' + spaltenKlassen(sp, "fuss-spiegel") + '">' + inhalt + "</td>";
+    }).join("");
+  }
+
   // Renderkontext der zuletzt gezeichneten Tabelle (für die Inline-Eingabe)
   function notenKontext() { return notenKtx; }
 
@@ -286,6 +317,11 @@
     const data = isNew
       ? Store.neueLeistung(k.id, { kategorieId: benutzbar[0].id, quartal: hj === 2 ? 3 : 1 })
       : vorhanden;
+    // Rohpunkte: Höchstpunktzahl und Notenschlüssel der Spalte (neue Spalten:
+    // Kopie des Vorschlags aus den Einstellungen)
+    const mss = Calc.istMSS(k);
+    const rpVorher = data.bewertung === "rohpunkte";
+    const schluesselAlt = Calc.schluesselNormalisieren(data.schluessel) || state.settings.notenschluessel.slice();
 
     const body =
       UI.field("Bezeichnung", "titel", data.titel, {
@@ -306,7 +342,33 @@
           })),
           hint: "Bestimmt die Epochalnote." }) +
       "</div>" +
-      UI.field("Datum", "datum", data.datum, { type: "date" });
+      UI.field("Datum", "datum", data.datum, { type: "date" }) +
+      UI.field("Bewertung", "bewertung", rpVorher ? "rohpunkte" : "note", { type: "select", options: [
+        { value: "note", label: "Note direkt eingeben" },
+        { value: "rohpunkte", label: "Rohpunkte eingeben – Note wird berechnet" }
+      ] }) +
+      '<div id="rp-block"' + (rpVorher ? "" : ' hidden') + ">" +
+        UI.field("Höchstpunktzahl", "maxPunkte", rpVorher ? Calc.formatRohpunkte(data.maxPunkte) : "", {
+          inputmode: "decimal", placeholder: "z. B. 90", hint: "Erreichbare Punkte der Arbeit (halbe Punkte erlaubt)." }) +
+        '<div class="field"><label>Notenschlüssel dieser Spalte</label>' + schluesselFelderHTML(schluesselAlt, mss) +
+          '<div class="hint">Punktgrenzen kaufmännisch auf halbe Punkte gerundet. Der Vorschlag kommt aus ⚙️ Einstellungen; ' +
+          "Änderungen hier gelten nur für diese Spalte.</div></div>" +
+      "</div>";
+
+    // Bewertung umschalten, Punktgrenzen beim Tippen mitrechnen
+    const onMount = (box) => {
+      const block = box.querySelector("#rp-block");
+      const auswahl = box.querySelector('[name="bewertung"]');
+      const max = box.querySelector('[name="maxPunkte"]');
+      const zeigen = () => {
+        block.hidden = auswahl.value !== "rohpunkte";
+        schluesselPunkteZeigen(block, schluesselAusFormular(block, schluesselAlt),
+          parseFloat(String(max.value).replace(",", ".")), mss);
+      };
+      auswahl.addEventListener("change", zeigen);
+      block.addEventListener("input", zeigen);
+      zeigen();
+    };
 
     const buttons = [{ label: "Abbrechen" }];
     if (!isNew) {
@@ -321,6 +383,22 @@
     buttons.push({ label: isNew ? "Anlegen" : "Speichern", className: "primary", onClick: async (close, box) => {
       const v = UI.formValues(box);
       const quartal = parseInt(v.quartal, 10) || 1;
+      // Rohpunkte prüfen; bei geänderter Höchstpunktzahl / Schlüssel die Noten neu berechnen
+      let neuRechnen = false;
+      if (v.bewertung === "rohpunkte") {
+        const maxPunkte = Calc.parseRohpunkte(v.maxPunkte, 100000);
+        if (!maxPunkte) { UI.toast("Bitte die Höchstpunktzahl angeben (ganze oder halbe Punkte)"); return; }
+        const schluessel = schluesselAusFormular(box.querySelector("#rp-block"), schluesselAlt);
+        if (!schluessel) { UI.toast("Die Prozente müssen von unten nach oben steigen (0–100)"); return; }
+        neuRechnen = rpVorher && (maxPunkte !== data.maxPunkte || JSON.stringify(schluessel) !== JSON.stringify(schluesselAlt));
+        if (neuRechnen && !await UI.confirmDialog("Noten neu berechnen?",
+          "Höchstpunktzahl oder Notenschlüssel haben sich geändert. Alle Noten dieser Spalte werden aus den gespeicherten " +
+          "Rohpunkten neu berechnet.", { okLabel: "Neu berechnen", danger: false })) return;
+        Object.assign(data, { bewertung: "rohpunkte", maxPunkte, schluessel });
+      } else {
+        // Zurück auf „Note direkt“: Noten bleiben, die Rohpunkte daran stören nicht
+        data.bewertung = "note";
+      }
       Object.assign(data, {
         titel: v.titel.trim(),
         kategorieId: v.kategorieId,
@@ -329,12 +407,16 @@
       });
       // Speichert die Spalte; ihre Noten folgen ihr (Quartal/Kategorie/Datum)
       await Store.Leistungen.save(data);
+      if (neuRechnen) {
+        const anzahl = await Store.Noten.ausRohpunktenNeu(data, mss);
+        UI.toast(anzahl === 1 ? "1 Note neu berechnet" : anzahl + " Noten neu berechnet");
+      }
       // Beim Anlegen ins Halbjahr der neuen Spalte wechseln, damit sie sichtbar ist
       state.notenHalbjahr = String(Store.halbjahrAusQuartal(quartal));
       close(); render();
     }});
 
-    UI.modal({ title: isNew ? "Neue Spalte" : "Spalte bearbeiten", bodyHTML: body, buttons });
+    UI.modal({ title: isNew ? "Neue Spalte" : "Spalte bearbeiten", bodyHTML: body, onMount, buttons });
   }
 
   // Rechenweg eines Halbjahres. Zusätzlich lässt sich hier die aus dem
@@ -400,5 +482,5 @@
   }
 
 
-  Object.assign(global.Views, { TabNoten, notenKontext, notenZeilenInhalt, leistungDialog, studentDetailDialog });
+  Object.assign(global.Views, { TabNoten, notenKontext, notenZeilenInhalt, notenFussInhalt, leistungDialog, studentDetailDialog });
 })(window);

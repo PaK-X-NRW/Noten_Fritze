@@ -5,11 +5,13 @@
      je Version { id, gueltigAb: "YYYY-MM-DD" (Montag) | null, eintraege }.
      Welche Version an einem Datum gilt, A/B-Wochen und Archiv rechnet
      calc.stundenplan.js.
-   - Store.Wochennotizen: freie Notiz je Woche (Schlüssel = Montag)
+   - Store.Wochennotizen: freie Notiz je Woche (Schlüssel = Montag) und die
+     Checklisten „Vorbereitung“ je Tag dieser Woche
    - Store.Termine: Kalender (Termine, Ferien, Änderungen einzelner Stunden:
      Ausfall, Verschieben mit Platztausch, Hinweis) und TERMIN_ARTEN
    - Store.Planungen: Fahrplan je Stunde (Store „planungen“); beim Verschieben
-     einer Stunde ziehen ihre Planungen in derselben Transaktion mit um
+     einer Stunde ziehen ihre Planungen in derselben Transaktion mit um;
+     Rücken ohne Ausfall, Bausteine in die nächste Stunde voranstellen
    - Store.Dateien: Anhänge (Kopie in der App), Aufräumen nach Frist
    Die Einträge verweisen auf die Stundenzeiten (blockId: "std-3" bzw. die
    ID einer Pause) und auf eine Klasse – oder tragen einen freien Titel.
@@ -219,10 +221,30 @@
   };
 
   // ---- Planungen (Fahrplan je Stunde) -------------------------------------------
-  // Datensatz: { id, klasseId, datum, blockId, thema, bausteine: [
+  // Datensatz: { id, klasseId, datum, blockId, thema, reihe, bausteine: [
   //   { id, typ: "text" | "link" | "datei", phase, minuten, text, url, dateiId } ] }
   // Eine Doppelstunde hat je Stunde einen Datensatz; das Planungsfenster zeigt
   // sie als einen Fahrplan (Calc.fahrplanAusPlanungen / fahrplanAufteilen).
+  // Schreibt den Fahrplan einer Einheit (synchron, innerhalb von DB.atomar).
+  //   vorhanden: bisherige Datensätze der Einheit
+  //   einheit: { klasseId, datum, blockIds, teile: { blockId: [bausteine] }, thema, reihe }
+  //   thema: Text für alle Stunden oder { blockId: Text } (Stunden mit eigenem Thema)
+  //   reihe: Name der Unterrichtsreihe (für alle Stunden der Einheit), "" = keine
+  function einheitSchreiben(os, vorhanden, einheit, t) {
+    const reihe = String(einheit.reihe || "").trim();
+    einheit.blockIds.forEach((blockId) => {
+      const thema = einheit.thema && typeof einheit.thema === "object" ? einheit.thema[blockId] || "" : einheit.thema;
+      // Je Stunde genau ein Datensatz; überzählige (Altlast) entfernen
+      const alle = vorhanden.filter((p) => p.blockId === blockId);
+      const alt = alle[0];
+      alle.slice(1).forEach((p) => os("planungen").delete(p.id));
+      const bausteine = einheit.teile[blockId] || [];
+      if (!bausteine.length && !thema && !reihe) { if (alt) os("planungen").delete(alt.id); return; }
+      os("planungen").put(Object.assign(alt || { id: uid(), klasseId: einheit.klasseId, datum: einheit.datum, blockId, createdAt: t },
+        { thema: thema || "", reihe, bausteine, updatedAt: t }));
+    });
+  }
+
   const Planungen = {
     alle: () => DB.getAll("planungen"),
     byKlasse: (klasseId) => DB.getAllByIndex("planungen", "klasseId", klasseId),
@@ -230,23 +252,71 @@
       return (await Planungen.byKlasse(klasseId)).filter((p) => p.datum === datum && blockIds.indexOf(p.blockId) !== -1);
     },
     // Speichert den Fahrplan einer Einheit: je Stunde die Bausteine, das Thema
-    // für alle Stunden. Stunden ohne Bausteine und ohne Thema werden gelöscht.
+    // für alle Stunden (oder je Stunde als { blockId: Text }). Stunden ohne
+    // Bausteine und ohne Thema werden gelöscht.
     //   teile: { blockId: [bausteine] }
-    async einheitSpeichern(klasseId, datum, blockIds, teile, thema) {
+    async einheitSpeichern(klasseId, datum, blockIds, teile, thema, reihe) {
       const vorhanden = await Planungen.derStunden(klasseId, datum, blockIds);
       const t = now();
       await DB.atomar(["planungen"], (os) => {
-        blockIds.forEach((blockId) => {
-          // Je Stunde genau ein Datensatz; überzählige (Altlast) entfernen
-          const alle = vorhanden.filter((p) => p.blockId === blockId);
-          const alt = alle[0];
-          alle.slice(1).forEach((p) => os("planungen").delete(p.id));
-          const bausteine = teile[blockId] || [];
-          if (!bausteine.length && !thema) { if (alt) os("planungen").delete(alt.id); return; }
-          os("planungen").put(Object.assign(alt || { id: uid(), klasseId, datum, blockId, createdAt: t },
-            { thema: thema || "", bausteine, updatedAt: t }));
-        });
+        einheitSchreiben(os, vorhanden, { klasseId, datum, blockIds, teile, thema, reihe }, t);
       });
+    },
+    // Unterrichtsreihe in eine Klasse übernehmen: je Stunde eine neue Planung
+    // (Thema, Reihe, Bausteine mit neuen IDs), dazu ggf. Dateien aus einem
+    // Reihen-Paket. Die Ziel-Stunden sind frei (Calc.reiheVerteilen). Eine Transaktion.
+    //   stunden: [{ datum, blockId, thema, bausteine }]
+    async reiheEinfuegen(klasseId, reihe, stunden, dateien) {
+      const t = now();
+      await DB.atomar(["planungen", "dateien"], (os) => {
+        (dateien || []).forEach((d) => os("dateien").put(d));
+        stunden.forEach((st) => os("planungen").put({
+          id: uid(), klasseId, datum: st.datum, blockId: st.blockId, thema: st.thema || "", reihe: reihe || "",
+          bausteine: (st.bausteine || []).map((x) => Object.assign({}, x, { id: uid() })), createdAt: t, updatedAt: t
+        }));
+      });
+    },
+    // Bausteine einer Einheit in eine andere Stunde der Klasse schieben: Die
+    // Quelle wird mit den übrigen Bausteinen gespeichert, am Ziel stehen die
+    // verschobenen vorne (vor der vorhandenen Planung, Thema bleibt). Eine Transaktion.
+    //   quelle: { klasseId, datum, blockIds, teile, thema } (ohne die Bausteine)
+    //   ziel: { datum, blockId }
+    async bausteineVoranstellen(quelle, ziel, bausteine) {
+      const vorhanden = await Planungen.derStunden(quelle.klasseId, quelle.datum, quelle.blockIds);
+      const dort = (await Planungen.derStunden(quelle.klasseId, ziel.datum, [ziel.blockId]))[0];
+      const t = now();
+      await DB.atomar(["planungen"], (os) => {
+        einheitSchreiben(os, vorhanden, quelle, t);
+        os("planungen").put(Object.assign(dort || { id: uid(), klasseId: quelle.klasseId, datum: ziel.datum, blockId: ziel.blockId, thema: "", createdAt: t }, {
+          bausteine: bausteine.concat((dort && dort.bausteine) || []),
+          updatedAt: t
+        }));
+      });
+    },
+    // Bausteine als eigene Stunde einschieben: Die Planungen ab dem Ziel rücken
+    // weiter (zuege aus Calc.planungenRuecken), am frei gewordenen Ziel steht
+    // eine neue Planung mit den Bausteinen und dem Thema (z. B. „Brüche 2“).
+    // Quelle, Umzug und neue Stunde in einer Transaktion.
+    async bausteineEinschieben(quelle, ziel, bausteine, thema, zuege) {
+      const vorhanden = await Planungen.derStunden(quelle.klasseId, quelle.datum, quelle.blockIds);
+      const dort = (await Planungen.derStunden(quelle.klasseId, ziel.datum, [ziel.blockId]))[0];
+      const umzug = await planungsUmzug(zuege);
+      // Ist die alte Planung des Ziels nicht mitgewandert (Ende des Horizonts), wird ergänzt statt doppelt angelegt
+      const bleibt = dort && !umzug.put.some((p) => p.id === dort.id);
+      const t = now();
+      await DB.atomar(["planungen"], (os) => {
+        einheitSchreiben(os, vorhanden, quelle, t);
+        umzug.del.forEach((id) => os("planungen").delete(id));
+        umzug.put.forEach((pl) => { pl.updatedAt = t; os("planungen").put(pl); });
+        os("planungen").put(bleibt
+          ? Object.assign(dort, { bausteine: bausteine.concat(dort.bausteine || []), updatedAt: t })
+          : { id: uid(), klasseId: quelle.klasseId, datum: ziel.datum, blockId: ziel.blockId,
+              thema: thema || "", reihe: String(quelle.reihe || "").trim(), bausteine, createdAt: t, updatedAt: t });
+      });
+    },
+    // Planungen umziehen (Calc.planungenRuecken) – eine Transaktion
+    async umziehen(zuege) {
+      return termineUndPlanungen([], await planungsUmzug(zuege));
     }
   };
 
@@ -318,13 +388,31 @@
     }
   };
 
+  // Datensatz je Woche: { montag, text, checklisten: { "YYYY-MM-DD": [{ id, text, erledigt }] } }
+  // Die Checklisten („Vorbereitung“ je Tag über der 1. Stunde) liegen bei der
+  // Notiz ihrer Woche. Ohne Text und ohne Punkte wird der Datensatz gelöscht.
+  function wochennotizSchreiben(n) {
+    const listen = n.checklisten || {};
+    Object.keys(listen).forEach((d) => { if (!(listen[d] || []).length) delete listen[d]; });
+    if (!String(n.text || "").trim() && !Object.keys(listen).length) return DB.del("wochennotizen", n.montag);
+    return DB.put("wochennotizen", { montag: n.montag, text: String(n.text || ""), checklisten: listen, updatedAt: now() });
+  }
   const Wochennotizen = {
     get: (montag) => DB.get("wochennotizen", montag).then((n) => (n && n.text) || ""),
-    // Leerer Text löscht die Notiz der Woche
+    // Checklisten der Woche { datum: [punkte] }
+    checklisten: (montag) => DB.get("wochennotizen", montag).then((n) => (n && n.checklisten) || {}),
+    // Leerer Text löscht die Notiz der Woche (die Checklisten bleiben)
     async save(montag, text) {
-      text = String(text || "");
-      if (!text.trim()) return DB.del("wochennotizen", montag);
-      return DB.put("wochennotizen", { montag, text, updatedAt: now() });
+      const n = (await DB.get("wochennotizen", montag)) || { montag };
+      n.text = String(text || "");
+      return wochennotizSchreiben(n);
+    },
+    // Checkliste eines Tages ersetzen (leere Liste = entfernen)
+    async checklisteSetzen(montag, datum, punkte) {
+      const n = (await DB.get("wochennotizen", montag)) || { montag, text: "" };
+      n.checklisten = n.checklisten || {};
+      n.checklisten[datum] = (punkte || []).filter((x) => String(x.text || "").trim());
+      return wochennotizSchreiben(n);
     }
   };
 

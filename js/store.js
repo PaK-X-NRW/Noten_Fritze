@@ -176,6 +176,16 @@
     const liste = (klasse && klasse.abgeschlosseneQuartale) || [];
     return liste.find((a) => a && a.quartal === quartal) || null;
   }
+  // Quartal, in das der Tracker neue Stunden dieser Klasse legt
+  // (Calc.erfassungsQuartal: nach einem Abschluss weiter im nächsten, nie
+  // rückwärts). Zählt nur Stunden des laufenden Schuljahres. null = alle vier
+  // Quartale abgeschlossen.
+  async function erfassungsQuartal(klasse, settings) {
+    const beginn = global.Calc.schuljahrBeginn(datumLokal());
+    const stunden = (await Stunden.byKlasse(klasse.id)).filter((st) => (st.datum || "") >= beginn);
+    const letzte = stunden.length ? stunden[stunden.length - 1] : null;   // byKlasse: nach startTs sortiert
+    return global.Calc.erfassungsQuartal(settings.aktuellesQuartal, klasse.abgeschlosseneQuartale, letzte && letzte.quartal);
+  }
   // Noch offene Stunden dieses Quartals werden dabei beendet – nachtragen
   // lässt sich danach nichts mehr.
   async function quartalAbschliessen(klasse, quartal, datum) {
@@ -305,6 +315,9 @@
   // „Mitarbeit 1. Quartal". Sie hängt an einer Kategorie (die das Gewicht
   // liefert) und an einem Quartal (das über die Epochalnote entscheidet).
   // Je Schüler/in steht in einer Leistung höchstens eine Note.
+  // Optional: bewertung "rohpunkte" mit maxPunkte und schluessel (Kopie des
+  // Notenschlüssels) – dann tippt man Punkte, die Note rechnet Calc aus;
+  // ohne Feld (oder "note") wird die Note direkt eingegeben.
   function neueLeistung(klasseId, data) {
     const t = now();
     const datum = (data && data.datum) || datumLokal();
@@ -411,6 +424,8 @@
       kategorieId: null,
       leistungId: null,     // Spalte, zu der die Note gehört (siehe Leistungen)
       wert: null,           // Zahl 1..6 (mit Nachkomma, z. B. 2.3)
+      // rohpunkte: nur in Rohpunkte-Spalten – die eingegebenen Punkte, aus
+      // denen wert berechnet wurde (bleiben zum Neuberechnen erhalten)
       titel: "",
       datum,
       quartal,              // 1–4; Aufrufer setzen i. d. R. settings.aktuellesQuartal
@@ -425,7 +440,8 @@
     // Eine Zelle der Notenübersicht setzen: In einer Leistung steht je
     // Schüler/in genau eine Note. wert === null löscht die Zelle; etwaige
     // Altbestände (mehrere Noten in derselben Zelle) werden dabei bereinigt.
-    async setzeZelle(leistung, schuelerId, wert) {
+    // rohpunkte: bei Rohpunkte-Spalten die eingegebenen Punkte (sonst weglassen)
+    async setzeZelle(leistung, schuelerId, wert, rohpunkte) {
       const alle = await DB.getAllByIndex("noten", "leistungId", leistung.id);
       const eigene = alle.filter((n) => n.schuelerId === schuelerId);
       for (const ueberzaehlig of eigene.slice(1)) await DB.del("noten", ueberzaehlig.id);
@@ -438,6 +454,8 @@
         leistungId: leistung.id
       });
       n.wert = wert;
+      if (rohpunkte !== undefined && rohpunkte !== null) n.rohpunkte = rohpunkte;
+      else delete n.rohpunkte;
       // Titel/Datum/Quartal folgen immer der Spalte
       n.titel = leistung.titel || "";
       n.datum = leistung.datum;
@@ -446,6 +464,16 @@
       n.kategorieId = leistung.kategorieId;
       await DB.put("noten", n);
       return n;
+    },
+    // Rohpunkte-Spalte: alle Noten aus ihren gespeicherten Rohpunkten neu
+    // berechnen (Höchstpunktzahl oder Schlüssel geändert). Eine Transaktion.
+    // Rückgabe: Anzahl neu berechneter Noten.
+    async ausRohpunktenNeu(leistung, mss) {
+      const alle = (await DB.getAllByIndex("noten", "leistungId", leistung.id))
+        .filter((n) => n.rohpunkte !== undefined && n.rohpunkte !== null);
+      alle.forEach((n) => { n.wert = global.Calc.noteAusRohpunkten(n.rohpunkte, leistung.maxPunkte, leistung.schluessel, mss); });
+      await DB.atomar(["noten"], (os) => { alle.forEach((n) => os("noten").put(n)); });
+      return alle.length;
     }
   };
 
@@ -684,7 +712,7 @@
     EVENT_TYPES, EVENT_TYPE_MAP, KACHEL_EVENT_TYPES,
     halbjahrAusDatum, quartalAusDatum, halbjahrAusQuartal, datumLokal,
     Klassen, neueKlasse,
-    abschlussVon, quartalAbschliessen, abschlussAufheben,
+    abschlussVon, quartalAbschliessen, abschlussAufheben, erfassungsQuartal,
     Schueler, neuerSchueler,
     Kategorien, neueKategorie,
     Leistungen, neueLeistung, leistungFuer, leistungenAusNoten,

@@ -22,6 +22,12 @@
     const now = Store.now();
     const ranges = { alle: 0, "30": 30 * 86400000, "7": 7 * 86400000 };
     const von = state.auswertungRange === "alle" ? 0 : now - ranges[state.auswertungRange];
+    // Beim Wechsel der Klasse: Reiter des Quartals, in das der Tracker gerade
+    // erfasst (nach einem Abschluss also das nächste)
+    if (state.auswertungKlasse !== k.id || !state.auswertungQuartal) {
+      state.auswertungKlasse = k.id;
+      state.auswertungQuartal = String((await Store.erfassungsQuartal(k, state.settings)) || 4);
+    }
     const q = quartalFilter("auswertungQuartal");
     const ereignisseGefiltert = q ? ereignisse.filter((e) => !e.quartal || e.quartal === q) : ereignisse;
     const stundenGefiltert = q ? stunden.filter((st) => !st.quartal || st.quartal === q) : stunden;
@@ -384,7 +390,11 @@
           // Stunden und Ereignisse bleiben stehen – das Quartal wird nur als
           // abgeschlossen vermerkt und dadurch im Mitarbeit-Tab gesperrt.
           await Store.quartalAbschliessen(k, q, Store.datumLokal());
-          UI.toast(eintraege.length + " Noten übertragen – Quartal abgeschlossen");
+          // Gleich ins Quartal wechseln, in das der Tracker jetzt erfasst
+          const naechstes = await Store.erfassungsQuartal(k, state.settings);
+          if (naechstes) state.auswertungQuartal = String(naechstes);
+          UI.toast(eintraege.length + " Noten übertragen – Quartal abgeschlossen" +
+            (naechstes ? ", der Tracker erfasst ab jetzt im " + naechstes + ". Quartal" : ""), { duration: 5000 });
           render();
         }}
       ]

@@ -4,6 +4,8 @@
      (0–100 Punkte, bewusst unabhängig von den Mitarbeitspunkten)
    - Stundenzeiten: laufende Stunde erkennen, Einzel-/Doppelstunde bestimmen
    - vergessene (nicht beendete) Stunden erkennen, Nachträge datieren
+   - Erfassungsquartal je Klasse (nach einem Quartalsabschluss weiter im
+     nächsten Quartal, nie rückwärts)
    Erweitert den Namespace Calc (calc.js lädt davor).
    ========================================================================= */
 (function (global) {
@@ -117,8 +119,30 @@
     return t < grenze ? t : Math.max(stunde.startTs, grenze - 1000);
   }
 
+  // ---- Erfassungsquartal ----------------------------------------------------
+  // In welches Quartal legt der Tracker neue Stunden einer Klasse? Nie
+  // rückwärts: das späteste aus eingestelltem Quartal, dem Quartal nach dem
+  // letzten Abschluss und dem Quartal der zuletzt erfassten Stunde (dieses
+  // Schuljahres); ist es abgeschlossen, das nächste offene. Wird ein Abschluss
+  // aufgehoben, um etwas zu korrigieren, bleibt der Tracker so im neuen Quartal.
+  //   abgeschlossene: klasse.abgeschlosseneQuartale [{ quartal, datum }]
+  //   letzteStunde: Quartal der zuletzt erfassten Stunde oder null
+  // Rückgabe: 1..4 oder null (alle vier Quartale abgeschlossen)
+  function erfassungsQuartal(eingestellt, abgeschlossene, letzteStunde) {
+    const zu = (abgeschlossene || []).filter(Boolean).map((a) => Number(a.quartal));
+    let q = Math.max(parseInt(eingestellt, 10) || 1, zu.length ? Math.max.apply(null, zu) + 1 : 1,
+      parseInt(letzteStunde, 10) || 1);
+    while (q <= 4 && zu.indexOf(q) !== -1) q++;
+    return q <= 4 ? q : null;
+  }
+  // Beginn des Schuljahres eines Datums: 1. August ("YYYY-MM-DD")
+  function schuljahrBeginn(datum) {
+    const j = parseInt(String(datum).slice(0, 4), 10), m = parseInt(String(datum).slice(5, 7), 10);
+    return (m >= 8 ? j : j - 1) + "-08-01";
+  }
+
   Object.assign(global.Calc, {
     heatPunkteAktuell, heatFarbeDurchPunkte, aktuelleStunde, trackerSession,
-    stundeVergessen, erfassungsZeit
+    stundeVergessen, erfassungsZeit, erfassungsQuartal, schuljahrBeginn
   });
 })(window);

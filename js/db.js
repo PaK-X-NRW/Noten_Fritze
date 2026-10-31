@@ -15,7 +15,8 @@
   //     "wochennotizen" (Notiz je Woche, Schlüssel = Montag)
   // v6: neuer Store "termine" (Kalender: Termine, Ferien, Änderungen einzelner Stunden)
   // v7: neue Stores "planungen" (Fahrplan je Stunde) und "dateien" (Anhänge)
-  const DB_VERSION = 7;
+  // v8: neuer Store "papierkorb" (gelöschte Klassen, 30 Tage wiederherstellbar)
+  const DB_VERSION = 8;
 
   // Definition der Object-Stores + Indizes. Zentral, damit Migrationen
   // (spätere DB_VERSION-Erhöhungen) übersichtlich bleiben.
@@ -64,6 +65,9 @@
     planungen:    { keyPath: "id", indexes: [{ name: "klasseId", keyPath: "klasseId" }] },
     // Anhänge der Planung (Kopie der Datei; Inhalt wird nach einer Frist entfernt)
     dateien:      { keyPath: "id", indexes: [] },
+    // Gelöschte Klassen: Schnappschuss (Klassen-Export + Stundenplan-Einträge,
+    // Termine, Planungen, Dateien) – 30 Tage wiederherstellbar, nicht im Backup
+    papierkorb:   { keyPath: "id", indexes: [] },
     einstellungen:{ keyPath: "key", indexes: [] }
   };
 

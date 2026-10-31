@@ -52,15 +52,15 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/store.einstellungen.js` | `Store` | `DEFAULT_SETTINGS`, Stundenzeiten/Schwellen, `getSettings`/`saveSettings` |
 | `js/store.migrationen.js` | `Store` | `SCHEMA_VERSION`, `MIGRATION_STEPS`, `migrateSchema` |
 | `js/store.transfer.js` | `Store` | Backup (`exportAll`/`importAll`) und Klassen-Export/-Import |
-| `js/store.stundenplan.js` | `Store` | `Store.Stundenplan` (Versionen des Wochenplans), `Store.Wochennotizen`, `Store.Termine` + `TERMIN_ARTEN` |
+| `js/store.stundenplan.js` | `Store` | `Store.Stundenplan` (Versionen des Wochenplans), `Store.Wochennotizen` (inkl. Checklisten je Tag), `Store.Termine` + `TERMIN_ARTEN` |
 | `js/store.demo.js` | `Store` | Demo-Daten (`seedDemoData`) beim ersten Start |
-| `js/calc.js` | `Calc` | Rechen-Kern: Notenskala (Eingabe, Drittel-/Zeugnisskala, Anzeige, MSS-Umrechnung), Kategorie-Helfer – **frei von DOM/DB** |
+| `js/calc.js` | `Calc` | Rechen-Kern: Notenskala (Eingabe, Drittel-/Zeugnisskala, Anzeige, MSS-Umrechnung), Rohpunkte → Note (`punkteTabelle`, `noteAusRohpunkten`), Kategorie-Helfer – **frei von DOM/DB** |
 | `js/calc.zeugnis.js` | `Calc` | Halbjahres-Kette: `berechneSchueler`, `halbjahrErgebnis`, `mitarbeitVorhanden` |
 | `js/calc.mitarbeit.js` | `Calc` | Mitarbeits-Auswertung (Stundennoten-Modell), Schwellen |
 | `js/calc.tracker.js` | `Calc` | Heatmap-Verfall/-Farbe, Stundenzeiten (`trackerSession`), vergessene Stunden (`stundeVergessen`, `erfassungsZeit`) |
 | `js/calc.sitzplan.js` | `Calc` | Sitzplan: Gang-Vorlagen, Lage der Plätze, Sitzregeln prüfen, `sitzplanVerteilen` |
 | `js/calc.stundenplan.js` | `Calc` | Stundenplan: Montag/KW, A/B-Wochen (`abWoche`), gültige Version (`versionFuer`), Archiv, tatsächlicher Tag (`tagesPlan`), Monat, `eintragJetzt`, Klassenfarben |
-| `js/calc.planung.js` | `Calc` | Stundenplanung: `einheitBestimmen`, `fahrplanAusPlanungen`/`fahrplanAufteilen`, `minutenSumme`, `vorherigeStunde`, `planungenUmziehen` |
+| `js/calc.planung.js` | `Calc` | Stundenplanung: `einheitBestimmen`, `fahrplanAusPlanungen`/`fahrplanAufteilen`, `minutenSumme`, `vorherigeStunde`/`naechsteStunde`, `planungenUmziehen`, `planungenRuecken` |
 | `js/csv.js` | `CSV` | CSV-Export/Import (UTF-8 mit BOM) |
 | `js/ui.js` | `UI` | UI-Bausteine: Modal, Toast, Formfelder, `esc`, `$`/`$all` |
 | `js/views.core.js` | `Views` | Views-Kern: State, Navigation (`go`), Render-Schleife (`render`), Zeitraum-Reiter |
@@ -72,9 +72,10 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/views.sitzplan.js` | `Views` | Reiter Sitzplan + Dialoge (Platz belegen, Räume) |
 | `js/views.mitarbeit.js` | `Views` | Reiter Mitarbeit + Dialoge (Schwellen, Herleitung, Quartal abschließen) |
 | `js/views.tracker.js` | `Views` | Mitarbeits-Tracker (Stunden, Kacheln, Modi, Heatmap, Restzeit, Tippen, Rückgängig) |
-| `js/views.stundenplan.js` | `Views` | Stundenplan auf der Startseite (Wochenraster, Bearbeiten, Pläne/Archiv, Wochennotiz, nächste Termine) |
+| `js/views.stundenplan.js` | `Views` | Stundenplan auf der Startseite (Wochenraster, Bearbeiten, Pläne/Archiv, Wochennotiz, Checkliste „Vorbereitung“, nächste Termine) |
 | `js/views.kalender.js` | `Views` | Kalender: Monatsansicht, Termin-Dialog, Zellen-Menü (Ausfall, Verschieben mit Tausch, Hinweis) |
-| `js/views.planung.js` | `Views` | Stundenplanung: Fahrplan-Ansicht (Bausteine, Ziehen, Übernehmen, HA), `fahrplanDialog` im Tracker |
+| `js/views.planung.js` | `Views` | Stundenplanung: Fenster neben dem Wochenplan (`planungPanel`: Thema, Reihe, Bausteine, Ziehen, ⇥ nächste Stunde, Übernehmen, HA, Ausfall/Rücken), `fahrplanDialog` im Tracker |
+| `js/views.reihen.js` | `Views` | Ansicht „Reihen“ (Umschalter Klassen · Stundenplan · Reihen): Übersicht, Ansehen, Export/Import als Paket, in eine Klasse übernehmen |
 | `js/views.dialoge.js` | `Views` | Allgemeine Dialoge (Klasse, Anteile, Schüler, Kategorie, Importe, Umzug-Empfang von der alten Adresse) |
 | `js/views.js` | `Views` | Aktions-Dispatcher: Action-Map + zentrale Delegation |
 | `js/app.js` | – | Bootstrap (DB öffnen, Demo-Daten, erster Render, SW-Registrierung) |
@@ -248,6 +249,19 @@ beim allerersten Start erscheint er bewusst nicht.
   löscht). Titel, Datum, Quartal und Kategorie einer Note folgen immer ihrer Leistung;
   Noten nie mit `Store.Noten.save` direkt an der Spalte vorbei anlegen. Für automatisch
   erzeugte Noten (Quartalsabschluss, HA-Note 6) gibt es `Store.leistungFuer`.
+- **Rohpunkte-Spalten:** Eine Leistung mit `bewertung: "rohpunkte"` trägt `maxPunkte` und
+  `schluessel` (16 Prozentgrenzen, Index = MSS-Punkte 0..15, Index 0 = 0 %; Kopie von
+  `settings.notenschluessel` beim Anlegen, je Spalte änderbar). Getippt werden Punkte
+  (`Calc.parseRohpunkte`: ganze/halbe bis `maxPunkte`), gespeichert **beides**: `note.wert`
+  (aus `Calc.noteAusRohpunkten`) und `note.rohpunkte` (`setzeZelle(…, wert, rohpunkte)`).
+  `Calc.punkteTabelle` rundet Prozent × Höchstpunkte **kaufmännisch auf halbe Punkte**; die
+  Grenze gehört zur besseren Note. Sek I nutzt die Stufen bis 14 Punkte (= 1, keine 1+) und
+  rechnet MSS-Punkte über `Calc.mssPunkteZuNote` in Drittelnoten um (13 → 1-, 0 → 6); die 15
+  gibt es nur in der MSS. Ändern sich Höchstpunktzahl oder Schlüssel einer Spalte, rechnet
+  `Store.Noten.ausRohpunktenNeu` nach Rückfrage alle Noten neu. Ohne Feld = „Note direkt“
+  (kein Migrationsschritt). Alles danach (Ø, Zeugnis, CSV) rechnet nur mit `wert`.
+  Vorschlag (Absprache mit der Lehrkraft): 25 · 30 · 35 · 40 · 45 · 50 · 56 · 62 · 68 · 74 ·
+  79 · 84 · 89 · 95 · 98 % für 1 … 15 Punkte (4 / 5 P. ab 45 %, 1 / 14 P. ab 95 %).
 - **Zeitraum der Notenübersicht ist das Halbjahr** (`state.notenHalbjahr`,
   `halbjahrFilter` / `halbjahrTabsHTML(action, klasse)` in views.core.js) – die Quartale
   erscheinen darin als Epochalnoten. In MSS-Klassen heißen die Reiter nach der
@@ -260,6 +274,12 @@ beim allerersten Start erscheint er bewusst nicht.
   HTML-String. Reihenfolge: schriftliche Leistungen · je Quartal (sonstige Leistungen
   **ohne** die der Mitarbeits-Kategorien, HA-Zählung, Epochalnote) · Schriftlich ·
   Sonstige · Zeugnisnote (+ Jahr im 2. HJ, aber **nicht** in MSS-Klassen).
+  **Fußzeile** (`notenFussInhalt`, `<tfoot>`): unter jeder Spalte mit `spiegel: true` (nur
+  Leistungen schriftlicher Kategorien) Ø und Notenspiegel aus `Calc.notenspiegel` – Ø aus den
+  genauen Werten (2- = 2,3), kaufmännisch auf zwei Stellen; Sek I Stufen 1–6 (Tendenzen zählen
+  zur ganzen Note), MSS jede Punktzahl 15–0; dazu die Minderleistungen „4- oder schlechter“ bzw.
+  „4 P. oder weniger“ mit Prozent. Die
+  Inline-Eingabe zeichnet die Fußzeile nach jeder Note neu (`zeileNeu`).
 - **Inline-Eingabe:** `notenEingabe` in `views.noten.eingabe.js` macht die Zelle zum
   Eingabefeld (Enter = nächste Zeile, Tab = nächste Spalte, Esc = abbrechen).
   Dazu öffnet sich das **Nummernpad** (`.notenpad`, im `body` mit
@@ -357,11 +377,19 @@ beim allerersten Start erscheint er bewusst nicht.
   setzt ab einer Woche neu – frühere Wochen bleiben. Leer = keine A/B-Wochen; der
   erste A/B-Eintrag fragt nach. `settings.startAnsicht` merkt die Ansicht der
   Startseite (`ViewHome` delegiert an `ViewStundenplan`, Umschalter nur mit Plan).
-  Notiz je Woche im Store `wochennotizen` (Schlüssel = Montag, leerer Text löscht).
+  Notiz je Woche im Store `wochennotizen` (Schlüssel = Montag). Am selben Datensatz liegen die
+  **Checklisten „Vorbereitung“** je Tag (`checklisten: { datum: [{ id, text, erledigt }] }`,
+  `Store.Wochennotizen.checklisten`/`checklisteSetzen`, Zeile über der 1. Stunde); gelöscht wird
+  der Datensatz erst ohne Text **und** ohne Punkte. Kein `DB_VERSION`-Sprung, im Backup enthalten.
+  Abhaken ändert nur den Punkt im DOM (kein `render()`), Änderungen laufen über eine Kette;
+  offene Punkte vergangener Tage sind rot, nichts wandert automatisch.
   Kaskade: `Klassen.remove` entfernt die Einträge der Klasse aus **allen** Versionen
   (gleiche Transaktion). Nicht im Klassen-Export (der Plan gehört der Lehrkraft),
   aber im Backup. Tracker-Start: `Calc.eintragJetzt` belegt den Raum vor und macht
   „Doppelstunde“ zum Hauptknopf, wenn die Klasse auch die folgende Stunde hat.
+  Die Kachel im Wochenplan zeigt denselben Raum in Klammern („7c (315)“, `raumHTML` in
+  views.stundenplan.js): Sitzplan des Eintrags, sonst der zuletzt benutzte, sonst der erste –
+  dieselbe Reihenfolge wie die Vorauswahl in `trackerStartDialog`.
   `db.js` meldet ein blockiertes Upgrade (anderes Fenster offen) per Toast und gibt
   die eigene Verbindung bei `versionchange` frei.
 - **Kalender:** Store `termine` (seit `DB_VERSION` 6) hält Termine (`art` aus
@@ -386,11 +414,22 @@ beim allerersten Start erscheint er bewusst nicht.
 - **Stundenplanung:** Store `planungen` (seit `DB_VERSION` 7, dort auch schon `dateien`):
   **je Stunde ein Datensatz** `{ klasseId, datum, blockId, thema, bausteine }`, Schlüssel ist
   der tatsächliche Platz der Stunde. Eine Einheit (Doppelstunde) bestimmt
-  `Calc.einheitBestimmen`; das Fenster (`state.view = "planung"`, `state.planungSlot`) zeigt
+  `Calc.einheitBestimmen`; das Fenster (`state.planungSlot`, rechts neben dem Wochenplan statt
+  Notiz/Terminen, `Views.planungPanel` aus `ViewStundenplan`; unter 900 px nur das Fenster) zeigt
   sie als eine Liste mit Trennern, `Calc.fahrplanAufteilen` verteilt beim Speichern auf die
   Stunden (`Store.Planungen.einheitSpeichern`, räumt doppelte Datensätze auf). Speichern
   läuft in `views.planung.js` über eine **Kette** (nacheinander) – parallele Aufrufe legten
-  sonst je einen neuen Datensatz an. Beim Verschieben/Tauschen/Zurückholen einer Stunde
+  sonst je einen neuen Datensatz an. Beim Neuaufbau speichert das Fenster **nur ausstehende**
+  Eingaben (`speicherTimer`) – ein volles Speichern überschriebe gerade gerückte Planungen.
+  **⇥ an einem Baustein** schiebt ihn und alle folgenden der Einheit in die nächste Stunde
+  (`Calc.naechsteStunde`); die App fragt: **vorne anhängen** (vor die vorhandene Planung,
+  Thema bleibt – `Store.Planungen.bausteineVoranstellen`) oder **einschieben** als eigene
+  Stunde mit `Calc.themaFortsetzung` („Brüche“ → „Brüche 2“ → „Brüche 3“); dann rücken die
+  Planungen ab dort **stundenweise** samt Thema weiter (`Calc.planungenRuecken`,
+  `Store.Planungen.bausteineEinschieben`). Jeweils eine Transaktion. **Thema je Stunde:**
+  Haben die Stunden einer Einheit verschiedene Themen (z. B. nach stundenweisem Rücken),
+  zeigt jede Trennlinie ein eigenes Themenfeld (`state.planung.themen`), gespeichert als
+  `{ blockId: Thema }` (`einheitSchreiben`); sonst gilt ein Thema für alle Stunden. Beim Verschieben/Tauschen/Zurückholen einer Stunde
   ziehen ihre Planungen in **derselben Transaktion** mit (`planungsUmzug` →
   `Calc.planungenUmziehen`, gleichzeitige Züge, Kollision = zusammenlegen). Tipp auf eine
   Klassenstunde → Planung, langes Drücken/Rechtsklick → Zellen-Menü (`UI.langDruck`
@@ -408,6 +447,20 @@ beim allerersten Start erscheint er bewusst nicht.
   schreibt `daten64` (Base64) nur auf Wunsch; `importAll` behält bei fehlendem Inhalt einen
   vorhandenen lokalen Inhalt, sonst gilt die Datei als entfernt. Die Dateiauswahl muss
   **direkt im Tipp** geöffnet werden (`input.click()` synchron), sonst blockt iOS.
+- **Unterrichtsreihen:** Feld `reihe` an der Planung (je Stunde, im Fenster eins für die Einheit,
+  `einheitSchreiben`; zieht beim Rücken/Verschieben mit, Kollision behält die vorhandene Reihe).
+  Kachel im Wochenplan: eigene Zeile `.sp-reihe`. Ansicht `views.reihen.js` (startAnsicht
+  `"reihen"`, nur mit Stundenplan im Umschalter): `Calc.reihenAusPlanungen` gruppiert je Klasse
+  und Name (Groß-/Kleinschreibung egal), `Calc.reiheVorlage` macht daraus eine Vorlage **ohne
+  Datum und Klasse** (`einheit` nur zur Anzeige), `Calc.reiheVerteilen` verteilt sie
+  **stundenweise** auf die freien Stunden ab einem Datum (Ziele aus `Calc.stundenReihe`,
+  Horizont 366 Tage; **jede** Stunde mit Planung gilt als belegt und wird übersprungen).
+  `Store.Planungen.reiheEinfuegen` schreibt neue, ganz normale Planungen (neue IDs) in einer
+  Transaktion. Paket-Datei `{ app: "noten-fritze-reihe", name, stunden, dateien }`
+  (`Store.reihePaket` / `Store.reiheAusPaket`): Datei-Inhalte als Base64 nur auf Wunsch,
+  importierte Dateien bekommen neue IDs; ohne Inhalt bleibt nur der Dateiname im Baustein.
+  Eine Übernahme innerhalb der App nutzt dieselben Datei-Datensätze weiter. Keine automatische
+  Vorbelegung der Reihe in neuen Stunden (Absprache).
 - **Weiterschieben bei Ausfall:** `Calc.weiterschiebenZuege(…, vorher, nachher, …, modus)`
   vergleicht die Reihe der stattfindenden Stunden einer Klasse (`Calc.stundenReihe`)
   mit Terminen **ohne** und **mit** den Ausfällen: Inhalt der i-ten Stunde vorher →
@@ -419,6 +472,12 @@ beim allerersten Start erscheint er bewusst nicht.
   schreiben Termine und Planungs-Umzug in einer Transaktion. Hierher verschobene
   Stunden fallen an ihrem alten Platz aus; ohne Weiterschieben kehrt ihre Planung dorthin
   zurück (`zurueckZuege`). Teil-Ausfall einer Doppelstunde → nur „stundenweise“.
+- **Planungen rücken ohne Ausfall** (Zellen-Menü und Planungsfenster, `rueckenDialog` in
+  `views.kalender.js`): `Calc.planungenRuecken` rechnet, als fiele die Stunde (bzw. Einheit)
+  aus – „nach hinten“ = Termine → Lücke (die Stunde wird frei), „nach vorne“ = Lücke →
+  Termine (die folgenden rücken auf; eine vorhandene Planung bleibt vorne, Kollision =
+  zusammenlegen). Die Lücke wird nie gespeichert; geschrieben wird nur der Umzug
+  (`Store.Planungen.umziehen`). Gleicher Horizont wie beim Ausfall.
 - **Dialoge mit Promise:** `UI.modal` ruft beim Schließen `onClose` auf. Wer in einem
   Knopf `close()` und dann `resolve(wert)` aufruft, bekommt das `resolve` aus `onClose`
   – also erst `resolve`, dann `close` (oder ein Merker wie in `abWocheDialog`).
@@ -517,9 +576,16 @@ beim allerersten Start erscheint er bewusst nicht.
   `klasse.abgeschlosseneQuartale` (`[{ quartal, datum }]`). Helfer:
   `Store.abschlussVon(klasse, quartal)` / `Store.abschlussAufheben`. Wirkung:
   Der Mitarbeit-Tab zeigt das Quartal grau (`.table-wrap.gesperrt`) mit
-  Hinweisleiste und Button „Abschluss aufheben"; `trackerStartDialog` verweigert
-  den Start, wenn `settings.aktuellesQuartal` dieser Klasse abgeschlossen ist.
-  Aufheben löscht die übertragene Note **nicht**.
+  Hinweisleiste und Button „Abschluss aufheben". Der Tracker legt neue Stunden ins
+  **Erfassungsquartal** der Klasse (`Store.erfassungsQuartal` → `Calc.erfassungsQuartal`):
+  **nie rückwärts** – das späteste aus `settings.aktuellesQuartal`, dem Quartal nach dem
+  letzten Abschluss und dem Quartal der zuletzt erfassten Stunde dieses Schuljahres
+  (`Calc.schuljahrBeginn`, 1. August), davon das erste nicht abgeschlossene. Nach einem
+  Abschluss erfasst er also automatisch im nächsten Quartal; ein aufgehobener Abschluss holt
+  ihn nicht zurück, wenn schon im neuen Quartal erfasst wurde. Erst wenn alle vier Quartale
+  abgeschlossen sind, verweigert `trackerStartDialog` den Start. Der Mitarbeit-Tab wählt beim
+  Klassenwechsel und nach dem Abschluss diesen Reiter vor (`state.auswertungKlasse`).
+  Aufheben löscht die übertragene Note **nicht**; erfasste Stunden behalten ihr Quartal.
 - **Exporte:** Alle Exporte laufen über `CSV.speichern(dateiname, inhalt, mime)` –
   dreistufig: 1) Export-Ordner via File System Access API (Handle in IndexedDB unter
   einstellungen/key `"export"`, Card „Export-Ordner“ in den Einstellungen),
@@ -531,8 +597,22 @@ beim allerersten Start erscheint er bewusst nicht.
   (kaskadierend löschen und importieren in einer Transaktion) oder „kopie“ (alle IDs neu vergeben,
   Referenzen inkl. `sitzplan.plaene[].seats[].schuelerId` ummappen). Buttons „Exportieren“
   in der Klassen-Topbar, „Klasse importieren“ auf Home (`klassenImportDialog`).
-- **Klasse löschen:** 🗑-Button direkt auf der Home-Kachel (`delete-class`,
-  Bestätigungsdialog, Kaskade via `Store.Klassen.remove`).
+- **Klasse löschen:** bewusst **nicht** mehr auf der Home-Kachel, sondern nur im Dialog
+  „Klasse bearbeiten“ (roter Bereich `.gefahrzone`, Action `delete-class`). Ablauf:
+  Bestätigung → **Sicherungsdatei** (Klassen-Export über `CSV.speichern`; bricht man das
+  Teilen-Blatt ab, fragt die App nach) → `Store.Papierkorb.klasseLoeschen`: legt einen
+  Schnappschuss im Store `papierkorb` ab (seit `DB_VERSION` 8: Klassen-Export **plus** was
+  der Export bewusst nicht enthält – Stundenplan-Einträge je Version, Termine, Planungen
+  und deren Dateien) und löscht dann kaskadierend über `Store.Klassen.remove`.
+  `Papierkorb.wiederherstellen` spielt alles zurück (bricht ab, wenn es die Klasse wieder
+  gibt), „Rückgängig“ im Toast und die Karte „Papierkorb“ in den Einstellungen nutzen es.
+  `Papierkorb.aufraeumen` löscht beim App-Start (app.js) nach `Papierkorb.TAGE` (30)
+  endgültig. Der Papierkorb ist **nicht** im Backup; „Alle Daten löschen“ leert ihn mit.
+- **Alle Daten löschen** (`delete-all`): eigener roter Bereich ganz unten in den
+  Einstellungen, nicht neben „Backup exportieren“. Speichert vorher automatisch ein Backup
+  (`exportAll({ mitDateien: false })`, Datei „…-vor-dem-loeschen-…“); bricht man das Speichern
+  ab, fragt die App nach. Bewusst **kein** Papierkorb: Wer alles löscht, will meist, dass
+  nichts auf dem Gerät bleibt.
 - **MSS-Punkte (Klassenstufe ab 11):** `klasse.klassenstufe` (5–13, `null` =
   Sek. I, im Klassen-Dialog wählbar) entscheidet über `Calc.istMSS(klasse)`,
   ob eine Klasse Schulnoten (1–6, niedriger = besser) oder MSS-Punkte
@@ -671,5 +751,9 @@ Aufgabe:
   Datenbank beim App-Start. `Store.seedBeispielklassen` („9a (Beispiel)“ +
   „Mathematik LK 12 (Beispiel)“) legt zusätzlich an, auch wenn schon Klassen da
   sind, und überspringt gleichnamige Klassen (Vergleich ohne Groß-/Kleinschreibung
-  und Rand-Leerzeichen); Rückgabe `{ angelegt, uebersprungen }` – Knopf in den
+  und Rand-Leerzeichen); Rückgabe `{ angelegt, uebersprungen, stundenplan }` – Knopf in den
   Einstellungen. Der Zusatz „(Beispiel)“ verhindert Verwechslungen mit echten Klassen.
+  **Nur wenn es noch keinen Stundenplan gibt**, legt `beispielStundenplanAnlegen` einen an
+  (`BEISPIEL_PLAN`: 9a Mo 1+2 · Mi 3 · Fr 3+4, LK 12 Di 3+4 · Do 1+2 · Fr 6 – auch für schon
+  vorhandene Beispielklassen), dazu Planungen ab dieser Woche für vier Wochen (nur für Klassen
+  ohne Planungen) und eine Klassenarbeit der 9a als Termin. Ein echter Plan wird nie angefasst.

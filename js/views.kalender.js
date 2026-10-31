@@ -8,6 +8,8 @@
    - Ausfall mit Weiterschieben der folgenden Planungen (in die nächste
      Doppel-/Einzelstunde oder stundenweise), Aufheben mit Zurückrücken,
      „Ich bin krank“ für einen Zeitraum (alle Klassen)
+   - Planungen rücken ohne Ausfall: ab einer Stunde nach hinten (Stunde
+     einschieben) oder nach vorne (aufrücken), je Einheit oder stundenweise
    Die Wochenansicht selbst liegt in views.stundenplan.js, die Rechnungen
    (tatsächlicher Tag, Monatsraster) in calc.stundenplan.js.
    ========================================================================= */
@@ -196,6 +198,7 @@
       } else {
         aktionen.push({ gruppe, label: "Fällt aus …", fn: () => ausfallDialog(item, datum, blockId, name) });
         aktionen.push({ gruppe, label: "Verschieben …", fn: () => verschiebenDialog(item, datum, blockId, name) });
+        if (k) aktionen.push({ gruppe, label: "Planungen rücken …", fn: () => rueckenDialog(item, datum, blockId, name) });
         if (item.verschobenVon) aktionen.push({ gruppe, label: "Zurück an den alten Platz",
           fn: async () => { await Store.Termine.verschiebungAufheben(item.verschobenVon); render(); } });
       }
@@ -357,6 +360,66 @@
     UI.toast("Ausfall aufgehoben" + (zuege.length ? " – Planungen zurückgerückt" : ""));
   }
 
+  // Planungen einer Klasse ab dieser Stunde rücken, ohne dass etwas ausfällt:
+  // nach hinten (die Stunde wird frei, z. B. Stoff nicht geschafft) oder nach
+  // vorne (die folgenden rücken auf, z. B. eingeschobene Stunde nicht nötig).
+  async function rueckenDialog(item, datum, blockId, name) {
+    const k = await kalenderDaten();
+    const plan = Calc.tagesPlan(k.versionen, k.abWochen, k.termine, datum);
+    const einheit = Calc.einheitBestimmen(plan, k.zeiten, item.klasseId, blockId);
+    const art = einheit.length === 2 ? "Doppelstunde" : einheit.length > 2 ? einheit.length + "-fach-Stunde" : "Einzelstunde";
+    const arten = einheit.length === 2 ? "Doppelstunden" : einheit.length > 2 ? einheit.length + "-fach-Stunden" : "Einzelstunden";
+    const texte = {
+      "nach|einheit": "Die Planung dieser " + art + " und aller folgenden " + arten + " rückt eine " + art + " weiter. Diese " + art +
+        " ist danach frei (z. B. für eine Wiederholung); andere Stunden bleiben, wie sie sind.",
+      "nach|stunde": "Ab dieser Stunde rückt jede Planung der Klasse eine Stunde weiter (eine Doppelstunde kann dabei auseinandergehen). Diese Stunde ist danach frei.",
+      "vor|einheit": "Die Planungen der folgenden " + arten + " rücken eine " + art + " nach vorne, auf diese " + art +
+        ". Was hier schon geplant ist, bleibt vorne stehen.",
+      "vor|stunde": "Alle folgenden Planungen der Klasse rücken eine Stunde nach vorne, auf diese Stunde. Was hier schon geplant ist, bleibt vorne stehen."
+    };
+    let richtung = "nach", modus = "einheit";
+    UI.modal({
+      title: "Planungen rücken",
+      bodyHTML: '<p class="muted">' + UI.esc(name) + " · " + tagKurz(datum) + " " + UI.esc(blockName(blockId, true)) +
+          " – der Stundenplan bleibt, nur die Planungen wandern.</p>" +
+        '<div class="seg rk-richtung"><button type="button" class="active" data-richtung="nach">Nach hinten (Stunde einschieben)</button>' +
+          '<button type="button" data-richtung="vor">Nach vorne (aufrücken)</button></div>' +
+        '<div class="seg rk-modus" style="margin-top:10px"><button type="button" class="active" data-modus="einheit">Je ' + art + "</button>" +
+          '<button type="button" data-modus="stunde">Stundenweise</button></div>' +
+        '<p class="hint rk-erklaerung"></p>',
+      onMount: (box) => {
+        const zeigen = () => {
+          UI.$all("[data-richtung]", box).forEach((b) => b.classList.toggle("active", b.getAttribute("data-richtung") === richtung));
+          UI.$all("[data-modus]", box).forEach((b) => b.classList.toggle("active", b.getAttribute("data-modus") === modus));
+          box.querySelector(".rk-erklaerung").textContent = texte[richtung + "|" + modus];
+        };
+        UI.$all("[data-richtung]", box).forEach((b) => b.addEventListener("click", () => { richtung = b.getAttribute("data-richtung"); zeigen(); }));
+        UI.$all("[data-modus]", box).forEach((b) => b.addEventListener("click", () => { modus = b.getAttribute("data-modus"); zeigen(); }));
+        zeigen();
+      },
+      buttons: [
+        { label: "Abbrechen" },
+        { label: "Rücken", className: "primary", onClick: async (close) => {
+          const bis = await schiebeBis(item.klasseId, datum);
+          if (!bis) { UI.toast("Ab hier gibt es keine Planungen, die rücken könnten"); return; }
+          close();
+          // Gerechnet wird, als fiele die Stunde (bzw. Einheit) aus
+          const bloecke = modus === "einheit" ? einheit.map((b) => b.id) : [blockId];
+          const eintraege = bloecke.map((id) => ({
+            datum, blockId: id,
+            item: id === blockId ? item : (plan.zellen[id] || []).find((i) => i.typ === "stunde" && i.klasseId === item.klasseId)
+          })).filter((e) => e.item);
+          const luecke = ersetzt(k.termine, Store.Termine.ausfallDatensaetze(eintraege, "", null));
+          const zuege = Calc.planungenRuecken(k.versionen, k.abWochen, k.termine, luecke, k.zeiten, item.klasseId, datum, bis, modus, richtung);
+          if (!zuege.length) { UI.toast("Es gibt nichts zu rücken"); return; }
+          await Store.Planungen.umziehen(zuege);
+          render();
+          UI.toast("Planungen ab " + tagKurz(datum) + (richtung === "vor" ? " nach vorne" : " nach hinten") + " gerückt");
+        }}
+      ]
+    });
+  }
+
   // „Ich bin krank“: alle Stunden aller Klassen (auch AG, Aufsicht) von–bis
   // fallen aus; die Planungen jeder Klasse rücken entsprechend weiter.
   function krankDialog() {
@@ -454,6 +517,7 @@
 
   Object.assign(global.Views, {
     monatHTML, monatBlaettern, monatTag, ansichtWechseln,
-    terminDialog, terminBearbeiten, terminNeu, zellenMenue, krankDialog
+    terminDialog, terminBearbeiten, terminNeu, zellenMenue, krankDialog,
+    ausfallDialog, ausfallAufheben, rueckenDialog
   });
 })(window);

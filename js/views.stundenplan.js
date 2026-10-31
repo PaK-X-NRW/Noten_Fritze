@@ -8,15 +8,19 @@
    - Bearbeiten: Zelle antippen -> Klasse oder Freitext, jede Woche oder A/B
    - Versionen: „Neuer Stundenplan ab …“, ältere Pläne im Archiv (nur lesbar)
    - Notiz je Woche (Wochenende / ToDos), darunter die nächsten Termine
-   - Tipp auf eine Klassenstunde öffnet die Stundenplanung (views.planung.js),
-     langes Drücken / Rechtsklick das Menü (Ausfall, Verschieben, Hinweis, Termin)
+   - Checkliste „✓ Vorbereitung“ je Tag über der 1. Stunde (Kopien, Versuche …):
+     abhaken, Punkt direkt in der Zelle anlegen, Tipp auf den Text = ändern/löschen;
+     offene Punkte vergangener Tage rot
+   - Tipp auf eine Klassenstunde öffnet die Stundenplanung als Fenster rechts
+     neben dem Plan (views.planung.js, statt Notiz/Terminen), langes Drücken /
+     Rechtsklick das Menü (Ausfall, Verschieben, Rücken, Hinweis, Termin)
    Monat, Termin- und Änderungs-Dialoge liegen in views.kalender.js, die
    Rechnungen (Wochen, A/B, Versionen, Tagesplan) in calc.stundenplan.js.
    ========================================================================= */
 (function (global) {
   "use strict";
 
-  const { state, go, render, homeUmschalterHTML } = global.Views;
+  const { state, go, render, homeUmschalterHTML, homeInfoHTML } = global.Views;
   const api = global.Views;   // views.kalender.js lädt später
   const TAGE = ["Mo", "Di", "Mi", "Do", "Fr"];
 
@@ -79,6 +83,8 @@
     planungenListe.forEach((p) => { planungen[p.klasseId + "|" + p.datum + "|" + p.blockId] = p; });
     const klassen = {};
     klassenListe.forEach((k) => { klassen[k.id] = k; });
+    // Sitzpläne (Räume) je Klasse – für „7c (315)“ in den Kacheln
+    for (const k of klassenListe) klassen[k.id] = Object.assign({}, k, { sitzplaene: await Store.Sitzplan.alle(k.id) });
     const heute = Store.datumLokal();
     const montag = angezeigterMontag();
     const version = Calc.versionFuer(versionen, montag);
@@ -103,8 +109,12 @@
 
     if (monat) {
       return { topbar, body: api.monatHTML(termine, klassen, ansichtTabs) +
-        '<p class="home-info"><a href="info.html">Was ist Noten-Fritze? · Anleitung · Datenschutz</a></p>' };
+        homeInfoHTML() };
     }
+
+    // Planungsfenster (views.planung.js) statt Notiz und Terminen, solange eine Stunde offen ist
+    const panel = state.planungSlot && !bearbeiten ? await api.planungPanel() : null;
+    const offen = panel ? state.planung : null;
 
     const woche = Calc.abWoche(s.abWochen, montag);
     const laufend = montag === Calc.montagVon(heute) ? laufenderBlockId(s.stundenzeiten) : null;
@@ -128,6 +138,13 @@
         (frei ? '<span class="sp-frei-name">🌴 ' + UI.esc(frei.titel || "frei") + "</span>" : "") + "</th>";
     }).join("") + "</tr>";
 
+    // Checkliste „Vorbereitung“ je Tag (Kopien, Versuche …) ganz oben
+    const checklisten = bearbeiten ? {} : await Store.Wochennotizen.checklisten(montag);
+    const vorbereitung = bearbeiten ? "" : '<tr class="checkliste"><th class="sp-zeit"><strong>✓ Vorbereitung</strong></th>' +
+      daten.map((d, i) => '<td class="sp-check' + (i + 1 === heuteTag ? " heute" : "") + '" data-ck-datum="' + d + '">' +
+        (checklisten[d] || []).map((x) => checkPunktHTML(x, d < heute)).join("") +
+        '<button class="ck-neu" data-action="ck-neu" title="Punkt hinzufügen">＋</button></td>').join("") + "</tr>";
+
     // Ganztägige Termine in eigener Zeile über der 1. Stunde
     const ganztags = tage.some((p) => p.ganztags.length)
       ? '<tr class="ganztags"><th class="sp-zeit"><strong>Ganztägig</strong></th>' + tage.map((p, i) =>
@@ -150,7 +167,8 @@
         const p = tage[i];
         const inhalt = (p.zellen[b.id] || []).map((item) => itemHTML(item, klassen,
           item.klasseId ? planungen[item.klasseId + "|" + daten[i] + "|" + b.id] : null)).join("");
-        return '<td class="' + klasse + (p.frei ? " frei" : "") + '" data-action="sp-zelle" data-datum="' + daten[i] +
+        const geoeffnet = offen && offen.datum === daten[i] && offen.blockIds.indexOf(b.id) !== -1;
+        return '<td class="' + klasse + (p.frei ? " frei" : "") + (geoeffnet ? " offen" : "") + '" data-action="sp-zelle" data-datum="' + daten[i] +
           '" data-block="' + UI.esc(b.id) + '">' + inhalt + "</td>";
       }).join("");
       return '<tr class="' + (b.art === "stunde" ? "" : "pause") + '"><th class="sp-zeit">' + label +
@@ -187,21 +205,24 @@
         "Für einen Wechsel (z. B. zum Halbjahr) „Neuer Stundenplan ab …“ wählen – der bisherige bleibt dann im Archiv.</div>";
     }
 
-    const notiz = await Store.Wochennotizen.get(montag);
+    const notiz = panel ? "" : await Store.Wochennotizen.get(montag);
     const body = hinweis + wochenKopf +
-      '<div class="sp-layout">' +
+      '<div class="sp-layout' + (panel ? " mit-planung" : "") + '">' +
         '<div class="table-wrap sp-wrap"><table class="sp-tabelle' + (bearbeiten ? " bearbeiten" : "") + '"><thead>' + kopf + "</thead><tbody>" +
-          ganztags + zeilen + "</tbody></table></div>" +
-        '<div class="sp-seite">' +
-          '<div class="card sp-notiz"><h3>Wochenende &amp; ToDos</h3>' +
-            '<textarea id="sp-notiz" placeholder="Notizen für diese Woche …">' + UI.esc(notiz) + "</textarea>" +
-            '<div class="hint">Gehört zur KW ' + kw + ", wird automatisch gespeichert.</div></div>" +
-          naechsteTermineHTML(termine, klassen, heute) +
-        "</div>" +
+          vorbereitung + ganztags + zeilen + "</tbody></table></div>" +
+        (panel
+          ? '<div class="sp-seite pl-seite">' + panel.html + "</div>"
+          : '<div class="sp-seite">' +
+              '<div class="card sp-notiz"><h3>Wochenende &amp; ToDos</h3>' +
+                '<textarea id="sp-notiz" placeholder="Notizen für diese Woche …">' + UI.esc(notiz) + "</textarea>" +
+                '<div class="hint">Gehört zur KW ' + kw + ", wird automatisch gespeichert.</div></div>" +
+              naechsteTermineHTML(termine, klassen, heute) +
+            "</div>") +
       "</div>" +
-      '<p class="home-info"><a href="info.html">Was ist Noten-Fritze? · Anleitung · Datenschutz</a></p>';
+      homeInfoHTML();
 
-    return { topbar, body, mount: () => {
+    return { topbar, body, fullWidth: !!panel, mount: () => {
+      if (panel) panel.mount();
       // Langes Drücken / Rechtsklick: Menü der Zelle (Ausfall, Verschieben, …)
       if (!bearbeiten) UI.langDruck(UI.$(".sp-tabelle"), ".sp-zelle[data-datum]", (el) =>
         api.zellenMenue(el.getAttribute("data-datum"), el.getAttribute("data-block")));
@@ -211,6 +232,103 @@
         UI.toast("Notiz gespeichert");
       });
     }};
+  }
+
+  // Ein Punkt der Checkliste; vorbei: der Tag ist vorüber (offene Punkte rot)
+  function checkPunktHTML(x, vorbei) {
+    return '<div class="ck-punkt' + (x.erledigt ? " erledigt" : vorbei ? " ueberfaellig" : "") + '" data-ck-id="' + UI.esc(x.id) + '">' +
+      '<button class="ck-box" data-action="ck-toggle" title="' + (x.erledigt ? "Wieder offen" : "Erledigt") + '">' + (x.erledigt ? "✓" : "") + "</button>" +
+      '<span class="ck-text" data-action="ck-bearbeiten">' + UI.esc(x.text) + "</span></div>";
+  }
+
+  // ---- Checkliste „Vorbereitung“ -------------------------------------------------
+  function checkOrt(el) {
+    const td = el.closest("[data-ck-datum]");
+    const punkt = el.closest("[data-ck-id]");
+    return { td, datum: td.getAttribute("data-ck-datum"), id: punkt ? punkt.getAttribute("data-ck-id") : null };
+  }
+  // Änderungen nacheinander (Kette) – schnelles Antippen mehrerer Kästchen
+  // würde sonst gleichzeitig lesen und einen Haken überschreiben.
+  let checkKette = Promise.resolve();
+  function checkNacheinander(fn) {
+    checkKette = checkKette.catch(() => {}).then(fn);
+    return checkKette;
+  }
+  async function checkListe(datum) {
+    return ((await Store.Wochennotizen.checklisten(Calc.montagVon(datum)))[datum] || []).map((x) => Object.assign({}, x));
+  }
+  // Abhaken: nur den Punkt im DOM umstellen (kein render – geht schneller und
+  // lässt das Planungsfenster in Ruhe)
+  function checkToggle(el) {
+    const o = checkOrt(el);
+    return checkNacheinander(async () => {
+      const liste = await checkListe(o.datum);
+      const x = liste.find((y) => y.id === o.id);
+      if (!x) return;
+      x.erledigt = !x.erledigt;
+      await Store.Wochennotizen.checklisteSetzen(Calc.montagVon(o.datum), o.datum, liste);
+      const alt = o.td.querySelector('[data-ck-id="' + o.id + '"]');
+      if (alt) alt.outerHTML = checkPunktHTML(x, o.datum < Store.datumLokal());
+    });
+  }
+  // Neuer Punkt direkt in der Zelle: Enter speichert und öffnet das nächste
+  // Feld, Esc oder ein leeres Feld beim Verlassen schließt.
+  function checkNeu(el) {
+    const o = checkOrt(el);
+    if (o.td.querySelector(".ck-eingabe")) { o.td.querySelector(".ck-eingabe").focus(); return; }
+    const feld = document.createElement("input");
+    feld.type = "text";
+    feld.className = "ck-eingabe";
+    feld.placeholder = "z. B. Kopien 9a";
+    o.td.insertBefore(feld, el);
+    feld.focus();
+    let fertig = false;
+    const sichern = () => {
+      const text = feld.value.trim();
+      if (!text) return Promise.resolve(false);
+      feld.value = "";
+      return checkNacheinander(async () => {
+        const liste = await checkListe(o.datum);
+        const x = { id: Store.uid(), text, erledigt: false };
+        liste.push(x);
+        await Store.Wochennotizen.checklisteSetzen(Calc.montagVon(o.datum), o.datum, liste);
+        feld.insertAdjacentHTML("beforebegin", checkPunktHTML(x, o.datum < Store.datumLokal()));
+        return true;
+      });
+    };
+    feld.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") { ev.preventDefault(); sichern().catch(UI.fehlerMelden); }
+      else if (ev.key === "Escape") { fertig = true; feld.remove(); }
+    });
+    feld.addEventListener("blur", () => {
+      if (fertig) return;
+      fertig = true;
+      sichern().then(() => feld.remove()).catch(UI.fehlerMelden);
+    });
+  }
+  // Tipp auf den Text: ändern oder löschen
+  async function checkBearbeiten(el) {
+    const o = checkOrt(el);
+    const liste = await checkListe(o.datum);
+    const x = liste.find((y) => y.id === o.id);
+    if (!x) return;
+    const speichern = async (neu) => { await Store.Wochennotizen.checklisteSetzen(Calc.montagVon(o.datum), o.datum, neu); render(); };
+    UI.modal({
+      title: "Vorbereitung · " + tagKurz(o.datum),
+      bodyHTML: UI.field("Punkt", "text", x.text, { placeholder: "z. B. Kopien 9a" }) +
+        '<div class="field"><label class="hstack"><input type="checkbox" id="ck-erledigt" style="width:auto;min-height:auto"' +
+          (x.erledigt ? " checked" : "") + "> Erledigt</label></div>",
+      buttons: [
+        { label: "Löschen", className: "danger", onClick: async (close) => { close(); await speichern(liste.filter((y) => y !== x)); } },
+        { label: "Abbrechen" },
+        { label: "Speichern", className: "primary", onClick: async (close, box) => {
+          const text = box.querySelector('[name="text"]').value.trim();
+          x.erledigt = box.querySelector("#ck-erledigt").checked;
+          close();
+          await speichern(text ? liste.map((y) => (y === x ? Object.assign(x, { text }) : y)) : liste.filter((y) => y !== x));
+        }}
+      ]
+    });
   }
 
   // Die nächsten 14 Tage (ab heute) unter der Wochennotiz
@@ -228,6 +346,16 @@
       "</div>";
   }
 
+  // Raum einer Stunde: der Sitzplan, auf den der Tracker beim Start umschaltet –
+  // der des Plan-Eintrags, sonst der zuletzt benutzte, sonst der erste
+  // (wie trackerStartDialog). Ergebnis: „ (315)“ oder "".
+  function raumHTML(k, sitzplanId) {
+    const sp = k && k.sitzplaene;
+    if (!sp || !sp.plaene.length) return "";
+    const plan = sp.plaene.find((p) => p.id === sitzplanId) || sp.plaene.find((p) => p.id === sp.aktivId) || sp.plaene[0];
+    return plan && plan.name ? ' <span class="sp-raum">(' + UI.esc(plan.name) + ")</span>" : "";
+  }
+
   // Eintrag des Plans (Bearbeiten-Modus): Klasse oder Freitext, A/B-Kennung
   function eintragHTML(e, klassen) {
     const ab = e.woche !== "alle" ? '<span class="sp-ab">' + e.woche + "</span>" : "";
@@ -235,7 +363,7 @@
       const k = klassen[e.klasseId];
       if (!k) return "";
       return '<div class="sp-eintrag" style="background:' + Calc.klassenFarbe(k) + '">' + ab +
-        '<span class="nm">' + UI.esc(k.name || "(ohne Namen)") + "</span>" +
+        '<span class="nm">' + UI.esc(k.name || "(ohne Namen)") + raumHTML(k, e.sitzplanId) + "</span>" +
         (k.fach ? '<span class="fach">' + UI.esc(k.fach) + "</span>" : "") + "</div>";
     }
     return '<div class="sp-eintrag frei">' + ab + '<span class="nm">' + UI.esc(e.titel || "") + "</span></div>";
@@ -260,11 +388,12 @@
     }
     const cls = "sp-eintrag" + (k ? "" : " frei") + (weg ? " weg" : "") + (item.verschobenVon ? " hergeschoben" : "");
     const anhaenge = planung && !weg ? (planung.bausteine || []).filter((x) => x.typ === "link" || x.typ === "datei").length : 0;
-    const thema = planung && !weg && planung.thema
+    const reihe = planung && !weg && planung.reihe ? '<span class="sp-reihe">' + UI.esc(planung.reihe) + "</span>" : "";
+    const thema = reihe + (planung && !weg && planung.thema
       ? '<span class="sp-thema">' + UI.esc(planung.thema) + (anhaenge ? " 📎" : "") + "</span>"
-      : (anhaenge ? '<span class="sp-thema">📎</span>' : "");
+      : (anhaenge ? '<span class="sp-thema">📎</span>' : ""));
     return '<div class="' + cls + '"' + (k ? ' style="background:' + Calc.klassenFarbe(k) + '"' : "") + ">" +
-      '<span class="nm">' + UI.esc(k ? (k.name || "(ohne Namen)") : item.titel) + "</span>" +
+      '<span class="nm">' + UI.esc(k ? (k.name || "(ohne Namen)") : item.titel) + (k ? raumHTML(k, item.sitzplanId) : "") + "</span>" +
       (k && k.fach && !zusatz && !thema ? '<span class="fach">' + UI.esc(k.fach) + "</span>" : "") + thema + zusatz + "</div>";
   }
 
@@ -281,10 +410,10 @@
     render();
   }
 
-  // Startseite: Klassen oder Stundenplan (wird gemerkt)
+  // Startseite: Klassen, Stundenplan oder Reihen (wird gemerkt)
   async function ansichtSetzen(ansicht) {
     const s = await Store.getSettings();
-    s.startAnsicht = ansicht === "stundenplan" ? "stundenplan" : "klassen";
+    s.startAnsicht = ansicht === "stundenplan" || ansicht === "reihen" ? ansicht : "klassen";
     await Store.saveSettings(s);
     if (ansicht !== "stundenplan") state.stundenplanBearbeiten = false;
   }
@@ -307,7 +436,10 @@
       // Eine Stunde, die hier (noch) liegt – auch ausgefallen, nicht weggeschoben
       const klassenStunde = stunde && items.find((i) => i.typ === "stunde" && i.klasseId &&
         !(i.aenderung && i.aenderung.aenderung === "verschoben"));
-      if (klassenStunde) return go("planung", { planungSlot: { klasseId: klassenStunde.klasseId, datum, blockId } });
+      if (klassenStunde) {
+        state.planungSlot = { klasseId: klassenStunde.klasseId, datum, blockId };
+        return render();
+      }
       if (!items.length) return api.terminDialog(null, { datum, blockId });
       return api.zellenMenue(datum, blockId);
     }
@@ -522,7 +654,7 @@
 
   Object.assign(global.Views, {
     ViewStundenplan, stundenplanEinrichten, ansichtSetzen, wocheBlaettern,
-    stundenplanZelle, abWocheUmstellen, plaeneDialog,
+    stundenplanZelle, abWocheUmstellen, plaeneDialog, checkToggle, checkNeu, checkBearbeiten,
     // Bausteine für views.kalender.js
     terminText, terminFarbe, terminChipHTML, tagMonat, datumLang, tagKurz, blockName, angezeigterMontag
   });

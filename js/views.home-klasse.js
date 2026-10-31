@@ -7,7 +7,7 @@
 (function (global) {
   "use strict";
 
-  const { state, nameHTML } = global.Views;
+  const { state, nameHTML, homeInfoHTML } = global.Views;
   const api = global.Views;   // Tabs aus views.noten/sitzplan/mitarbeit.js (laden später)
 
   // =========================================================================
@@ -16,7 +16,7 @@
   // Umschalter der Startseite (nur, wenn ein Stundenplan eingerichtet ist)
   function homeUmschalterHTML(aktiv) {
     return '<div class="tabs home-tabs">' +
-      [["klassen", "Klassen"], ["stundenplan", "Stundenplan"]].map(([id, label]) =>
+      [["klassen", "Klassen"], ["stundenplan", "Stundenplan"], ["reihen", "Reihen"]].map(([id, label]) =>
         '<button class="tab' + (aktiv === id ? " active" : "") + '" data-action="home-ansicht" data-ansicht="' + id + '">' + label + "</button>"
       ).join("") + "</div>";
   }
@@ -26,6 +26,7 @@
     // gewählte Ansicht (Klassen oder Stundenplan).
     const plaene = await Store.Stundenplan.alle();
     if (plaene.length && state.settings.startAnsicht === "stundenplan") return api.ViewStundenplan();
+    if (plaene.length && state.settings.startAnsicht === "reihen") return api.ViewReihen();
 
     const klassen = (await Store.Klassen.all())
       .sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0));
@@ -37,7 +38,6 @@
       const typLabel = k.typ === "hauptfach" ? "Hauptfach" : "Nebenfach";
       return (
         '<div class="card class-card" data-action="open-class" data-id="' + k.id + '" style="border-left:8px solid ' + Calc.klassenFarbe(k) + '">' +
-          '<button class="iconbtn plain danger-text card-del" data-action="delete-class" data-id="' + k.id + '" title="Klasse löschen">🗑</button>' +
           '<div class="chips">' +
             '<span class="chip accent">' + UI.esc(k.fach || "Fach") + "</span>" +
             '<span class="chip">' + UI.esc(typLabel) + "</span>" +
@@ -58,8 +58,7 @@
       ? '<div class="grid cards">' + cards + "</div>"
       : '<div class="empty"><div class="big">🎓</div><p>Noch keine Klassen vorhanden.</p>' +
         '<button class="btn primary" data-action="add-class">Erste Klasse anlegen</button></div>') +
-      // Dezenter Weg zur Infoseite (Anleitung, Datenschutz, Kontakt)
-      '<p class="home-info"><a href="info.html">Was ist Noten-Fritze? · Anleitung · Datenschutz</a></p>';
+      homeInfoHTML();
 
     const topbar =
       '<div class="title-wrap"><h1 class="main">Noten-Fritze</h1>' +

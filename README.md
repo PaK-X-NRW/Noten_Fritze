@@ -41,7 +41,7 @@ Tablet-first, optimiert für das **iPad im Querformat**, offline nutzbar als PWA
   Seitenbeschreibung/Vorschau-Tags und strukturierte Daten (JSON-LD) in `info.html`.
 - Lizenz: MIT (siehe `LICENSE`).
 - **Unterstützen:** freiwillige Beiträge über `https://paypal.me/notenfritze` – nur als normaler Link
-  (Infoseite, Abschnitt „Unterstützen“, und Einstellungen → Karte „Über“), kein PayPal-Skript.
+  (Infoseite, Abschnitt „Unterstützen“, Knopfleiste unten auf der Startseite und Einstellungen → Karte „Über“), kein PayPal-Skript.
   Anbieter ist ein Kleingewerbe (Kleinunternehmer § 19 UStG); deshalb hat `info.html` ein Impressum.
 
 Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Workflow
@@ -80,7 +80,7 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `calc.tracker.js` – Heatmap, Stundenzeiten, vergessene Stunden
   - `calc.sitzplan.js` – Raumform-Vorlagen, Sitzregeln, automatisches Verteilen
   - `calc.stundenplan.js` – Wochen, A/B-Wochen, Versionen, tatsächlicher Tag, Monat, Klassenfarben
-  - `calc.planung.js` – Stundenplanung: Einheit (Doppelstunde), Fahrplan aufteilen, Minuten, vorige Stunde, Umzug
+  - `calc.planung.js` – Stundenplanung: Einheit (Doppelstunde), Fahrplan aufteilen, Minuten, vorige/nächste Stunde, Umzug, Rücken
     (alle `calc*.js` rein, ohne DOM/DB; geprüft in `tests.html`)
   - `csv.js` – CSV-Export/Import
   - `ui.js` – UI-Bausteine (Modal, Toast, Formfelder)
@@ -94,7 +94,8 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `views.tracker.js` – Mitarbeits-Tracker
   - `views.stundenplan.js` – Stundenplan auf der Startseite (Wochenansicht)
   - `views.kalender.js` – Monatsansicht, Termine, Ausfall/Verschieben/Hinweis
-  - `views.planung.js` – Stundenplanung (Fahrplan aus Bausteinen)
+  - `views.planung.js` – Stundenplanung (Fenster neben dem Wochenplan, Fahrplan aus Bausteinen)
+  - `views.reihen.js` – Unterrichtsreihen (Übersicht, Export/Import, in eine Klasse übernehmen)
   - `views.dialoge.js` – allgemeine Dialoge
   - `views.js` – Aktions-Dispatcher (Action-Map, Delegation)
   - `app.js` – Bootstrap
@@ -128,13 +129,14 @@ kategorien     { id, klasseId, name, art('schriftlich'|'sonstige'),
                  quelle('manuell'|'mitarbeit'), sortIndex }
                  (quelle 'mitarbeit' = wird über „Quartal abschließen“ gefüllt)
 leistungen     { id, klasseId, kategorieId, quartal(1..4), titel, datum(YYYY-MM-DD),
-                 sortIndex, createdAt }
+                 sortIndex, createdAt,
+                 bewertung('note'|'rohpunkte', fehlt = 'note'), maxPunkte, schluessel[16 %] }
                  (= eine Spalte der Notenübersicht, z. B. „2. Klassenarbeit“;
                   je Schüler/in steht darin genau eine Note)
 noten          { id, klasseId, schuelerId, kategorieId, leistungId, wert(1..6,
                  oder 0..15 MSS-Punkte bei Klassenstufe >= 11, s. Calc.istMSS),
                  titel, datum(YYYY-MM-DD), quartal(1..4), halbjahr(1|2, abgeleitet),
-                 createdAt }
+                 rohpunkte (nur in Rohpunkte-Spalten), createdAt }
                  (titel/datum/quartal folgen immer der Leistung)
 sitzplaene     { klasseId, aktivId, plaene:[{ id, name, rows, cols,
                  seats:[{id,row,col,schuelerId,keinPlatz?}] }], regeln:[…] }
@@ -157,7 +159,8 @@ stundenplaene  { id, gueltigAb(YYYY-MM-DD, Montag | null = von Anfang an),
                               sitzplanId | null }], createdAt, updatedAt }
                  (je Datensatz eine Version des Wochenplans; gültig ist die mit dem
                  spätesten gueltigAb ≤ Datum, ältere als die heutige = Archiv)
-wochennotizen  { montag(YYYY-MM-DD), text, updatedAt }   (Notiz je Woche)
+wochennotizen  { montag(YYYY-MM-DD), text, checklisten: { 'YYYY-MM-DD': [{ id, text, erledigt }] }, updatedAt }
+               (Notiz je Woche + Checkliste „Vorbereitung“ je Tag)
 termine        { id, art('klassenarbeit'|'test'|'konferenz'|'elternabend'|'aufsicht'|
                  'vertretung'|'sonstiges'|'ferien'|'aenderung'), titel, datum, bis (Ferien),
                  blockId | null (ganztägig), klasseId | null, notiz,
@@ -166,11 +169,15 @@ termine        { id, art('klassenarbeit'|'test'|'konferenz'|'elternabend'|'aufsi
                  createdAt, updatedAt }
                  (Änderungen meinen eine Stunde über Datum + Block + Klasse bzw. Freitext;
                  der Plan selbst bleibt unverändert)
-planungen      { id, klasseId, datum, blockId, thema, bausteine:[{ id, typ('text'|'link'|'datei'),
+planungen      { id, klasseId, datum, blockId, thema, reihe(Name der Unterrichtsreihe),
+                 bausteine:[{ id, typ('text'|'link'|'datei'),
                  phase, minuten, text, url, dateiId }], createdAt, updatedAt }
                  (je Stunde ein Datensatz; eine Doppelstunde = zwei Datensätze, im Fenster
                  ein Fahrplan mit Trennlinie; zieht beim Verschieben der Stunde mit)
 dateien        { id, name, mime, groesse, daten(ArrayBuffer | null), behalten, entferntAm, erstelltAm }
+papierkorb     { id, klasseId, name, geloeschtAm(YYYY-MM-DD), export(Klassen-Export),
+                 stundenplan:[{ versionId, eintraege }], termine, planungen, dateien }
+                 (gelöschte Klasse, 30 Tage wiederherstellbar; seit DB_VERSION 8, nicht im Backup)
                  (Kopie einer angehängten Datei; den Inhalt entfernt der App-Start nach der Frist,
                  Name/Größe bleiben – auch im Baustein; im Backup nur auf Wunsch, als Base64)
 einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punkte'|'note6'),
@@ -181,6 +188,7 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
                  abWochen [{ abMontag, woche('A'|'B') }] (Umschaltpunkte der A/B-Wochen),
                  sitzplanKachelSpalten(6..15, Standard 9),
                  mitarbeitPunkte, mitarbeitSchwellen,
+                 notenschluessel[16 % je MSS-Punkt 0..15] (Vorschlag für Rohpunkte-Spalten),
                  heatPunkteEinfach, heatPunkteGut, heatPunkteSehrGut,
                  heatStartWert, heatVerfallPunkte, heatVerfallMinuten, anteile,
                  dateiAufbewahrung('frist'|'nie'), dateiFristTage(Standard 14) }
@@ -303,7 +311,10 @@ Stunde) gehört zu einem der vier Quartale (1. Q: Aug–Okt, 2. Q: Nov–Jan,
 - **Mitarbeits-Auswertung** bleibt beim Filter „1. Q · 2. Q · 3. Q · 4. Q · Jahr“,
   weil Stunden und Ereignisse quartalsweise abgeschlossen werden.
 - Neue Spalten liegen voreingestellt im ersten Quartal des angezeigten Halbjahres;
-  Ereignisse und Stunden übernehmen weiterhin die Einstellung „Aktuelles Quartal“.
+  Neue Stunden (und ihre Ereignisse) liegen im **Erfassungsquartal der Klasse**: die
+  Einstellung „Aktuelles Quartal“, nach einem Quartalsabschluss automatisch das nächste
+  Quartal – nie rückwärts, auch nicht nach „Abschluss aufheben“, wenn schon im neuen
+  Quartal erfasst wurde.
 
 ### Mitarbeit in der Notenübersicht
 
@@ -430,9 +441,11 @@ Stundennoten (`3+`, nicht `2,8`).
   Roh-Ereignisse lassen sich dabei als CSV sichern.
   **Gelöscht wird nichts:** Stunden und Meldungen bleiben erhalten, das Quartal
   wird nur als abgeschlossen markiert. Der Mitarbeit-Tab zeigt es dann grau mit
-  dem Hinweis „Abgeschlossen am …“, für dieses Quartal lässt sich kein Tracker
-  mehr starten. Der Knopf **„Abschluss aufheben“** gibt es wieder frei; die
-  übertragene Note bleibt dabei stehen. Ein erneuter Abschluss ist mit den
+  dem Hinweis „Abgeschlossen am …“. Der Tracker erfasst für diese Klasse ab sofort im
+  **nächsten Quartal** (der Start-Dialog sagt es dazu), ohne dass die Einstellung
+  „Aktuelles Quartal“ umgestellt werden muss; der Mitarbeit-Tab springt auf das neue
+  Quartal. Der Knopf **„Abschluss aufheben“** gibt es wieder frei; die übertragene Note
+  und alle schon erfassten Stunden bleiben in ihrem Quartal. Ein erneuter Abschluss ist mit den
   bereits übertragenen Noten vorbelegt.
 
 ## 6. CSV-Schema
@@ -466,8 +479,11 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
 
 - **Home** – Klassenübersicht als Karten, sortiert nach zuletzt geöffnet; lange nicht
   geöffnete Klassen mit rotem Punkt + Hinweis. „＋ Klasse“, „Klasse importieren“,
-  Einstellungen. Jede Karte trägt oben rechts einen 🗑-Button zum direkten Löschen
-  der Klasse (mit Bestätigung, inkl. aller Noten/Ereignisse/Stunden).
+  Einstellungen. **Löschen** einer Klasse geht bewusst nur über die Klasse →
+  „Bearbeiten“ → roter Bereich „Klasse löschen …“: Vorher wird eine Sicherungsdatei
+  (Klassen-Export) gespeichert, danach liegt die Klasse **30 Tage im Papierkorb**
+  (⚙️ Einstellungen) und lässt sich vollständig wiederherstellen – mit Stundenplan-
+  Einträgen, Terminen und Planungen; „Rückgängig“ direkt im Toast.
   Ohne Stundenplan gibt es den Knopf **„📅 Stundenplan einrichten“**; danach schaltet
   ein Umschalter **Klassen · Stundenplan** zwischen beiden Ansichten (die gewählte
   merkt sich die App).
@@ -475,7 +491,10 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   Pausenzeilen erscheinen nur mit Eintrag (z. B. Aufsicht). Wochen blättern (◀ ▶,
   „Heute“), KW und A/B-Woche im Kopf (antippen = A/B ab dieser Woche umstellen),
   heute und die laufende Stunde hervorgehoben, rechts eine **Notiz je Woche**
-  („Wochenende & ToDos“). Tipp auf eine Klasse öffnet sie. **✏️ Bearbeiten**: Zelle
+  („Wochenende & ToDos“). Über der 1. Stunde je Tag eine **Checkliste „✓ Vorbereitung“**
+  (Kopien, Versuche …): ＋ legt Punkte direkt in der Zelle an (Enter = nächster Punkt),
+  Kästchen hakt ab, Tipp auf den Text ändert oder löscht; offene Punkte vergangener Tage
+  sind rot. Tipp auf eine Klasse öffnet sie. **✏️ Bearbeiten**: Zelle
   antippen → Klasse (optional mit Raum) oder Freitext, jede Woche oder A/B getrennt,
   optional auch die folgende Stunde (Doppelstunde). **🗂 Pläne**: aktueller, geplante
   und archivierte Pläne; „Neuer Stundenplan ab …“ legt eine Kopie an, die ab der
@@ -495,9 +514,27 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   die **nächsten Termine** (14 Tage). Jede Klasse hat eine **eigene Farbe**
   (Klassen-Dialog, Farbstreifen auf der Klassenkarte), die im Stundenplan und bei
   Terminen der Klasse gilt.
+- **Reihen** (dritter Knopf neben „Klassen · Stundenplan“) – Unterrichtsreihen: Im
+  Planungsfenster steht neben dem Thema das Feld **„Reihe“** (z. B. „Der Schimmelreiter“,
+  Vorschläge aus der Klasse); die Kachel im Stundenplan zeigt die Reihe als eigene Zeile.
+  Die Ansicht „Reihen“ listet alle Reihen je Klasse (Stunden, Zeitraum): **Ansehen**
+  (jede Stunde mit Thema, Phasen, Links, Dateinamen), **Exportieren** als Paket (JSON ohne
+  Datum/Klasse, Dateien auf Wunsch), **Reihe importieren** und **In Klasse übernehmen**:
+  Klasse und Startdatum wählen, die Vorschau zeigt, welche Stunde wohin kommt – verteilt
+  wird stundenweise auf die freien Stunden laut Stundenplan, schon geplante Stunden werden
+  übersprungen. Danach sind es ganz normale Planungen.
 - **Stundenplanung** – **Tipp** auf eine Klassenstunde im Stundenplan öffnet ihren
-  Fahrplan (Vollbild); **langes Drücken** bzw. Rechtsklick öffnet das Menü (Ausfall,
-  Verschieben, Hinweis, Termin) – im Fahrplan auch über „⋯ Stunde ändern“. Oben das
+  Fahrplan als **Fenster rechts neben dem Wochenplan** (statt Notiz und Terminen; der Plan
+  bleibt bedienbar – blättern, andere Stunde antippen wechselt das Fenster, ✕ schließt;
+  auf schmalen Bildschirmen nur das Fenster); **langes Drücken** bzw. Rechtsklick öffnet das
+  Menü (Ausfall, Verschieben, Planungen rücken, Hinweis, Termin). Im Fenster direkt:
+  **Fällt aus …** (bzw. Ausfall aufheben), **⇅ Rücken …** – die Planungen der Klasse ab
+  dieser Stunde ohne Ausfall **nach hinten** (Stunde einschieben, sie wird frei) oder
+  **nach vorne** (aufrücken), je Doppel-/Einzelstunde oder stundenweise – und **⋯ Mehr**.
+  **⇥** an einem Baustein schiebt ihn und alle folgenden in die nächste Stunde der Klasse –
+  auf Nachfrage **vorne angehängt** (vor die vorhandene Planung) oder **eingeschoben** als
+  eigene Stunde „Thema 2“; dann rücken die Planungen ab dort stundenweise samt Thema weiter.
+  Haben die Stunden einer Doppelstunde verschiedene Themen, hat jede ein eigenes Themenfeld. Oben das
   **Thema** (erscheint im Raster) und „verplant: x von 45 Min“. **Bausteine** mit Phase
   (Vorschläge: Einstieg · Erarbeitung · Sicherung · Übung · Hausaufgabe · Puffer, frei
   ergänzbar), Minuten und Text, dazu **Link-Bausteine** („Öffnen“); sortieren am Griff ⠿,
@@ -505,7 +542,7 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   verschiebbarer Trennlinie „— 2. Stunde —“; neue Bausteine füllen die Stunden von oben.
   Oben erscheint die **Hausaufgabe der letzten Stunde** der Klasse, **📋 Übernehmen**
   hängt den Fahrplan einer anderen Stunde an, **▶ Tracker** startet die Erfassung, im
-  Tracker zeigt **🗺 Fahrplan** den Plan der laufenden Stunde. Wird eine Stunde
+  Tracker zeigt **📋 Stundenplanung** den Plan der laufenden Stunde. Wird eine Stunde
   verschoben (oder getauscht), zieht ihr Fahrplan mit. **＋ Datei** legt eine Kopie der
   gewählten Datei in der App ab (Dateien, Fotos, Kamera): Öffnen, Teilen, 📌 behalten.
   Beim App-Start wird der Inhalt entfernt, wenn die letzte Stunde mit dieser Datei länger
@@ -546,8 +583,19 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   darauf speichert und springt eine Zeile weiter. Die Bildschirmtastatur bleibt
   dabei zu (das Feld ist auf `inputmode="none"` gesetzt) – eine angeschlossene
   Tastatur funktioniert unverändert.
+  **Fußzeile:** unter jeder schriftlichen Leistung (Klassen-/Kursarbeit) der
+  **Durchschnitt** (aus den genauen Noten, 2- = 2,3, auf zwei Stellen) und der
+  **Notenspiegel** (Sek I: 1–6, Tendenzen zählen zur ganzen Note; MSS: 15–0 Punkte),
+  dazu die Minderleistungen „4- oder schlechter“ bzw. „4 P. oder weniger“ mit Prozent –
+  rechnet bei jeder Eingabe mit.
   „＋ Spalte“ legt eine neue Leistung an (Bezeichnung, Kategorie, Quartal, Datum) –
-  voreingestellt im angezeigten Halbjahr. Ein Tipp auf den Spaltenkopf bearbeitet
+  voreingestellt im angezeigten Halbjahr. **Bewertung „Rohpunkte“** (z. B. Klassenarbeit
+  mit 90 P.): Höchstpunktzahl angeben, dann in den Zellen die Punkte tippen (auch halbe,
+  Zifferntastatur statt Pad) – die Zelle zeigt die Note und darunter die Punkte, der Kopf
+  die Höchstpunktzahl. Note über den **Notenschlüssel in Prozent** (Vorschlag unter
+  ⚙️ Einstellungen, je Spalte anpassbar, Grenzen kaufmännisch auf halbe Punkte gerundet);
+  Rohpunkte bleiben gespeichert, eine Änderung von Schlüssel oder Höchstpunktzahl rechnet
+  die Noten der Spalte nach Rückfrage neu. Ein Tipp auf den Spaltenkopf bearbeitet
   oder löscht die Spalte, ein Tipp auf den Namen zeigt die komplette Herleitung.
   Die drei Spaltengruppen (schriftlich · sonstige · Zeugnis) sind farbig hinterlegt,
   die Namensspalte bleibt beim horizontalen Scrollen stehen. Spaltenköpfe lassen
@@ -586,13 +634,18 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
   Wertung vergessener Hausaufgaben (HA-Modus),
   Stundenzeiten (Stunden und Pausen,
   täglich gleich), Mitarbeitspunkte, Notenschwellen, Heatmap-Punktverfall,
-  Export-Ordner, Backup/Restore, Demo-Daten, Beispielklassen, alles löschen.
+  Export-Ordner, Backup/Restore, Demo-Daten, Beispielklassen, Papierkorb. **Alle Daten
+  löschen** steht getrennt davon in einem roten Bereich ganz unten und speichert vorher
+  automatisch ein Backup (ohne die Dateien der Stundenplanung).
 - **Beispielklassen** – Knopf „Beispielklassen anlegen“ (Einstellungen) legt
   zwei Klassen mit einem komplett durchgespielten Schuljahr an: **„9a
   (Beispiel)“** (Sek. I, Schulnoten) und **„Mathematik LK 12 (Beispiel)“** (Oberstufe,
   MSS-Punkte). In beiden sind das 1.–3. Quartal abgeschlossen (Stunden und
   Meldungen bleiben grau sichtbar), das 4. Quartal läuft noch, sodass sich
-  „Quartal abschließen“ selbst ausprobieren lässt. Anders als „Demo-Daten neu
+  „Quartal abschließen“ selbst ausprobieren lässt. Gibt es noch keinen Stundenplan,
+  entsteht ein Beispiel-Stundenplan (Doppel- und Einzelstunden) mit Planungen für die
+  nächsten vier Wochen und einer Klassenarbeit der 9a – zum Ausprobieren von Rücken
+  und ⇥; ein vorhandener Plan bleibt unverändert. Anders als „Demo-Daten neu
   laden“ funktioniert das auch bei bereits vorhandenen Klassen; gleichnamige
   Klassen werden übersprungen. Der Ablauf ist in `Dev/Schuljahr-Schema.md` (nur lokal) Schritt
   für Schritt mit Beispielzahlen beschrieben.
@@ -614,8 +667,8 @@ HA-Modus wählbar (Punkteabzug oder Note 6 ab der 3., wirkt über den Notenvorsc
 Notenschwellen global und je Klasse editierbar · Besprechungsmodus ·
 MSS-Punkte-Skala (0–15) für Klassenstufe ab 11, umschaltbar je Klasse ·
 CSV-Export (5 Arten) mit Export-Ordner/Teilen-Blatt · CSV-Import Schüler ·
-Klassen-Export/-Import (ersetzen/als Kopie) · Klasse löschen direkt auf der
-Home-Kachel · JSON-Voll-Backup · PWA/Offline · Demo-Daten · Beispielklassen
+Klassen-Export/-Import (ersetzen/als Kopie) · Klasse löschen mit Sicherungsdatei
+und 30 Tagen Papierkorb · JSON-Voll-Backup · PWA/Offline · Demo-Daten · Beispielklassen
 (Sek. I und Oberstufe) mit komplettem Musterjahr.
 
 **Bewusst später (klar als Ausbau markiert):**
@@ -675,6 +728,7 @@ Noten_Fritze/
    ├─ views.stundenplan.js  Stundenplan auf der Startseite (Woche)
    ├─ views.kalender.js     Monat, Termine, Ausfall/Verschieben/Hinweis
    ├─ views.planung.js      Stundenplanung (Fahrplan)
+   ├─ views.reihen.js       Unterrichtsreihen (Übersicht, Paket, übernehmen)
    ├─ views.dialoge.js      allgemeine Dialoge
    ├─ views.js              Aktions-Dispatcher (Action-Map)
    └─ app.js                Bootstrap
