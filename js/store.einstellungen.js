@@ -126,6 +126,8 @@
     schemaVersion: 1,
     // Aktuelles Quartal (1–4) – neue Noten/Ereignisse/Stunden werden damit getaggt
     aktuellesQuartal: 1,
+    // Zuletzt gezeigte Neuigkeiten (APP_VERSION); null = noch nie (app.js)
+    gesehenVersion: null,
     // Vergessene Hausaufgaben werten:
     // "punkte" = vergessene HA geben Minuspunkte in der Mitarbeit
     // "note6"  = jede 3. vergessene HA je Quartal erzeugt automatisch eine

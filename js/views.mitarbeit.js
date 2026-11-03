@@ -71,6 +71,7 @@
     const q = quartalFilter("auswertungQuartal");
     const mss = Calc.istMSS(k);
     const uebertragen = await mitarbeitNotenVonQuartal(k, q);
+    const erfassungsQ = await Store.erfassungsQuartal(k, state.settings);
 
     const rangeBtns = [["alle", "Gesamt"], ["30", "30 Tage"], ["7", "7 Tage"]].map(([id, l]) =>
       '<button class="tab ' + (state.auswertungRange === id ? "active" : "") + '" data-action="ausw-range" data-range="' + id + '">' + l + "</button>"
@@ -122,6 +123,13 @@
         "Leistungsverweigerung = 6 für die Stunde, Tage mit Abwesenheit zählen nicht. " +
         stundenGefiltert.length + " Stunde" + (stundenGefiltert.length === 1 ? "" : "n") + " im gewählten Zeitraum. " +
         "Tippe auf einen Vorschlag, um die Rechnung zu sehen.</p>";
+    // Wohin der Tracker gerade erfasst – mit der Möglichkeit, das zu ändern
+    // (z. B. nach einem versehentlichen Abschluss)
+    const erfassungZeile = '<div class="hstack wrap" style="margin-bottom:var(--gap)"><span>' + (erfassungsQ
+      ? "Der Tracker erfasst neue Stunden im <strong>" + erfassungsQ + ". Quartal</strong>" +
+        (k.erfassungsQuartalGewaehlt === erfassungsQ ? " (von Hand gewählt)" : "")
+      : "Alle vier Quartale sind abgeschlossen – der Tracker erfasst nichts mehr.") + "</span>" +
+      (erfassungsQ ? '<button class="btn small" data-action="erfassung-quartal">Ändern</button>' : "") + "</div>";
 
     return (
       '<div class="hstack wrap" style="margin-bottom:var(--gap)">' +
@@ -134,6 +142,7 @@
           : '<button class="btn small" data-action="quartal-abschliessen">Quartal abschließen</button>') +
         '<button class="btn small" data-action="export-events">Mitarbeit-CSV</button>' +
       "</div>" +
+      erfassungZeile +
       hinweis +
       '<div class="table-wrap' + (abschluss ? " gesperrt" : "") + '"><table><thead><tr>' +
         "<th>Name</th><th class=\"num\">Meld.</th><th class=\"num\">Punkte</th><th class=\"num\">Stunden</th>" +
@@ -354,13 +363,23 @@
             return; // Abbruch ohne Änderung
           }
           const kategorieWahl = box.querySelector("#qa-kategorie").value;
-          const ok = await UI.confirmDialog("Quartal wirklich abschließen?",
+          // Läuft das Quartal laut Kalender noch über vier Wochen, ist es
+          // vermutlich das falsche – warnen, aber nicht verbieten.
+          const rest = Calc.quartalRestTage(q, Store.datumLokal());
+          const frueh = rest !== null && rest > 28;
+          const ok = await UI.confirmDialog(frueh ? "Quartal läuft noch – trotzdem abschließen?" : "Quartal wirklich abschließen?",
+            (frueh ? "Achtung: Das " + q + ". Quartal läuft laut Kalender noch bis " +
+              UI.datumKurz(Calc.quartalEnde(q, Store.datumLokal())) + " (" + rest + " Tage). Ist es wirklich das richtige Quartal? " : "") +
             "Die eingetragenen Noten werden übertragen. Das " + q + ". Quartal wird danach gesperrt: " +
             "Stunden und Meldungen bleiben zur Ansicht erhalten, es lässt sich aber nichts mehr erfassen. " +
             "Aufheben kannst du das jederzeit im Reiter Mitarbeit.",
             { okLabel: "Übertragen & abschließen", danger: false });
           if (!ok) return;
           close();
+
+          // Vorheriger Stand für „Rückgängig“ im Toast
+          const vorher = { wahl: k.erfassungsQuartalGewaehlt || null, kategorieNeu: null,
+            kategorieQuelle: null, leistungNeu: false, noten: {} };
 
           // Ziel-Kategorie: gewählte oder neu angelegte „Mündliche Mitarbeit“.
           // Sie wird als Mitarbeits-Kategorie markiert – daran erkennt die
@@ -374,16 +393,25 @@
             });
             await Store.Kategorien.save(kat);
             kategorieId = kat.id;
+            vorher.kategorieNeu = kat.id;
           } else {
             const kat = kategorien.find((c) => c.id === kategorieId);
             if (kat && kat.quelle !== "mitarbeit") {
+              vorher.kategorieQuelle = { id: kat.id, quelle: kat.quelle };
               kat.quelle = "mitarbeit";
               await Store.Kategorien.save(kat);
             }
           }
           // Alle übertragenen Noten landen in einer gemeinsamen Spalte des Quartals
+          const spaltenVorher = (await Store.Leistungen.byKlasse(k.id)).map((l) => l.id);
           const leistung = await Store.leistungFuer(k.id, kategorieId, q,
             "Mitarbeit " + q + ". Quartal", Store.datumLokal());
+          vorher.leistungNeu = spaltenVorher.indexOf(leistung.id) === -1;
+          if (!vorher.leistungNeu) {
+            (await Store.Noten.byKlasse(k.id)).forEach((n) => {
+              if (n.leistungId === leistung.id) vorher.noten[n.schuelerId] = n.wert;
+            });
+          }
           for (const e of eintraege) {
             await Store.Noten.setzeZelle(leistung, e.schuelerId, e.wert);
           }
@@ -394,7 +422,12 @@
           const naechstes = await Store.erfassungsQuartal(k, state.settings);
           if (naechstes) state.auswertungQuartal = String(naechstes);
           UI.toast(eintraege.length + " Noten übertragen – Quartal abgeschlossen" +
-            (naechstes ? ", der Tracker erfasst ab jetzt im " + naechstes + ". Quartal" : ""), { duration: 5000 });
+            (naechstes ? ", der Tracker erfasst ab jetzt im " + naechstes + ". Quartal" : ""), {
+            duration: 10000,
+            aktion: { label: "Rückgängig", onClick: () => {
+              abschlussZuruecknehmen(k.id, q, leistung, eintraege, vorher).catch(UI.fehlerMelden);
+            } }
+          });
           render();
         }}
       ]
@@ -402,5 +435,113 @@
   }
 
 
-  Object.assign(global.Views, { TabAuswertung, auswertungKontext, mitarbeitNotenVonQuartal, schwellenDialog, mitarbeitHerleitungDialog, quartalAbschliessenDialog });
+  // „Rückgängig“ direkt nach dem Abschluss: Abschluss aufheben, übertragene
+  // Noten auf den vorherigen Stand, eine dabei neu angelegte Spalte bzw.
+  // Kategorie wieder entfernen und das Erfassungsquartal wie vorher.
+  async function abschlussZuruecknehmen(klasseId, q, leistung, eintraege, vorher) {
+    const k = await Store.Klassen.get(klasseId);
+    if (!k) return;
+    if (vorher.kategorieNeu) {
+      await Store.Kategorien.remove(vorher.kategorieNeu);   // nimmt Spalte und Noten mit
+    } else if (vorher.leistungNeu) {
+      await Store.Leistungen.remove(leistung.id);
+    } else {
+      for (const e of eintraege) {
+        const alt = vorher.noten[e.schuelerId];
+        await Store.Noten.setzeZelle(leistung, e.schuelerId, alt === undefined ? null : alt);
+      }
+    }
+    if (vorher.kategorieQuelle) {
+      const kat = await Store.Kategorien.get(vorher.kategorieQuelle.id);
+      if (kat) {
+        if (vorher.kategorieQuelle.quelle === undefined) delete kat.quelle;
+        else kat.quelle = vorher.kategorieQuelle.quelle;
+        await Store.Kategorien.save(kat);
+      }
+    }
+    await Store.abschlussAufheben(k, q);
+    k.erfassungsQuartalGewaehlt = vorher.wahl;
+    await Store.Klassen.save(k);
+    state.auswertungQuartal = String(q);
+    render();
+    UI.toast("Abschluss des " + q + ". Quartals zurückgenommen");
+  }
+
+  // ---- Erfassungsquartal von Hand wählen ------------------------------------
+  // Legt fest, in welches Quartal der Tracker neue Stunden dieser Klasse legt
+  // (bis zum nächsten Abschluss), und holt auf Wunsch Stunden, die im falschen
+  // Quartal gelandet sind, samt ihren Einträgen herüber.
+  //   opts: { titel, einleitung, danach() }
+  async function erfassungsQuartalDialog(k, opts) {
+    opts = opts || {};
+    const offen = [1, 2, 3, 4].filter((q) => !Store.abschlussVon(k, q));
+    if (!offen.length) {
+      UI.toast("Alle vier Quartale sind abgeschlossen – erst einen Abschluss aufheben");
+      return;
+    }
+    const [jetzt, zahl] = await Promise.all([
+      Store.erfassungsQuartal(k, state.settings), Store.stundenJeQuartal(k.id)
+    ]);
+    const auswahl = UI.field("Neue Stunden erfassen im", "quartal", String(jetzt), { type: "select",
+      options: offen.map((q) => ({ value: String(q), label: q + ". Quartal" + (q === jetzt ? " (bisher)" : "") })) });
+    const verschiebbar = offen.filter((q) => zahl[q] && zahl[q].stunden);
+    const verschiebenHTML = verschiebbar.length
+      ? '<div class="field"><label>Schon erfasste Stunden umziehen (nur falls sie im falschen Quartal gelandet sind)</label>' +
+        verschiebbar.map((q) =>
+          '<label class="hstack" data-von="' + q + '"><input type="checkbox" data-verschieben="' + q +
+            '" style="width:auto;min-height:auto"> ' + zahl[q].stunden + " Stunde" + (zahl[q].stunden === 1 ? "" : "n") +
+            " (" + zahl[q].ereignisse + " Eintr" + (zahl[q].ereignisse === 1 ? "ag" : "äge") + ") aus dem " + q +
+            '. Quartal ins <span class="eq-ziel"></span>. Quartal verschieben</label>').join("") +
+        '<div class="hint">Betrifft nur Stunden dieses Schuljahres. Bereits übertragene Noten bleiben unverändert.</div></div>'
+      : "";
+    let uebernommen = false;
+    UI.modal({
+      title: opts.titel || "Erfassungsquartal · " + k.name,
+      bodyHTML: '<p class="muted">' + UI.esc(opts.einleitung ||
+          "Der Tracker legt neue Stunden dieser Klasse in das gewählte Quartal – bis zum nächsten Quartalsabschluss, danach geht es automatisch weiter.") +
+        "</p>" + auswahl + verschiebenHTML,
+      onMount: (box) => {
+        const sel = box.querySelector('select[name="quartal"]');
+        const sync = () => {
+          UI.$all(".eq-ziel", box).forEach((s) => { s.textContent = sel.value; });
+          UI.$all("[data-von]", box).forEach((lbl) => {
+            const gleich = lbl.getAttribute("data-von") === sel.value;
+            lbl.style.display = gleich ? "none" : "";
+            if (gleich) lbl.querySelector("input").checked = false;
+          });
+        };
+        sel.addEventListener("change", sync);
+        sync();
+      },
+      // Abbrechen: der aufrufende Dialog (z. B. Tracker starten) geht weiter
+      onClose: () => { if (!uebernommen && opts.danach) opts.danach(); },
+      buttons: [
+        { label: "Abbrechen" },
+        { label: "Übernehmen", className: "primary", onClick: async (close, box) => {
+          const ziel = parseInt(box.querySelector('select[name="quartal"]').value, 10);
+          const von = UI.$all("input[data-verschieben]", box)
+            .filter((c) => c.checked).map((c) => parseInt(c.getAttribute("data-verschieben"), 10))
+            .filter((q) => q !== ziel);
+          uebernommen = true;
+          close();
+          // Erst umziehen, dann wählen: entspricht das Ziel danach ohnehin der
+          // automatischen Regel, bleibt keine Wahl gespeichert.
+          let stunden = 0, eintr = 0;
+          for (const v of von) {
+            const r = await Store.stundenQuartalAendern(k.id, v, ziel);
+            stunden += r.stunden; eintr += r.ereignisse;
+          }
+          await Store.erfassungsQuartalWaehlen(k, ziel, state.settings);
+          state.auswertungQuartal = String(ziel);
+          render();
+          UI.toast("Der Tracker erfasst ab jetzt im " + ziel + ". Quartal" +
+            (stunden ? " – " + stunden + " Stunde" + (stunden === 1 ? "" : "n") + " mit " + eintr + " Eintr" +
+              (eintr === 1 ? "ag" : "ägen") + " verschoben" : ""), { duration: 5000 });
+          if (opts.danach) opts.danach();
+        }}
+      ]
+    });
+  }
+
+  Object.assign(global.Views, { TabAuswertung, auswertungKontext, mitarbeitNotenVonQuartal, schwellenDialog, mitarbeitHerleitungDialog, quartalAbschliessenDialog, erfassungsQuartalDialog });
 })(window);

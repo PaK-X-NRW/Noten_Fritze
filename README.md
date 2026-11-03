@@ -67,6 +67,7 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   strukturierte Objekte). LocalStorage wird bewusst **nicht** für Nutzdaten benutzt.
 - **Schichten:**
   - `version.js` – App-Version (`MAJOR.MINOR.PATCH`, eine Stelle für alles)
+  - `neuigkeiten.js` – „Was ist neu?“ je Version (Fenster nach einem Update, Einstellungen → Über & Hilfe)
   - `db.js` – generischer IndexedDB-Wrapper (Promises, Schema-Versionierung)
   - `store.js` – Domänenmodell und Repositories (Kern des Namespace `Store`)
   - `store.einstellungen.js` – Standardwerte und App-Einstellungen
@@ -85,7 +86,7 @@ Jeder Stand, der auf `main` landet, geht automatisch online – erledigt vom Wor
   - `csv.js` – CSV-Export/Import
   - `ui.js` – UI-Bausteine (Modal, Toast, Formfelder)
   - `views.core.js` – Views-Kern (State, Routing, Render-Schleife)
-  - `views.einstellungen.js` – Einstellungen inkl. Stundenzeiten
+  - `views.einstellungen.js` – Einstellungen in Reitern inkl. Stundenzeiten, Fenster „Was ist neu?“
   - `views.besprechung.js` – Besprechungsmodus
   - `views.home-klasse.js` – Home + Klassenansicht (Reiter Schüler, Kategorien)
   - `views.noten.js` / `views.noten.eingabe.js` – Reiter Noten (Tabelle, Dialoge / Eingabe, Nummernpad)
@@ -120,6 +121,7 @@ klassen        { id, name, schuljahr, fach, typ('hauptfach'|'nebenfach'),
                  klassenstufe(5..13, null=Sek.I), anteilSchriftlich, anteilSonstige,
                  mitarbeitSchwellen(null=global), farbe(Stundenplan/Kalender, null=berechnet),
                  abgeschlosseneQuartale[{quartal(1..4), datum}],
+                 erfassungsQuartalGewaehlt(1..4, null=automatisch; bis zum nächsten Abschluss),
                  notizen, createdAt, updatedAt, lastOpenedAt }
 schueler       { id, klasseId, vorname, nachname, bemerkung, sortIndex, ... }
                  (sortIndex = manuelle Reihenfolge; angezeigt wird je nach
@@ -181,6 +183,7 @@ papierkorb     { id, klasseId, name, geloeschtAm(YYYY-MM-DD), export(Klassen-Exp
                  (Kopie einer angehängten Datei; den Inhalt entfernt der App-Start nach der Frist,
                  Name/Größe bleiben – auch im Baustein; im Backup nur auf Wunsch, als Base64)
 einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punkte'|'note6'),
+                 gesehenVersion (zuletzt gezeigte Neuigkeiten, null = noch nie),
                  stundenzeiten [{ id, art('stunde'|'pause'), name, start, ende, nr }]
                  (bis 1.15: stundenplan, wird beim Lesen umgewandelt),
                  schuelerSortierung('nachname'|'manuell'),
@@ -200,7 +203,7 @@ einstellungen  { key:'app', schemaVersion, aktuellesQuartal(1..4), haModus('punk
   Sitzplatz-Zuweisung, Einträge im Stundenplan, Termine, Planungen); das Löschen einer Kategorie oder einer Spalte nimmt die
   darin erfassten Noten mit.
 - **App-Version:** `APP_VERSION` in `js/version.js` (Schema `MAJOR.MINOR.PATCH`,
-  aktuell **1.17.0**) ist die sichtbare Programmversion: angezeigt unter
+  aktuell **1.19.0**) ist die sichtbare Programmversion: angezeigt unter
   Einstellungen → Über, Name des Service-Worker-Caches, Feld `appVersion` im
   JSON-Backup. Sie wird von Hand gepflegt und ist unabhängig von den beiden
   internen Zählern unten.
@@ -314,7 +317,8 @@ Stunde) gehört zu einem der vier Quartale (1. Q: Aug–Okt, 2. Q: Nov–Jan,
   Neue Stunden (und ihre Ereignisse) liegen im **Erfassungsquartal der Klasse**: die
   Einstellung „Aktuelles Quartal“, nach einem Quartalsabschluss automatisch das nächste
   Quartal – nie rückwärts, auch nicht nach „Abschluss aufheben“, wenn schon im neuen
-  Quartal erfasst wurde.
+  Quartal erfasst wurde. Ausnahme: ein im Mitarbeit-Tab von Hand gewähltes Quartal
+  („Ändern“), es gilt bis zum nächsten Abschluss.
 
 ### Mitarbeit in der Notenübersicht
 
@@ -447,6 +451,14 @@ Stundennoten (`3+`, nicht `2,8`).
   Quartal. Der Knopf **„Abschluss aufheben“** gibt es wieder frei; die übertragene Note
   und alle schon erfassten Stunden bleiben in ihrem Quartal. Ein erneuter Abschluss ist mit den
   bereits übertragenen Noten vorbelegt.
+  Läuft das Quartal laut Kalender noch mehr als vier Wochen, warnt die Rückfrage davor
+  (abschließen lässt es sich trotzdem). **Versehentlich abgeschlossen?** Direkt danach bietet der Hinweis 10 Sekunden lang
+  „Rückgängig“ (Noten, Abschluss und Erfassungsquartal wie vorher). Später: „Abschluss
+  aufheben“ fragt gleich, in welchem Quartal der Tracker weiter erfassen soll. Dieselbe Auswahl
+  gibt es jederzeit über die Zeile „Der Tracker erfasst neue Stunden im …“ → **Ändern** im
+  Mitarbeit-Tab und im Start-Dialog des Trackers. Dort lassen sich auch Stunden, die im
+  falschen Quartal gelandet sind, samt Meldungen in das gewählte Quartal verschieben. Die
+  Wahl gilt bis zum nächsten Abschluss.
 
 ## 6. CSV-Schema
 
@@ -630,13 +642,17 @@ robustes Quoting (`"` verdoppelt). Der Import erkennt `,` **und** `;` automatisc
 - **Besprechungsmodus** – ein/e Schüler/in einzeln, groß; nur deren Daten sichtbar
   (Datenschutz bei der Notenbesprechung), Vor/Zurück, Halbjahr-Filter; zeigt
   die Zeugnisnote groß und darunter die komplette Herleitung Schritt für Schritt.
-- **Einstellungen** – aktuelles Quartal, Reihenfolge der Schüler/innen,
-  Wertung vergessener Hausaufgaben (HA-Modus),
-  Stundenzeiten (Stunden und Pausen,
-  täglich gleich), Mitarbeitspunkte, Notenschwellen, Heatmap-Punktverfall,
-  Export-Ordner, Backup/Restore, Demo-Daten, Beispielklassen, Papierkorb. **Alle Daten
-  löschen** steht getrennt davon in einem roten Bereich ganz unten und speichert vorher
-  automatisch ein Backup (ohne die Dateien der Stundenplanung).
+- **Einstellungen** in Reitern: **Allgemein** (aktuelles Quartal, Reihenfolge der
+  Schüler/innen) · **Noten** (Notenschlüssel für Rohpunkte) · **Mitarbeit & Tracker**
+  (Mitarbeitspunkte, HA-Modus, Notenschwellen, Heatmap, Kachelgröße im Sitzplan) ·
+  **Stundenplan** (Stundenzeiten mit Pausen, Dateien der Stundenplanung) · **Daten**
+  (Backup/Restore, Demo-Daten, Export-Ordner, Papierkorb, Beispielklassen; **Alle Daten
+  löschen** in einem roten Bereich ganz unten, speichert vorher automatisch ein Backup ohne
+  die Dateien der Stundenplanung) · **Über & Hilfe** („Was ist neu?“, Infoseite, Version).
+- **Was ist neu?** – Nach einem Update zeigt die App einmal die Neuerungen seit der zuletzt
+  gesehenen Version (`js/neuigkeiten.js`, Einstellung `gesehenVersion`), mit Knopf „Alle
+  Neuigkeiten“; bei einer Neuinstallation nicht. Wer von einer Version vor 1.19.0 kommt,
+  sieht einmalig alles ab 1.18.0. Jederzeit unter Einstellungen → Über & Hilfe.
 - **Beispielklassen** – Knopf „Beispielklassen anlegen“ (Einstellungen) legt
   zwei Klassen mit einem komplett durchgespielten Schuljahr an: **„9a
   (Beispiel)“** (Sek. I, Schulnoten) und **„Mathematik LK 12 (Beispiel)“** (Oberstufe,
@@ -717,7 +733,7 @@ Noten_Fritze/
    ├─ csv.js                CSV-Export/Import
    ├─ ui.js                 Modal/Toast/Formfelder
    ├─ views.core.js         Views-Kern (State, Routing, Render)
-   ├─ views.einstellungen.js Einstellungen inkl. Stundenzeiten
+   ├─ views.einstellungen.js Einstellungen (Reiter) inkl. Stundenzeiten, „Was ist neu?“
    ├─ views.besprechung.js  Besprechungsmodus
    ├─ views.home-klasse.js  Home + Klassenansicht (Schüler, Kategorien)
    ├─ views.noten.js        Reiter Noten (Tabelle, Spalten-/Schüler-Dialog)

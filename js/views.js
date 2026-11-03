@@ -13,10 +13,10 @@
     studentDetailDialog, seatAssignDialog, sitzplanNeuDialog, sitzplanUmbenennenDialog,
     sitzplanFormUmschalten, sitzplanVorlage, sitzplanRegelnDialog, sitzplanAutomatisch,
     importStudentsDialog, backupImportDialog,
-    schwellenDialog, mitarbeitHerleitungDialog, quartalAbschliessenDialog, klassenImportDialog,
+    schwellenDialog, mitarbeitHerleitungDialog, quartalAbschliessenDialog, erfassungsQuartalDialog, klassenImportDialog,
     trackerStartDialog, trackerModusToggle, trackerModusEnde, trackerModusTap,
     trackerStundeBeenden, trackerVerlassen, trackerRaumDialog, trackerTap, trackerUndo, trackerHeatPause,
-    besprechungStep, stundenzeitenAktion,
+    besprechungStep, stundenzeitenAktion, neuigkeitenDialog,
     stundenplanEinrichten, ansichtSetzen, wocheBlaettern, stundenplanZelle, abWocheUmstellen, plaeneDialog,
     checkToggle, checkNeu, checkBearbeiten,
     monatBlaettern, monatTag, ansichtWechseln, terminBearbeiten, terminNeu, krankDialog,
@@ -30,6 +30,8 @@
   const ACTIONS = {
     home: () => go("home"),
     settings: () => go("einstellungen"),
+    "einstellungen-reiter": (el) => { state.einstellungenReiter = el.getAttribute("data-reiter"); render(); },
+    neuigkeiten: () => neuigkeitenDialog(null, false),
     "add-class": () => klasseDialog(null),
     "open-class": (el) => go("klasse", { klasseId: el.getAttribute("data-id"), tab: "schueler" }),
     "edit-class": async () => klasseDialog(await Store.Klassen.get(state.klasseId)),
@@ -299,6 +301,18 @@
       await Store.abschlussAufheben(k, q);
       render();
       UI.toast(q + ". Quartal wieder freigegeben");
+      // Danach festlegen, wo der Tracker weiter erfasst (z. B. zurück ins
+      // versehentlich abgeschlossene Quartal)
+      await erfassungsQuartalDialog(k, {
+        titel: "Wo soll der Tracker weiter erfassen?",
+        einleitung: "Das " + q + ". Quartal ist wieder offen. Wähle, in welches Quartal neue Stunden ab jetzt kommen – " +
+          "das gilt bis zum nächsten Quartalsabschluss. Abbrechen lässt alles, wie es ist."
+      });
+    },
+    // Mitarbeit: Erfassungsquartal des Trackers von Hand wählen
+    "erfassung-quartal": async () => {
+      const k = await Store.Klassen.get(state.klasseId);
+      if (k) await erfassungsQuartalDialog(k);
     },
 
     // Export-Ordner (File System Access API, Chrome/Edge)

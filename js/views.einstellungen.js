@@ -276,6 +276,17 @@
   // =========================================================================
   //  EINSTELLUNGEN
   // =========================================================================
+  // Reiter der Einstellungen; der gewählte gilt nur bis zum Neuladen
+  // (state.einstellungenReiter, Action „einstellungen-reiter“)
+  const EINSTELLUNGS_REITER = [
+    { id: "allgemein", label: "Allgemein" },
+    { id: "noten", label: "Noten" },
+    { id: "mitarbeit", label: "Mitarbeit & Tracker" },
+    { id: "stundenplan", label: "Stundenplan" },
+    { id: "daten", label: "Daten" },
+    { id: "ueber", label: "Über & Hilfe" }
+  ];
+
   async function ViewEinstellungen() {
     const s = state.settings;
     // Gewählter Export-Ordner (File System Access API) – nur Name lesen,
@@ -294,130 +305,155 @@
       '<button class="iconbtn plain" data-action="home" title="Zurück">‹</button>' +
       '<div class="title-wrap"><h1 class="main">Einstellungen</h1></div>';
 
-    const body =
-      '<div class="card"><h2>Notenberechnung</h2>' +
-        einstellungFeld("Aktuelles Quartal", "aktuellesQuartal", s, { type: "select", options: [
-          { value: "1", label: "1. Quartal" },
-          { value: "2", label: "2. Quartal" },
-          { value: "3", label: "3. Quartal" },
-          { value: "4", label: "4. Quartal" }
-        ], hint: "Neue Noten, Stunden und Mitarbeits-Ereignisse werden diesem Quartal zugeordnet." }) +
-      "</div>" +
-      '<div class="card"><h2>Darstellung</h2>' +
-        einstellungFeld("Reihenfolge der Schüler/innen", "schuelerSortierung", s, { type: "select", options: [
-          { value: "nachname", label: "Alphabetisch (Nachname)" },
-          { value: "manuell", label: "Manuell (▲/▼ im Schüler-Tab)" }
-        ], hint: "Gilt für alle Listen: Noten, Tracker, Sitzplan, Besprechung und CSV-Exporte. Die manuelle Reihenfolge bleibt gespeichert und ist jederzeit wieder abrufbar." }) +
-        einstellungFeld("Sitzplan: Kacheln höchstens so klein wie bei … Spalten", "sitzplanKachelSpalten", s, { type: "number", inputmode: "numeric",
-          hint: "Gilt für Tracker und Reiter Sitzplan. Hat ein Sitzplan mehr Spalten, bleiben die Kacheln so groß und das Raster lässt sich seitlich wischen. Wertebereich: 6 bis 15 (bei 15 wird nie gescrollt)." }) +
-      "</div>" +
-      '<div class="card"><h2>Mitarbeit – Punkte je Ereignistyp</h2>' + punkte +
-        einstellungFeld("Vergessene Hausaufgaben werten", "haModus", s, { type: "select", options: [
-          { value: "punkte", label: "Punkteabzug in der Mitarbeit" },
-          { value: "note6", label: "Ab der 3. je eine Note 6 (Mündliche Mitarbeit)" }
-        ], hint: "Bei „Note 6“ geben vergessene Hausaufgaben keine Punkte; je drei vergessene HA im Quartal kommt eine zusätzliche Stundennote 6 in den Notenvorschlag – eine eigene Notenspalte entsteht dabei nicht." }) +
-      "</div>" +
-      '<div class="card"><h2>Mitarbeit – Notenschwellen</h2>' +
-        '<p class="muted">Übersetzt die Punkte einer einzelnen Stunde in eine Stundennote; der Vorschlag für die Mitarbeitsnote ist der Ø aller Stundennoten. Einzelne Klassen können eigene Schwellen bekommen (Klasse → Auswertung → Schwellen), z. B. weil eine Biologiestunde andere Mitarbeit ermöglicht als eine Deutschstunde.</p>' +
-        '<div id="schwellen-global">' + schwellenFelderHTML(s.mitarbeitSchwellen) + "</div>" +
-      "</div>" +
-      '<div class="card"><h2>Notenschlüssel für Rohpunkte</h2>' +
-        '<p class="muted">Vorschlag für Spalten mit der Bewertung „Rohpunkte“ (z. B. Klassen- und Kursarbeiten): ab wie viel Prozent ' +
-        "der Höchstpunktzahl es welche Note bzw. wie viele MSS-Punkte gibt. Die Punktgrenzen werden kaufmännisch auf halbe Punkte " +
-        "gerundet. Jede neue Spalte bekommt eine Kopie, die du dort anpassen kannst – eine Änderung hier verändert keine " +
-        "schon vergebenen Noten.</p>" +
-        '<div id="ns-global">' + schluesselFelderHTML(s.notenschluessel, null) + "</div>" +
-        '<div class="btn-row" style="margin-top:10px"><button class="btn small" data-action="notenschluessel-standard">Vorschlag wiederherstellen</button></div>' +
-      "</div>" +
-      '<div class="card"><h2>Heatmap</h2>' + heatpunkte +
-        '<div class="field" style="margin-top:14px">' + einstellungFeld("Default-Wert für neue / zurückgesetzte Heatmap", "heatStartWert", s, { type: "number", inputmode: "numeric", hint: "Wertebereich: 0 bis 100" }) + "</div>" +
-        '<div class="form-row" style="align-items:center">' +
-          '<div class="grow"><strong>Y Heatmap-Punkte verfallen pro X Minuten</strong><div class="hint">Bezogen auf eine 45-Minuten-Stunde; der Tracker skaliert auf die tatsächliche Stundendauer.</div></div>' +
-          zahlFeld("heatVerfallPunkte", s) + zahlFeld("heatVerfallMinuten", s, "X Minuten") +
-        "</div>" +
-      "</div>" +
-      '<div class="card"><h2>Stundenzeiten</h2>' +
-        '<p class="muted">Beginn und Ende der Stunden und Pausen – gilt für jeden Schultag gleich. ' +
-        "Der Tracker erkennt damit die laufende Stunde, ihre Restzeit und Doppelstunden. " +
-        "Pausen und sonstige Zeiten (z. B. Frühaufsicht) zählen nicht als Unterricht.</p>" +
-        stundenzeitenHTML(s) +
-      "</div>" +
-      '<div class="card"><h2>Dateien der Stundenplanung</h2>' +
-        '<p class="muted">Angehängte Dateien werden als <strong>Kopie</strong> in der App gespeichert – das Original bleibt, ' +
-        "wo es war. Sie liegen dadurch doppelt auf dem Gerät und belegen Speicherplatz. Deshalb entfernt die App ihren Inhalt " +
-        "automatisch, sobald die letzte Stunde, in der eine Datei vorkommt, länger als die Frist zurückliegt. Mit 📌 markierte " +
-        "Dateien bleiben. Name und Größe bleiben im Fahrplan stehen – die Datei lässt sich dann neu hinzufügen.</p>" +
-        '<div class="form-row">' +
-          einstellungFeld("Inhalt automatisch entfernen", "dateiAufbewahrung", s, { type: "select", options: [
-            { value: "frist", label: "nach der Frist" }, { value: "nie", label: "nie" }] }) +
-          einstellungFeld("Frist (Tage nach der Stunde)", "dateiFristTage", s, { type: "number", inputmode: "numeric", hint: "Standard: 14 Tage" }) +
-        "</div>" +
-        '<p class="hint">Belegt: ' + Views.groesseText(belegt) + " in " + mitInhalt.length + (mitInhalt.length === 1 ? " Datei" : " Dateien") + ".</p>" +
-        (mitInhalt.length ? '<div class="btn-row"><button class="btn danger" data-action="dateien-entfernen">Inhalt aller Dateien jetzt entfernen</button></div>' : "") +
-      "</div>" +
-      '<div class="card"><h2>Export-Ordner</h2>' +
-        '<p class="muted">Exporte (CSV/JSON) direkt in einen Ordner auf diesem Gerät speichern. ' +
-        'Funktioniert in Chrome/Edge; auf dem iPad läuft der Export stattdessen über das Teilen-Blatt („In Dateien sichern“).</p>' +
-        (!ordnerApi
-          ? '<p class="hint">Auf diesem Gerät/Browser nicht verfügbar – Exporte laufen über das Teilen-Blatt oder den Downloads-Ordner.</p>'
-          : '<p class="hint">' + (ordnerHandle
-              ? "Gewählter Ordner: <strong>" + UI.esc(ordnerHandle.name) + "</strong>"
-              : "Kein Ordner gewählt.") + "</p>" +
-            '<div class="btn-row">' +
-              '<button class="btn" data-action="export-ordner-waehlen">Ordner wählen</button>' +
-              (ordnerHandle ? '<button class="btn" data-action="export-ordner-vergessen">Entfernen</button>' : "") +
-            "</div>") +
-      "</div>" +
-      '<div class="card"><h2>Datensicherung</h2><p class="muted">Alle Daten bleiben lokal im Browser. Sicherung als JSON-Datei empfohlen.</p>' +
-        '<div class="btn-row">' +
-          '<button class="btn" data-action="backup-export">Backup exportieren (JSON)</button>' +
-          '<button class="btn" data-action="backup-import">Backup importieren</button>' +
-          '<button class="btn" data-action="reset-demo">Demo-Daten neu laden</button>' +
-        "</div>" +
-      "</div>" +
-      '<div class="card"><h2>Papierkorb</h2>' +
-        '<p class="muted">Gelöschte Klassen bleiben hier ' + Store.Papierkorb.TAGE + " Tage und lassen sich vollständig " +
-        "wiederherstellen – mit Noten, Mitarbeit, Stundenplan-Einträgen, Terminen und Planungen. Danach werden sie " +
-        "beim Start der App endgültig entfernt. Der Papierkorb ist nicht Teil des Backups.</p>" +
-        (papierkorb.length
-          ? papierkorb.map((e) => '<div class="pk-zeile"><div class="grow"><strong>' + UI.esc(e.name || "(ohne Namen)") + "</strong>" +
-              '<div class="hint">gelöscht am ' + UI.esc(e.geloeschtAm.split("-").reverse().join(".")) + " · noch " +
-              Store.Papierkorb.restTage(e) + " Tage</div></div>" +
-              '<button class="btn small primary" data-action="papierkorb-zurueck" data-id="' + UI.esc(e.id) + '">Wiederherstellen</button>' +
-              '<button class="btn small danger" data-action="papierkorb-weg" data-id="' + UI.esc(e.id) + '">Endgültig löschen</button></div>').join("")
-          : '<p class="hint">Der Papierkorb ist leer.</p>') +
-      "</div>" +
-      '<div class="card"><h2>Beispielklassen</h2>' +
-        '<p class="muted">Zwei Klassen mit einem komplett durchgespielten Schuljahr zum Ausprobieren: ' +
-        '„9a (Beispiel)“ mit Schulnoten und „Mathematik LK 12 (Beispiel)“ mit MSS-Punkten. ' +
-        "In beiden sind das 1.–3. Quartal abgeschlossen, das 4. Quartal läuft noch. " +
-        "Gibt es noch keinen Stundenplan, entsteht ein Beispiel-Stundenplan mit Planungen für die nächsten vier Wochen " +
-        "(zum Ausprobieren von Rücken und ⇥). " +
-        "Deine eigenen Klassen bleiben unverändert; löschen kannst du die Beispiele jederzeit über die Klasse → Bearbeiten.</p>" +
-        '<div class="btn-row">' +
-          '<button class="btn" data-action="seed-beispielklassen">Beispielklassen anlegen</button>' +
-        "</div>" +
-      "</div>" +
-      '<div class="card"><h2>Hilfe &amp; Rechtliches</h2>' +
-        '<p class="muted">Anleitung, Funktionsübersicht, Datenschutzerklärung, Impressum und Lizenz findest du auf der Infoseite.</p>' +
-        '<p class="hint">Noten sind personenbezogene Schülerdaten: Für die Nutzung auf einem privaten Gerät ist in der Regel ' +
-          "eine Genehmigung der Schulleitung nötig (Einzelheiten regelt jedes Bundesland). Die Daten liegen nur auf diesem Gerät – " +
-          "exportiere deshalb regelmäßig ein Backup.</p>" +
-        '<div class="btn-row"><a class="btn" href="info.html">Infoseite öffnen</a></div>' +
-      "</div>" +
-      '<div class="card"><h2>Über</h2><p class="muted">Noten-Fritze · Version ' + APP_VERSION +
-        " · lokale PWA · keine Cloud, keine Konten.</p>" +
-        '<p class="hint">DB-Schema ' + DB.DB_VERSION + " · Daten-Version " + Store.SCHEMA_VERSION + ".</p>" +
-        // Normaler Link, öffnet PayPal erst beim Antippen; die App selbst lädt nichts von dort.
-        '<p class="muted">Noten-Fritze ist kostenlos und bleibt es. Wenn du die Weiterentwicklung unterstützen möchtest, ' +
-          "freue ich mich über einen freiwilligen Beitrag.</p>" +
-        '<div class="btn-row"><a class="btn" href="https://paypal.me/notenfritze" target="_blank" rel="noopener">☕ Per PayPal unterstützen</a></div></div>' +
-      // Bewusst ganz unten und getrennt von „Backup exportieren“ (Action „delete-all“)
-      '<div class="card gefahrzone"><h3>Alle Daten löschen</h3>' +
-        '<p class="hint">Löscht alle Klassen mit Noten und Mitarbeit, Stundenplan, Termine, Planungen, Einstellungen und den ' +
-        "Papierkorb von diesem Gerät. Vorher wird automatisch ein Backup als Datei gespeichert (ohne die Dateien der " +
-        "Stundenplanung); damit lässt sich über „Backup importieren“ alles zurückholen.</p>" +
-        '<button class="btn danger" data-action="delete-all">Alle Daten löschen …</button></div>';
+    // Karten je Reiter (EINSTELLUNGS_REITER); gezeigt wird nur der aktive
+    const karten = {
+      allgemein: [
+        '<div class="card"><h2>Quartal</h2>' +
+          einstellungFeld("Aktuelles Quartal", "aktuellesQuartal", s, { type: "select", options: [
+            { value: "1", label: "1. Quartal" },
+            { value: "2", label: "2. Quartal" },
+            { value: "3", label: "3. Quartal" },
+            { value: "4", label: "4. Quartal" }
+          ], hint: "Neue Noten, Stunden und Mitarbeits-Ereignisse werden diesem Quartal zugeordnet." }) +
+        "</div>",
+        '<div class="card"><h2>Darstellung</h2>' +
+          einstellungFeld("Reihenfolge der Schüler/innen", "schuelerSortierung", s, { type: "select", options: [
+            { value: "nachname", label: "Alphabetisch (Nachname)" },
+            { value: "manuell", label: "Manuell (▲/▼ im Schüler-Tab)" }
+          ], hint: "Gilt für alle Listen: Noten, Tracker, Sitzplan, Besprechung und CSV-Exporte. Die manuelle Reihenfolge bleibt gespeichert und ist jederzeit wieder abrufbar." }) +
+        "</div>"
+      ],
+      noten: [
+        '<div class="card"><h2>Notenschlüssel für Rohpunkte</h2>' +
+          '<p class="muted">Vorschlag für Spalten mit der Bewertung „Rohpunkte“ (z. B. Klassen- und Kursarbeiten): ab wie viel Prozent ' +
+          "der Höchstpunktzahl es welche Note bzw. wie viele MSS-Punkte gibt. Die Punktgrenzen werden kaufmännisch auf halbe Punkte " +
+          "gerundet. Jede neue Spalte bekommt eine Kopie, die du dort anpassen kannst – eine Änderung hier verändert keine " +
+          "schon vergebenen Noten.</p>" +
+          '<div id="ns-global">' + schluesselFelderHTML(s.notenschluessel, null) + "</div>" +
+          '<div class="btn-row" style="margin-top:10px"><button class="btn small" data-action="notenschluessel-standard">Vorschlag wiederherstellen</button></div>' +
+        "</div>"
+      ],
+      mitarbeit: [
+        '<div class="card"><h2>Mitarbeit – Punkte je Ereignistyp</h2>' + punkte +
+          einstellungFeld("Vergessene Hausaufgaben werten", "haModus", s, { type: "select", options: [
+            { value: "punkte", label: "Punkteabzug in der Mitarbeit" },
+            { value: "note6", label: "Ab der 3. je eine Note 6 (Mündliche Mitarbeit)" }
+          ], hint: "Bei „Note 6“ geben vergessene Hausaufgaben keine Punkte; je drei vergessene HA im Quartal kommt eine zusätzliche Stundennote 6 in den Notenvorschlag – eine eigene Notenspalte entsteht dabei nicht." }) +
+        "</div>",
+        '<div class="card"><h2>Mitarbeit – Notenschwellen</h2>' +
+          '<p class="muted">Übersetzt die Punkte einer einzelnen Stunde in eine Stundennote; der Vorschlag für die Mitarbeitsnote ist der Ø aller Stundennoten. Einzelne Klassen können eigene Schwellen bekommen (Klasse → Auswertung → Schwellen), z. B. weil eine Biologiestunde andere Mitarbeit ermöglicht als eine Deutschstunde.</p>' +
+          '<div id="schwellen-global">' + schwellenFelderHTML(s.mitarbeitSchwellen) + "</div>" +
+        "</div>",
+        '<div class="card"><h2>Heatmap</h2>' + heatpunkte +
+          '<div class="field" style="margin-top:14px">' + einstellungFeld("Default-Wert für neue / zurückgesetzte Heatmap", "heatStartWert", s, { type: "number", inputmode: "numeric", hint: "Wertebereich: 0 bis 100" }) + "</div>" +
+          '<div class="form-row" style="align-items:center">' +
+            '<div class="grow"><strong>Y Heatmap-Punkte verfallen pro X Minuten</strong><div class="hint">Bezogen auf eine 45-Minuten-Stunde; der Tracker skaliert auf die tatsächliche Stundendauer.</div></div>' +
+            zahlFeld("heatVerfallPunkte", s) + zahlFeld("heatVerfallMinuten", s, "X Minuten") +
+          "</div>" +
+        "</div>",
+        '<div class="card"><h2>Sitzplan</h2>' +
+          einstellungFeld("Sitzplan: Kacheln höchstens so klein wie bei … Spalten", "sitzplanKachelSpalten", s, { type: "number", inputmode: "numeric",
+            hint: "Gilt für Tracker und Reiter Sitzplan. Hat ein Sitzplan mehr Spalten, bleiben die Kacheln so groß und das Raster lässt sich seitlich wischen. Wertebereich: 6 bis 15 (bei 15 wird nie gescrollt)." }) +
+        "</div>"
+      ],
+      stundenplan: [
+        '<div class="card"><h2>Stundenzeiten</h2>' +
+          '<p class="muted">Beginn und Ende der Stunden und Pausen – gilt für jeden Schultag gleich. ' +
+          "Der Tracker erkennt damit die laufende Stunde, ihre Restzeit und Doppelstunden. " +
+          "Pausen und sonstige Zeiten (z. B. Frühaufsicht) zählen nicht als Unterricht.</p>" +
+          stundenzeitenHTML(s) +
+        "</div>",
+        '<div class="card"><h2>Dateien der Stundenplanung</h2>' +
+          '<p class="muted">Angehängte Dateien werden als <strong>Kopie</strong> in der App gespeichert – das Original bleibt, ' +
+          "wo es war. Sie liegen dadurch doppelt auf dem Gerät und belegen Speicherplatz. Deshalb entfernt die App ihren Inhalt " +
+          "automatisch, sobald die letzte Stunde, in der eine Datei vorkommt, länger als die Frist zurückliegt. Mit 📌 markierte " +
+          "Dateien bleiben. Name und Größe bleiben im Fahrplan stehen – die Datei lässt sich dann neu hinzufügen.</p>" +
+          '<div class="form-row">' +
+            einstellungFeld("Inhalt automatisch entfernen", "dateiAufbewahrung", s, { type: "select", options: [
+              { value: "frist", label: "nach der Frist" }, { value: "nie", label: "nie" }] }) +
+            einstellungFeld("Frist (Tage nach der Stunde)", "dateiFristTage", s, { type: "number", inputmode: "numeric", hint: "Standard: 14 Tage" }) +
+          "</div>" +
+          '<p class="hint">Belegt: ' + Views.groesseText(belegt) + " in " + mitInhalt.length + (mitInhalt.length === 1 ? " Datei" : " Dateien") + ".</p>" +
+          (mitInhalt.length ? '<div class="btn-row"><button class="btn danger" data-action="dateien-entfernen">Inhalt aller Dateien jetzt entfernen</button></div>' : "") +
+        "</div>"
+      ],
+      daten: [
+        '<div class="card"><h2>Datensicherung</h2><p class="muted">Alle Daten bleiben lokal im Browser. Sicherung als JSON-Datei empfohlen.</p>' +
+          '<div class="btn-row">' +
+            '<button class="btn" data-action="backup-export">Backup exportieren (JSON)</button>' +
+            '<button class="btn" data-action="backup-import">Backup importieren</button>' +
+            '<button class="btn" data-action="reset-demo">Demo-Daten neu laden</button>' +
+          "</div>" +
+        "</div>",
+        '<div class="card"><h2>Export-Ordner</h2>' +
+          '<p class="muted">Exporte (CSV/JSON) direkt in einen Ordner auf diesem Gerät speichern. ' +
+          'Funktioniert in Chrome/Edge; auf dem iPad läuft der Export stattdessen über das Teilen-Blatt („In Dateien sichern“).</p>' +
+          (!ordnerApi
+            ? '<p class="hint">Auf diesem Gerät/Browser nicht verfügbar – Exporte laufen über das Teilen-Blatt oder den Downloads-Ordner.</p>'
+            : '<p class="hint">' + (ordnerHandle
+                ? "Gewählter Ordner: <strong>" + UI.esc(ordnerHandle.name) + "</strong>"
+                : "Kein Ordner gewählt.") + "</p>" +
+              '<div class="btn-row">' +
+                '<button class="btn" data-action="export-ordner-waehlen">Ordner wählen</button>' +
+                (ordnerHandle ? '<button class="btn" data-action="export-ordner-vergessen">Entfernen</button>' : "") +
+              "</div>") +
+        "</div>",
+        '<div class="card"><h2>Papierkorb</h2>' +
+          '<p class="muted">Gelöschte Klassen bleiben hier ' + Store.Papierkorb.TAGE + " Tage und lassen sich vollständig " +
+          "wiederherstellen – mit Noten, Mitarbeit, Stundenplan-Einträgen, Terminen und Planungen. Danach werden sie " +
+          "beim Start der App endgültig entfernt. Der Papierkorb ist nicht Teil des Backups.</p>" +
+          (papierkorb.length
+            ? papierkorb.map((e) => '<div class="pk-zeile"><div class="grow"><strong>' + UI.esc(e.name || "(ohne Namen)") + "</strong>" +
+                '<div class="hint">gelöscht am ' + UI.esc(e.geloeschtAm.split("-").reverse().join(".")) + " · noch " +
+                Store.Papierkorb.restTage(e) + " Tage</div></div>" +
+                '<button class="btn small primary" data-action="papierkorb-zurueck" data-id="' + UI.esc(e.id) + '">Wiederherstellen</button>' +
+                '<button class="btn small danger" data-action="papierkorb-weg" data-id="' + UI.esc(e.id) + '">Endgültig löschen</button></div>').join("")
+            : '<p class="hint">Der Papierkorb ist leer.</p>') +
+        "</div>",
+        '<div class="card"><h2>Beispielklassen</h2>' +
+          '<p class="muted">Zwei Klassen mit einem komplett durchgespielten Schuljahr zum Ausprobieren: ' +
+          '„9a (Beispiel)“ mit Schulnoten und „Mathematik LK 12 (Beispiel)“ mit MSS-Punkten. ' +
+          "In beiden sind das 1.–3. Quartal abgeschlossen, das 4. Quartal läuft noch. " +
+          "Gibt es noch keinen Stundenplan, entsteht ein Beispiel-Stundenplan mit Planungen für die nächsten vier Wochen " +
+          "(zum Ausprobieren von Rücken und ⇥). " +
+          "Deine eigenen Klassen bleiben unverändert; löschen kannst du die Beispiele jederzeit über die Klasse → Bearbeiten.</p>" +
+          '<div class="btn-row">' +
+            '<button class="btn" data-action="seed-beispielklassen">Beispielklassen anlegen</button>' +
+          "</div>" +
+        "</div>",
+        // Bewusst ganz unten und getrennt von „Backup exportieren“ (Action „delete-all“)
+        '<div class="card gefahrzone"><h3>Alle Daten löschen</h3>' +
+          '<p class="hint">Löscht alle Klassen mit Noten und Mitarbeit, Stundenplan, Termine, Planungen, Einstellungen und den ' +
+          "Papierkorb von diesem Gerät. Vorher wird automatisch ein Backup als Datei gespeichert (ohne die Dateien der " +
+          "Stundenplanung); damit lässt sich über „Backup importieren“ alles zurückholen.</p>" +
+          '<button class="btn danger" data-action="delete-all">Alle Daten löschen …</button></div>'
+      ],
+      ueber: [
+        '<div class="card"><h2>Was ist neu?</h2>' +
+          '<p class="muted">Die Neuerungen aller Versionen ab 1.16 auf einen Blick. Nach einem Update erscheinen sie einmal von selbst.</p>' +
+          '<div class="btn-row"><button class="btn" data-action="neuigkeiten">Was ist neu?</button></div>' +
+        "</div>",
+        '<div class="card"><h2>Hilfe &amp; Rechtliches</h2>' +
+          '<p class="muted">Anleitung, Funktionsübersicht, Datenschutzerklärung, Impressum und Lizenz findest du auf der Infoseite.</p>' +
+          '<p class="hint">Noten sind personenbezogene Schülerdaten: Für die Nutzung auf einem privaten Gerät ist in der Regel ' +
+            "eine Genehmigung der Schulleitung nötig (Einzelheiten regelt jedes Bundesland). Die Daten liegen nur auf diesem Gerät – " +
+            "exportiere deshalb regelmäßig ein Backup.</p>" +
+          '<div class="btn-row"><a class="btn" href="info.html">Infoseite öffnen</a></div>' +
+        "</div>",
+        '<div class="card"><h2>Über</h2><p class="muted">Noten-Fritze · Version ' + APP_VERSION +
+          " · lokale PWA · keine Cloud, keine Konten.</p>" +
+          '<p class="hint">DB-Schema ' + DB.DB_VERSION + " · Daten-Version " + Store.SCHEMA_VERSION + ".</p>" +
+          // Normaler Link, öffnet PayPal erst beim Antippen; die App selbst lädt nichts von dort.
+          '<p class="muted">Noten-Fritze ist kostenlos und bleibt es. Wenn du die Weiterentwicklung unterstützen möchtest, ' +
+            "freue ich mich über einen freiwilligen Beitrag.</p>" +
+          '<div class="btn-row"><a class="btn" href="https://paypal.me/notenfritze" target="_blank" rel="noopener">☕ Per PayPal unterstützen</a></div></div>'
+      ]
+    };
+    const aktiv = EINSTELLUNGS_REITER.some((r) => r.id === state.einstellungenReiter) ? state.einstellungenReiter : "allgemein";
+    const body = '<div class="tabs">' + EINSTELLUNGS_REITER.map((r) =>
+        '<button class="tab' + (r.id === aktiv ? " active" : "") + '" data-action="einstellungen-reiter" data-reiter="' + r.id + '">' +
+        r.label + "</button>").join("") + "</div>" +
+      karten[aktiv].join("");
 
     return { topbar, body, mount: () => {
       // Einfache Einstellungen: alle nach dem Bauplan (EINSTELLUNGEN)
@@ -442,8 +478,33 @@
     }};
   }
 
+  // ---- Was ist neu? (neuigkeiten.js) ---------------------------------------
+  // eintraege: Auswahl aus NEUIGKEITEN (nach einem Update nur die ungesehenen);
+  // ohne Angabe alle. nachUpdate: Titel „Neu in …“ und Knopf „Alle Neuigkeiten“.
+  function neuigkeitenDialog(eintraege, nachUpdate) {
+    const alle = global.NEUIGKEITEN || [];
+    const liste = eintraege || alle;
+    const html = liste.map((n) =>
+      '<div class="card" style="margin:0 0 12px"><h3 style="margin:0">Version ' + UI.esc(n.version) +
+        (n.titel ? " · " + UI.esc(n.titel) : "") + "</h3>" +
+        '<div class="hint">' + UI.esc(String(n.datum || "").split("-").reverse().join(".")) + "</div>" +
+        '<ul style="margin:8px 0 0;padding-left:20px">' +
+          (n.punkte || []).map((p) => '<li style="margin:4px 0">' + UI.esc(p) + "</li>").join("") +
+        "</ul></div>").join("");
+    const buttons = [];
+    if (nachUpdate && liste.length < alle.length) {
+      buttons.push({ label: "Alle Neuigkeiten", onClick: (close) => { close(); neuigkeitenDialog(null, false); } });
+    }
+    buttons.push({ label: nachUpdate ? "Alles klar" : "Schließen", className: "primary" });
+    UI.modal({
+      title: nachUpdate ? "Neu in Noten-Fritze " + APP_VERSION : "Was ist neu?",
+      bodyHTML: html || '<p class="muted">Keine Einträge.</p>',
+      buttons
+    });
+  }
+
   Object.assign(global.Views, {
-    ViewEinstellungen, schwellenFelderHTML, schwellenAusFormular, EINSTELLUNGEN, stundenzeitenAktion,
+    ViewEinstellungen, neuigkeitenDialog, schwellenFelderHTML, schwellenAusFormular, EINSTELLUNGEN, stundenzeitenAktion,
     schluesselFelderHTML, schluesselAusFormular, schluesselPunkteZeigen
   });
 })(window);

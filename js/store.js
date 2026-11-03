@@ -137,6 +137,9 @@
       // Abgeschlossene Quartale: [{ quartal: 1..4, datum: "YYYY-MM-DD" }].
       // Ein Eintrag sperrt das Quartal im Mitarbeit-Tab (siehe abschlussVon).
       abgeschlosseneQuartale: [],
+      // Von Hand gewähltes Erfassungsquartal des Trackers (null = automatisch,
+      // siehe erfassungsQuartal); jeder Abschluss setzt es zurück
+      erfassungsQuartalGewaehlt: null,
       notizen: "",
       createdAt: t,
       updatedAt: t,
@@ -179,16 +182,66 @@
   // Quartal, in das der Tracker neue Stunden dieser Klasse legt
   // (Calc.erfassungsQuartal: nach einem Abschluss weiter im nächsten, nie
   // rückwärts). Zählt nur Stunden des laufenden Schuljahres. null = alle vier
-  // Quartale abgeschlossen.
-  async function erfassungsQuartal(klasse, settings) {
+  // Quartale abgeschlossen. ohneWahl: die automatische Regel ohne das von Hand
+  // gewählte Quartal (klasse.erfassungsQuartalGewaehlt).
+  async function erfassungsQuartal(klasse, settings, ohneWahl) {
     const beginn = global.Calc.schuljahrBeginn(datumLokal());
     const stunden = (await Stunden.byKlasse(klasse.id)).filter((st) => (st.datum || "") >= beginn);
     const letzte = stunden.length ? stunden[stunden.length - 1] : null;   // byKlasse: nach startTs sortiert
-    return global.Calc.erfassungsQuartal(settings.aktuellesQuartal, klasse.abgeschlosseneQuartale, letzte && letzte.quartal);
+    return global.Calc.erfassungsQuartal(settings.aktuellesQuartal, klasse.abgeschlosseneQuartale,
+      letzte && letzte.quartal, ohneWahl ? null : klasse.erfassungsQuartalGewaehlt);
+  }
+  // Quartal, in das der Tracker ab jetzt erfasst, von Hand festlegen (gilt bis
+  // zum nächsten Abschluss). Entspricht es der automatischen Regel, wird keine
+  // Wahl gespeichert – dann rückt der Tracker wie gewohnt selbst weiter.
+  async function erfassungsQuartalWaehlen(klasse, quartal, settings) {
+    klasse.erfassungsQuartalGewaehlt = null;
+    const auto = await erfassungsQuartal(klasse, settings, true);
+    klasse.erfassungsQuartalGewaehlt = Number(quartal) === auto ? null : Number(quartal);
+    await Klassen.save(klasse);
+    return klasse;
+  }
+  // Stunden dieses Schuljahres je Quartal: { 1: { stunden, ereignisse }, … }
+  async function stundenJeQuartal(klasseId) {
+    const beginn = global.Calc.schuljahrBeginn(datumLokal());
+    const [stunden, ereignisse] = await Promise.all([Stunden.byKlasse(klasseId), Ereignisse.byKlasse(klasseId)]);
+    const zahl = {}, quartalVon = {};
+    stunden.filter((st) => (st.datum || "") >= beginn).forEach((st) => {
+      const q = Number(st.quartal);
+      if (!q) return;
+      quartalVon[st.id] = q;
+      zahl[q] = zahl[q] || { stunden: 0, ereignisse: 0 };
+      zahl[q].stunden += 1;
+    });
+    ereignisse.forEach((e) => { const q = quartalVon[e.stundeId]; if (q) zahl[q].ereignisse += 1; });
+    return zahl;
+  }
+  // Alle Stunden dieses Schuljahres aus Quartal `von` samt ihren Ereignissen
+  // nach Quartal `nach` verschieben (z. B. nach einem versehentlichen
+  // Abschluss) – in einer Transaktion. Rückgabe: { stunden, ereignisse }
+  async function stundenQuartalAendern(klasseId, von, nach) {
+    const beginn = global.Calc.schuljahrBeginn(datumLokal());
+    const t = now();
+    const stunden = (await Stunden.byKlasse(klasseId))
+      .filter((st) => (st.datum || "") >= beginn && Number(st.quartal) === Number(von));
+    const ids = {};
+    stunden.forEach((st) => {
+      ids[st.id] = true;
+      st.quartal = Number(nach); st.halbjahr = halbjahrAusQuartal(nach); st.updatedAt = t;
+    });
+    const ereignisse = (await Ereignisse.byKlasse(klasseId)).filter((e) => e.stundeId && ids[e.stundeId]);
+    ereignisse.forEach((e) => { e.quartal = Number(nach); e.halbjahr = halbjahrAusQuartal(nach); });
+    await DB.atomar(["stunden", "ereignisse"], (os) => {
+      stunden.forEach((st) => os("stunden").put(st));
+      ereignisse.forEach((e) => os("ereignisse").put(e));
+    });
+    return { stunden: stunden.length, ereignisse: ereignisse.length };
   }
   // Noch offene Stunden dieses Quartals werden dabei beendet – nachtragen
-  // lässt sich danach nichts mehr.
+  // lässt sich danach nichts mehr. Ein von Hand gewähltes Erfassungsquartal
+  // gilt nur bis zum nächsten Abschluss.
   async function quartalAbschliessen(klasse, quartal, datum) {
+    klasse.erfassungsQuartalGewaehlt = null;
     if (!Array.isArray(klasse.abgeschlosseneQuartale)) klasse.abgeschlosseneQuartale = [];
     const vorhanden = abschlussVon(klasse, quartal);
     if (vorhanden) vorhanden.datum = datum || datumLokal();
@@ -713,6 +766,7 @@
     halbjahrAusDatum, quartalAusDatum, halbjahrAusQuartal, datumLokal,
     Klassen, neueKlasse,
     abschlussVon, quartalAbschliessen, abschlussAufheben, erfassungsQuartal,
+    erfassungsQuartalWaehlen, stundenJeQuartal, stundenQuartalAendern,
     Schueler, neuerSchueler,
     Kategorien, neueKategorie,
     Leistungen, neueLeistung, leistungFuer, leistungenAusNoten,

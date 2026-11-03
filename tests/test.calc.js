@@ -435,6 +435,28 @@
     fall("Abschluss aufgehoben, noch nichts im neuen Quartal: zurück ins alte", () => {
       gleich(Calc.erfassungsQuartal(1, [], 1), 1);
     });
+    fall("Von Hand gewählt: geht vor, auch rückwärts", () => {
+      gleich(Calc.erfassungsQuartal(2, zu(1), 3, 2), 2);
+      gleich(Calc.erfassungsQuartal(1, [], 3, 1), 1);
+    });
+    fall("Von Hand gewählt, aber abgeschlossen: automatische Regel", () => {
+      gleich(Calc.erfassungsQuartal(2, zu(1, 2), 2, 2), 3);
+    });
+    fall("Ungültige Wahl wird übergangen", () => {
+      gleich(Calc.erfassungsQuartal(1, [], 2, null), 2);
+      gleich(Calc.erfassungsQuartal(1, [], 2, 7), 2);
+    });
+    fall("Quartalsende im Schuljahr des Datums", () => {
+      gleich(Calc.quartalEnde(1, "2026-11-03"), "2026-10-31");
+      gleich(Calc.quartalEnde(2, "2026-11-03"), "2027-01-31");
+      gleich(Calc.quartalEnde(4, "2027-03-01"), "2027-07-31");
+    });
+    fall("Resttage bis zum Quartalsende", () => {
+      gleich(Calc.quartalRestTage(2, "2026-11-03"), 89);
+      gleich(Calc.quartalRestTage(2, "2027-01-31"), 0);
+      gleich(Calc.quartalRestTage(1, "2026-11-03"), -3);
+      gleich(Calc.quartalRestTage(3, "2027-03-29"), 32);   // über die Zeitumstellung
+    });
     fall("Alle vier abgeschlossen: kein Quartal mehr", () => {
       gleich(Calc.erfassungsQuartal(4, zu(1, 2, 3, 4), 4), null);
     });
@@ -786,6 +808,22 @@
       const erg = Calc.sitzplanVerteilen(plan(1, 3), ["a", "b", "c", "d", "e"], [{ typ: "vorne", a: "e", reihen: 1 }], zufall(4));
       gleich(erg.ohnePlatz.length, 2);
       wahr(erg.ohnePlatz.indexOf("e") === -1, "e hat eine Regel und bekommt einen Platz");
+    });
+  });
+
+  gruppe("Versionen (Neuigkeiten)", () => {
+    const liste = [{ version: "1.16.0" }, { version: "1.18.0" }, { version: "1.17.0" }, { version: "1.19.0" }];
+    fall("Vergleich nach Zahlen, nicht nach Text", () => {
+      wahr(Calc.versionVergleich("1.9.2", "1.10.0") < 0, "1.9.2 < 1.10.0");
+      gleich(Calc.versionVergleich("1.18.0", "1.18.0"), 0);
+      wahr(Calc.versionVergleich("2.0.0", "1.19.9") > 0, "2.0.0 > 1.19.9");
+    });
+    fall("Neuigkeiten seit der gesehenen Version, neueste zuerst", () => {
+      gleich(Calc.neuigkeitenSeit(liste, "1.16.0", "1.19.0").map((n) => n.version), ["1.19.0", "1.18.0", "1.17.0"]);
+      gleich(Calc.neuigkeitenSeit(liste, "1.19.0", "1.19.0").length, 0);
+    });
+    fall("Nichts aus der Zukunft", () => {
+      gleich(Calc.neuigkeitenSeit(liste, "1.17.0", "1.18.0").map((n) => n.version), ["1.18.0"]);
     });
   });
 

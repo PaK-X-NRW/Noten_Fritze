@@ -47,6 +47,7 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | Datei | Namespace | Aufgabe |
 |---|---|---|
 | `js/version.js` | `APP_VERSION` | App-Version `MAJOR.MINOR.PATCH` (Single Source of Truth) |
+| `js/neuigkeiten.js` | `NEUIGKEITEN` | „Was ist neu?“ je Version (reine Daten, neueste zuerst) |
 | `js/db.js` | `DB` | Generischer IndexedDB-Wrapper (Promises, Schema-Versionierung) |
 | `js/store.js` | `Store` | Store-Kern: Ereignistypen, Quartals-/Heat-Helfer, Repositories je Entität (inkl. Leistungen) |
 | `js/store.einstellungen.js` | `Store` | `DEFAULT_SETTINGS`, Stundenzeiten/Schwellen, `getSettings`/`saveSettings` |
@@ -64,7 +65,7 @@ Schichten (Ladereihenfolge in `index.html` ist bindend – Abhängigkeiten!):
 | `js/csv.js` | `CSV` | CSV-Export/Import (UTF-8 mit BOM) |
 | `js/ui.js` | `UI` | UI-Bausteine: Modal, Toast, Formfelder, `esc`, `$`/`$all` |
 | `js/views.core.js` | `Views` | Views-Kern: State, Navigation (`go`), Render-Schleife (`render`), Zeitraum-Reiter |
-| `js/views.einstellungen.js` | `Views` | Einstellungen inkl. Stundenzeiten, Schwellen-Felder (`schwellenFelderHTML`) |
+| `js/views.einstellungen.js` | `Views` | Einstellungen in Reitern (`EINSTELLUNGS_REITER`) inkl. Stundenzeiten, Schwellen-Felder (`schwellenFelderHTML`), `neuigkeitenDialog` |
 | `js/views.besprechung.js` | `Views` | Besprechungsmodus + Noten-Aufschlüsselung (`breakdownHTML`) |
 | `js/views.home-klasse.js` | `Views` | Home (Klassenübersicht) + Klassenansicht mit Tabs Schüler/Kategorien |
 | `js/views.noten.js` | `Views` | Reiter Noten: Spaltenmodell, Tabelle, Dialoge Spalte + Schüler-Detail |
@@ -144,7 +145,11 @@ IndexedDB-Datenbank `noten-fritze` (Stores siehe README.md, Abschnitt 3).
   0. **App-Version** (`APP_VERSION` in `js/version.js`, `MAJOR.MINOR.PATCH`):
      rein für Mensch und Cache. MAJOR = große Umbauten, MINOR = neue Funktionen,
      PATCH = Fixes/Feinschliff. Bei **jedem** Release erhöhen – aber nur auf
-     Ansage (siehe Abschnitt 5).
+     Ansage (siehe Abschnitt 5). Dazu gehört ein Eintrag oben in `js/neuigkeiten.js`
+     (kurz, in der Sprache der Lehrkräfte): `app.js` zeigt nach einem Update einmal
+     alles seit `settings.gesehenVersion` (`Calc.neuigkeitenSeit`), nicht bei einer
+     Neuinstallation (leere DB); ohne Vermerk (vor 1.19.0) einmalig ab 1.18.0.
+     Einstellungen → Reiter „Über & Hilfe“ → „Was ist neu?“ zeigt alle Einträge.
   1. **Struktur** (Stores/Indizes): `DB_VERSION` in `db.js` erhöhen, Store in
      `STORES` ergänzen – `onupgradeneeded` legt Fehlendes additiv an.
      Bestehende Stores nie zerstörerisch umbauen; Daten der Nutzer sind heilig.
@@ -586,6 +591,22 @@ beim allerersten Start erscheint er bewusst nicht.
   abgeschlossen sind, verweigert `trackerStartDialog` den Start. Der Mitarbeit-Tab wählt beim
   Klassenwechsel und nach dem Abschluss diesen Reiter vor (`state.auswertungKlasse`).
   Aufheben löscht die übertragene Note **nicht**; erfasste Stunden behalten ihr Quartal.
+- **Falschen Abschluss korrigieren:** `klasse.erfassungsQuartalGewaehlt` (1–4, null =
+  automatisch) geht in `Calc.erfassungsQuartal` vor, solange das Quartal offen ist; jeder
+  `quartalAbschliessen` setzt es zurück (kein Migrationsschritt, fehlend = automatisch).
+  Gewählt wird in `erfassungsQuartalDialog` (views.mitarbeit.js): Zeile „Der Tracker erfasst
+  neue Stunden im …“ mit „Ändern“ im Mitarbeit-Tab (Action `erfassung-quartal`), automatisch
+  nach „Abschluss aufheben“ und über „Ändern“ im Start-Dialog des Trackers.
+  `Store.erfassungsQuartalWaehlen` speichert keine Wahl, wenn sie der automatischen Regel
+  entspricht. Im selben Dialog lassen sich die Stunden eines Quartals (dieses Schuljahres)
+  samt Ereignissen umziehen (`Store.stundenQuartalAendern`, eine Transaktion; Zählung über
+  `Store.stundenJeQuartal`); nur offene Quartale. Nach dem Abschluss bietet der Toast
+  10 s lang „Rückgängig“ (`abschlussZuruecknehmen`): Noten der Spalte auf den alten Stand
+  (neu angelegte Spalte/Kategorie wieder weg, geänderte `quelle` zurück), Abschluss aufheben,
+  vorherige Wahl wiederherstellen. Beim Abschluss beendete offene Stunden bleiben beendet.
+  Vorbeugend warnt die Rückfrage beim Abschließen, wenn das Quartal laut Kalender noch
+  **mehr als 28 Tage** läuft (`Calc.quartalRestTage` / `Calc.quartalEnde`: 31.10. · 31.01. ·
+  30.04. · 31.07.) – nur Warnung, Abschließen bleibt möglich (Absprache).
 - **Exporte:** Alle Exporte laufen über `CSV.speichern(dateiname, inhalt, mime)` –
   dreistufig: 1) Export-Ordner via File System Access API (Handle in IndexedDB unter
   einstellungen/key `"export"`, Card „Export-Ordner“ in den Einstellungen),
@@ -739,7 +760,8 @@ Aufgabe:
   vorhandene Installationen, eine Migration ist dafür nicht nötig. 2) Regel im
   Bauplan `EINSTELLUNGEN` (`views.einstellungen.js`: `art` zahl/auswahl, `min`,
   `max`, `ersatz`, `werte`, `meldung`, `danach`). 3) Feld mit
-  `einstellungFeld(...)` bzw. `zahlZeile(...)` in eine Karte setzen. Speichern,
+  `einstellungFeld(...)` bzw. `zahlZeile(...)` in eine Karte des passenden Reiters
+  (`karten` in `ViewEinstellungen`) setzen. Speichern,
   Prüfen und Rückmeldung übernimmt dann der gemeinsame Handler – keine eigenen
   Listener je Feld. Zusammengesetzte Werte (Schwellen, Stundenzeiten) behalten
   eigene Handler. Die Einstellung in README (Datenmodell) und ggf. info.html nennen.

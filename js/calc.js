@@ -269,12 +269,31 @@
     return istNotenKategorie(kat) && kat.quelle === "mitarbeit" && kat.art !== "schriftlich";
   }
 
+  // ---- Versionen (Neuigkeiten-Fenster) ----------------------------------------
+  // "1.18.0" vs. "1.19.0": < 0, wenn a älter ist, 0 bei Gleichstand, > 0 wenn neuer
+  function versionVergleich(a, b) {
+    const x = String(a || "0").split("."), y = String(b || "0").split(".");
+    for (let i = 0; i < 3; i++) {
+      const d = (parseInt(x[i], 10) || 0) - (parseInt(y[i], 10) || 0);
+      if (d) return d;
+    }
+    return 0;
+  }
+  // Einträge (NEUIGKEITEN), die nach `gesehen` bis einschließlich `aktuell`
+  // erschienen sind – neueste zuerst
+  function neuigkeitenSeit(liste, gesehen, aktuell) {
+    return (liste || []).filter((n) => versionVergleich(n.version, gesehen) > 0 &&
+      versionVergleich(n.version, aktuell) <= 0)
+      .sort((a, b) => versionVergleich(b.version, a.version));
+  }
+
   global.Calc = {
     istMSS,
     parseNote, clampNote, formatNote,
     zeugnisnote, formatZeugnisnote, istGrenzwert, jahresnote,
     tendenznote, formatTendenz, noteZuMssPunkte, noteFarbe,
     notenspiegel, mssPunkteZuNote, schluesselNormalisieren, punkteTabelle, noteAusRohpunkten, parseRohpunkte, formatRohpunkte,
-    istNotenKategorie, istMitarbeitsKategorie
+    istNotenKategorie, istMitarbeitsKategorie,
+    versionVergleich, neuigkeitenSeit
   };
 })(window);

@@ -15,6 +15,7 @@
     view: "home",          // home | klasse | tracker | besprechung | einstellungen
     klasseId: null,
     tab: "schueler",       // schueler | noten | kategorien | sitzplan | auswertung
+    einstellungenReiter: "allgemein",   // Reiter der Einstellungen (views.einstellungen.js)
     auswertungRange: "alle",
     // Notenübersicht: Zeitraum ist das Halbjahr ("1" | "2"), die Quartale
     // stecken darin als Epochalnoten. "" = Default aus dem aktuellen Quartal.

@@ -125,11 +125,17 @@
   // letzten Abschluss und dem Quartal der zuletzt erfassten Stunde (dieses
   // Schuljahres); ist es abgeschlossen, das nächste offene. Wird ein Abschluss
   // aufgehoben, um etwas zu korrigieren, bleibt der Tracker so im neuen Quartal.
+  // Ein von Hand gewähltes Quartal (klasse.erfassungsQuartalGewaehlt) geht vor,
+  // solange es nicht abgeschlossen ist – damit lässt sich ein versehentlicher
+  // Abschluss korrigieren. Jeder Abschluss löscht die Wahl wieder.
   //   abgeschlossene: klasse.abgeschlosseneQuartale [{ quartal, datum }]
   //   letzteStunde: Quartal der zuletzt erfassten Stunde oder null
+  //   gewaehlt: von Hand gewähltes Quartal oder null
   // Rückgabe: 1..4 oder null (alle vier Quartale abgeschlossen)
-  function erfassungsQuartal(eingestellt, abgeschlossene, letzteStunde) {
+  function erfassungsQuartal(eingestellt, abgeschlossene, letzteStunde, gewaehlt) {
     const zu = (abgeschlossene || []).filter(Boolean).map((a) => Number(a.quartal));
+    const wahl = parseInt(gewaehlt, 10);
+    if (wahl >= 1 && wahl <= 4 && zu.indexOf(wahl) === -1) return wahl;
     let q = Math.max(parseInt(eingestellt, 10) || 1, zu.length ? Math.max.apply(null, zu) + 1 : 1,
       parseInt(letzteStunde, 10) || 1);
     while (q <= 4 && zu.indexOf(q) !== -1) q++;
@@ -141,8 +147,24 @@
     return (m >= 8 ? j : j - 1) + "-08-01";
   }
 
+  // Letzter Tag eines Quartals im Schuljahr des Datums ("YYYY-MM-DD"):
+  // 1. Q 31.10. · 2. Q 31.01. · 3. Q 30.04. · 4. Q 31.07.
+  function quartalEnde(quartal, datum) {
+    const j = parseInt(schuljahrBeginn(datum).slice(0, 4), 10);
+    return ({ 1: j + "-10-31", 2: (j + 1) + "-01-31", 3: (j + 1) + "-04-30", 4: (j + 1) + "-07-31" })[quartal] || null;
+  }
+  // Ganze Tage vom Datum bis zum Quartalsende (negativ = schon vorbei).
+  // Rechnet in UTC-Mittag, damit die Zeitumstellung nicht stört.
+  function quartalRestTage(quartal, datum) {
+    const ende = quartalEnde(quartal, datum);
+    if (!ende) return null;
+    const ts = (d) => Date.UTC(parseInt(d.slice(0, 4), 10), parseInt(d.slice(5, 7), 10) - 1, parseInt(d.slice(8, 10), 10), 12);
+    return Math.round((ts(ende) - ts(String(datum))) / 86400000);
+  }
+
   Object.assign(global.Calc, {
     heatPunkteAktuell, heatFarbeDurchPunkte, aktuelleStunde, trackerSession,
-    stundeVergessen, erfassungsZeit, erfassungsQuartal, schuljahrBeginn
+    stundeVergessen, erfassungsZeit, erfassungsQuartal, schuljahrBeginn,
+    quartalEnde, quartalRestTage
   });
 })(window);

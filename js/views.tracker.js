@@ -679,15 +679,27 @@
     buttons.push({ label: "Doppelstunde", className: offen ? "" : "primary", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(doppel, offen, id, erfassungsQ); }});
     buttons.push({ label: "Ohne Zeitangabe", onClick: (close, box) => { const id = gewaehlt(box); close(); stundeStarten(null, offen, id, erfassungsQ); }});
 
-    // Weicht das Quartal der Klasse vom eingestellten ab, sagen wir es dazu
-    const quartalHinweis = erfassungsQ !== aktuellesQ
-      ? '<p class="hint-box">Erfasst wird im <strong>' + erfassungsQ + ". Quartal</strong>" +
-        (Store.abschlussVon(klasse, erfassungsQ - 1) ? " – das " + (erfassungsQ - 1) + ". Quartal ist abgeschlossen." : ".") + "</p>"
-      : "";
+    // Das Quartal steht immer dabei, damit ein falsches sofort auffällt; weicht
+    // es vom eingestellten ab, hervorgehoben. „Ändern“ öffnet die Auswahl
+    // (views.mitarbeit.js, lädt später – deshalb zur Laufzeit über Views).
+    const quartalHinweis = '<div class="hstack wrap ' + (erfassungsQ !== aktuellesQ ? "hint-box" : "") + '"><span>' +
+      "Neue Stunde wird im <strong>" + erfassungsQ + ". Quartal</strong> erfasst" +
+      (klasse && klasse.erfassungsQuartalGewaehlt === erfassungsQ ? " (von Hand gewählt)"
+        : klasse && Store.abschlussVon(klasse, erfassungsQ - 1) ? " – das " + (erfassungsQ - 1) + ". Quartal ist abgeschlossen" : "") +
+      '.</span><button class="btn small" id="tracker-quartal-aendern">Ändern</button></div>';
 
-    UI.modal({
+    const dlg = UI.modal({
       title: "Tracker starten",
       bodyHTML: quartalHinweis + offenText + raumHTML + "<p>Wie lange dauert die neue Stunde?</p>" + '<p class="muted">' + info + "</p>",
+      onMount: (box) => {
+        const btn = box.querySelector("#tracker-quartal-aendern");
+        if (!btn || !klasse) return;
+        btn.addEventListener("click", () => {
+          dlg.close();
+          global.Views.erfassungsQuartalDialog(klasse, { danach: () => { trackerStartDialog().catch(UI.fehlerMelden); } })
+            .catch(UI.fehlerMelden);
+        });
+      },
       buttons
     });
   }

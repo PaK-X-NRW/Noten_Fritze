@@ -15,6 +15,7 @@ const ASSETS = [
   "./index.html",
   "./css/styles.css",
   "./js/version.js",
+  "./js/neuigkeiten.js",
   "./js/db.js",
   "./js/store.js",
   "./js/store.einstellungen.js",
